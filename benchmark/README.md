@@ -8,17 +8,12 @@ A small test BAM file (`test.bam`) with a chr6-only GTF annotation, included in 
 
 ### Results
 
-|                  | dupRadar (R) | dupRust      |
-| ---------------- | ------------ | ------------ |
-| **Intercept**    | 0.03         | 0.03         |
-| **Slope**        | 1.6          | 1.5          |
-| **Genes**        | 2,905        | 2,905        |
-
-### Density scatter plot
-
-| dupRadar (R)                               | dupRust                                            |
-| ------------------------------------------ | -------------------------------------------------- |
-| ![R density](r_output/duprateExpDens.png)  | ![Rust density](rust_output/test_duprateExpDens.png) |
+| Metric | dupRadar (R) | dupRust |
+| --- | --- | --- |
+| **Intercept** | 0.03 | 0.03 |
+| **Slope** | 1.6 | 1.5 |
+| **Genes total** | 2,905 | 2,905 |
+| **Genes with reads** | 621 | 621 |
 
 ### Replication
 
@@ -46,27 +41,37 @@ Paired-end, unstranded, aligned to GRCh38 (Ensembl chromosome names).
 
 ### Results
 
-|                       | dupRadar (R)            | dupRust                |
-| --------------------- | ----------------------- | ---------------------- |
-| **Runtime**           | 1,428 s (23.8 min)     | 178 s (3.0 min)        |
-| **Speedup**           | —                       | **~8x**                |
-| **Intercept**         | 0.8245                  | 0.8213                 |
-| **Slope**             | 1.6774                  | 1.6859                 |
-| **Genes total**       | 63,086                  | 63,086                 |
-| **Genes with reads**  | 24,719                  | 23,159                 |
+| Metric | dupRadar (R) | dupRust |
+| --- | --- | --- |
+| **Runtime** | 1,428 s (23.8 min) | 178 s (3.0 min) |
+| **Speedup** | — | **~8x** |
+| **Intercept** | 0.8245 | 0.8213 |
+| **Slope** | 1.6774 | 1.6859 |
+| **Genes total** | 63,086 | 63,086 |
+| **Genes with reads** | 24,719 | 23,159 |
+
+### Count comparison
+
+| Metric | dupRadar (R) | dupRust | Ratio |
+| --- | ---: | ---: | ---: |
+| **Total allCountsMulti** | 16,097,284 | 14,237,148 | 0.88 |
+| **Total filteredCountsMulti** | 4,671,832 | 4,020,122 | 0.86 |
+| **Total allCounts (unique)** | 14,710,916 | 13,694,224 | 0.93 |
+| **Total filteredCounts (unique)** | 4,305,768 | 3,830,538 | 0.89 |
 
 #### Count correlation (excluding mitochondrial genes)
 
-| Metric               | Pearson r |
-| -------------------- | --------- |
-| allCountsMulti       | 0.973     |
-| allCounts (unique)   | 0.985     |
+| Metric | Pearson r |
+| --- | --- |
+| allCountsMulti | 0.973 |
+| allCounts (unique) | 0.985 |
 
-### Density scatter plot
+#### Per-gene exact match rates
 
-| dupRadar (R)                                          | dupRust                                                                            |
-| ----------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| ![R density](large/r_output/duprateExpDens.png)       | ![Rust density](large/rust_output/GM12878_REP1.markdup.sorted_duprateExpDens.png)  |
+| Metric | Exact matches | Percentage |
+| --- | ---: | ---: |
+| allCountsMulti | 51,670 / 63,086 | 81.9% |
+| allCounts (unique) | 56,436 / 63,086 | 89.5% |
 
 ### Replication
 

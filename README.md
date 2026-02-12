@@ -1,4 +1,4 @@
-# dupRust
+# dupRust 🧬🦀
 
 A fast Rust reimplementation of [dupRadar](https://github.com/ssayols/dupRadar) for assessing PCR duplicate rates in RNA-Seq datasets.
 
@@ -145,6 +145,14 @@ For an input BAM file named `sample.bam`, the following files are generated:
 | Speed | Minutes per sample | Seconds per sample |
 | Memory | High (R overhead) | Low |
 | Output format | Identical | Identical |
+
+### Density scatter plots (GM12878 REP1, ~10 GB BAM)
+
+| dupRadar (R) | dupRust |
+|---|---|
+| ![R density](benchmark/large/r_output/duprateExpDens.png) | ![Rust density](benchmark/large/rust_output/GM12878_REP1.markdup.sorted_duprateExpDens.png) |
+
+For detailed benchmark results including runtime, count correlation, and replication instructions, see the [benchmark README](benchmark/README.md).
 
 ## Interpreting the results
 
