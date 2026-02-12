@@ -118,12 +118,12 @@ fn estimate_density(x: &[f64], y: &[f64], nbins: usize) -> Vec<f64> {
 
     // Anisotropic Gaussian smoothing with adaptive bandwidth
     let mut smoothed = vec![vec![0.0f64; nbins + 1]; nbins + 1];
-    for bx in 0..=nbins {
-        for by in 0..=nbins {
-            if grid[bx][by] == 0 {
+    for (bx, row) in grid.iter().enumerate() {
+        for (by, &cell) in row.iter().enumerate() {
+            if cell == 0 {
                 continue;
             }
-            let c = grid[bx][by] as f64;
+            let c = cell as f64;
             for dx in -radius_x..=radius_x {
                 for dy in -radius_y..=radius_y {
                     let nx = bx as i32 + dx;
@@ -197,6 +197,7 @@ fn quantile(sorted: &[f64], p: f64) -> f64 {
 ///
 /// plotters has no native dashed-line support, so we draw small segments
 /// separated by gaps.
+#[allow(clippy::too_many_arguments)]
 fn draw_dotted_vline<DB: DrawingBackend>(
     root: &DrawingArea<DB, plotters::coord::Shift>,
     x: i32,
@@ -285,7 +286,7 @@ where
         .y_labels(21) // step=5 on 0-100, then filter to multiples of 25
         .y_label_formatter(&|v| {
             let iv = v.round() as i32;
-            if iv >= 0 && iv <= 100 && iv % 25 == 0 && (*v - iv as f64).abs() < 0.1 {
+            if (0..=100).contains(&iv) && iv % 25 == 0 && (*v - iv as f64).abs() < 0.1 {
                 format!("{}", iv)
             } else {
                 String::new()
@@ -336,7 +337,7 @@ where
         if seg_idx >= limit {
             if seg_on && seg_pts.len() >= 2 {
                 chart.draw_series(LineSeries::new(
-                    seg_pts.drain(..).collect::<Vec<_>>(),
+                    std::mem::take(&mut seg_pts),
                     BLACK.stroke_width(curve_sw),
                 ))?;
             }

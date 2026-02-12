@@ -350,7 +350,7 @@ pub fn count_reads(
         result.context("Error reading BAM record")?;
         total_reads += 1;
 
-        if total_reads % 5_000_000 == 0 {
+        if total_reads.is_multiple_of(5_000_000) {
             debug!("Processed {} reads...", total_reads);
         }
 
