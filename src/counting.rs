@@ -311,18 +311,25 @@ fn strand_matches(
     }
 }
 
-/// Extract aligned (match) blocks from a CIGAR string.
+/// Extract aligned (match) blocks from a CIGAR string into a reusable buffer.
 ///
-/// Walks the CIGAR operations and returns genomic intervals for each
-/// M/=/X operation. N (intron skip) and D (deletion) operations advance
-/// the reference position without producing an aligned block.
+/// Walks the CIGAR operations and appends genomic intervals for each
+/// M/=/X operation to the provided buffer (which is cleared first).
+/// N (intron skip) and D (deletion) operations advance the reference
+/// position without producing an aligned block.
 /// This ensures spliced reads don't falsely overlap with genes in introns.
+///
+/// # Arguments
+/// * `start` - The reference start position of the read
+/// * `cigar` - The CIGAR string view from the BAM record
+/// * `blocks` - Reusable buffer for aligned blocks (cleared before use)
 fn cigar_to_aligned_blocks(
     start: u64,
     cigar: &rust_htslib::bam::record::CigarStringView,
-) -> Vec<(u64, u64)> {
+    blocks: &mut Vec<(u64, u64)>,
+) {
     use rust_htslib::bam::record::Cigar;
-    let mut blocks = Vec::new();
+    blocks.clear();
     let mut ref_pos = start;
 
     for op in cigar.iter() {
@@ -345,8 +352,6 @@ fn cigar_to_aligned_blocks(
             Cigar::Ins(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) | Cigar::Pad(_) => {}
         }
     }
-
-    blocks
 }
 
 /// Metadata collected per read for paired-end mate buffering.
@@ -443,6 +448,12 @@ pub fn count_reads(
     // The HI tag disambiguates secondary alignment pairs for multi-mapped reads.
     let mut mate_buffer: HashMap<MateBufferKey, MateInfo> = HashMap::new();
 
+    // Reusable buffers to avoid per-read heap allocations.
+    // These are cleared and reused each iteration of the main loop.
+    let mut aligned_blocks_buf: Vec<(u64, u64)> = Vec::new();
+    let mut overlaps_buf: Vec<&GeneInterval> = Vec::new();
+    let mut gene_hits: Vec<GeneIdx> = Vec::new();
+
     // Iterate over all records
     let mut record = bam::Record::new();
     while let Some(result) = bam.read(&mut record) {
@@ -519,30 +530,33 @@ pub fn count_reads(
             bam_chrom.as_str()
         };
 
-        // Find gene overlaps using CIGAR-aware aligned blocks
-        let gene_hits: Vec<GeneIdx> = if let Some(chrom_idx) = index.get(chrom) {
+        // Find gene overlaps using CIGAR-aware aligned blocks.
+        // Reuses pre-allocated buffers to avoid per-read heap allocations.
+        gene_hits.clear();
+        if let Some(chrom_idx) = index.get(chrom) {
             // Extract aligned blocks from CIGAR (M/=/X operations only).
             // This avoids false overlaps with genes in introns of spliced reads.
-            let aligned_blocks = cigar_to_aligned_blocks(record.pos() as u64, &record.cigar());
+            cigar_to_aligned_blocks(
+                record.pos() as u64,
+                &record.cigar(),
+                &mut aligned_blocks_buf,
+            );
 
-            let mut overlaps = Vec::new();
-            for (block_start, block_end) in &aligned_blocks {
-                overlaps.extend(chrom_idx.query(*block_start, *block_end));
+            overlaps_buf.clear();
+            for (block_start, block_end) in &aligned_blocks_buf {
+                overlaps_buf.extend(chrom_idx.query(*block_start, *block_end));
             }
 
             // Filter by strand and deduplicate gene indices (no string cloning)
-            let mut genes_hit: Vec<GeneIdx> = overlaps
-                .iter()
-                .filter(|iv| strand_matches(is_reverse, is_read1, paired, iv.strand, stranded))
-                .map(|iv| iv.gene_idx)
-                .collect();
-            genes_hit.sort_unstable();
-            genes_hit.dedup();
-            genes_hit
-        } else {
-            // Chromosome not in annotation
-            Vec::new()
-        };
+            gene_hits.extend(
+                overlaps_buf
+                    .iter()
+                    .filter(|iv| strand_matches(is_reverse, is_read1, paired, iv.strand, stranded))
+                    .map(|iv| iv.gene_idx),
+            );
+            gene_hits.sort_unstable();
+            gene_hits.dedup();
+        }
 
         // --- Single-end counting: assign directly ---
         if !paired {
@@ -687,11 +701,12 @@ pub fn count_reads(
                 stat_assigned += 1;
             }
         } else {
-            // First mate seen - buffer it and wait for the other mate
+            // First mate seen - buffer it and wait for the other mate.
+            // Clone gene_hits since the buffer is reused across iterations.
             mate_buffer.insert(
                 buffer_key,
                 MateInfo {
-                    gene_hits,
+                    gene_hits: gene_hits.clone(),
                     is_dup,
                     is_multi,
                 },
