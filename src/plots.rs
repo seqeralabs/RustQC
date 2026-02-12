@@ -57,29 +57,11 @@ fn density_color(t: f64) -> RGBColor {
     let b = DENSITY_COLORS[i].2 as f64 * (1.0 - frac) + DENSITY_COLORS[i + 1].2 as f64 * frac;
     RGBColor(r as u8, g as u8, b as u8)
 }
-
-/// Silverman's rule-of-thumb bandwidth: `0.9 * min(sd, IQR/1.34) * n^(-1/5)`.
-/// This approximates R's `KernSmooth::dpik()` for bandwidth selection.
-fn silverman_bandwidth(vals: &[f64]) -> f64 {
-    let n = vals.len() as f64;
-    if n < 2.0 {
-        return 1.0;
-    }
-    let mean = vals.iter().sum::<f64>() / n;
-    let var = vals.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (n - 1.0);
-    let sd = var.sqrt();
-    let mut sorted = vals.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let last = sorted.len() - 1;
-    let q1 = sorted[((n * 0.25) as usize).min(last)];
-    let q3 = sorted[((n * 0.75) as usize).min(last)];
-    let iqr = q3 - q1;
-    let spread = if iqr > 0.0 { sd.min(iqr / 1.34) } else { sd };
-    0.9 * spread * n.powf(-0.2)
-}
-
-/// 2-D kernel-density estimation on a grid, similar to R's `densCols(nbin=500)`.
-/// Uses adaptive Silverman bandwidth to match R's `KernSmooth::bkde2D`.
+/// 2-D kernel-density estimation on a grid, matching R's `densCols(nbin=500)`.
+///
+/// Matches R's `grDevices::densCols()` which internally uses
+/// `.smoothScatterCalcDensity()` with bandwidth = IQR_90/25 and
+/// `KernSmooth::bkde2D` with `gridsize`, `tau=3.4` truncation.
 fn estimate_density(x: &[f64], y: &[f64], nbins: usize) -> Vec<f64> {
     if x.is_empty() {
         return vec![];
@@ -93,42 +75,81 @@ fn estimate_density(x: &[f64], y: &[f64], nbins: usize) -> Vec<f64> {
     if x_range == 0.0 || y_range == 0.0 {
         return vec![1.0; x.len()];
     }
-    let x_step = x_range / nbins as f64;
-    let y_step = y_range / nbins as f64;
 
-    // Compute adaptive bandwidths (in bin units) using Silverman's rule
-    let bw_x = silverman_bandwidth(x);
-    let bw_y = silverman_bandwidth(y);
+    // R's densCols bandwidth: diff(quantile(x, c(0.05, 0.95))) / 25
+    // This is the 90% interquantile range divided by 25.
+    let mut x_sorted = x.to_vec();
+    x_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let mut y_sorted = y.to_vec();
+    y_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let bw_x = (quantile(&x_sorted, 0.95) - quantile(&x_sorted, 0.05)) / 25.0;
+    let bw_y = (quantile(&y_sorted, 0.95) - quantile(&y_sorted, 0.05)) / 25.0;
+
+    // Guard against zero bandwidth
+    let bw_x = if bw_x > 0.0 { bw_x } else { x_range / 25.0 };
+    let bw_y = if bw_y > 0.0 { bw_y } else { y_range / 25.0 };
+    // R's bkde2D extends the grid range by 1.5*bandwidth beyond the data range
+    let grid_x_min = x_min - 1.5 * bw_x;
+    let grid_x_max = x_max + 1.5 * bw_x;
+    let grid_y_min = y_min - 1.5 * bw_y;
+    let grid_y_max = y_max + 1.5 * bw_y;
+    let grid_x_range = grid_x_max - grid_x_min;
+    let grid_y_range = grid_y_max - grid_y_min;
+
+    let x_step = grid_x_range / (nbins - 1) as f64;
+    let y_step = grid_y_range / (nbins - 1) as f64;
+
+    // Convert bandwidths to bin units for Gaussian smoothing
     let bw_x_bins = (bw_x / x_step).max(1.0);
     let bw_y_bins = (bw_y / y_step).max(1.0);
-    let radius_x = (bw_x_bins * 3.0).ceil() as i32; // 3σ cutoff
-    let radius_y = (bw_y_bins * 3.0).ceil() as i32;
+    // R's bkde2D uses tau=3.4 as the kernel truncation parameter
+    let tau = 3.4;
+    let radius_x = (bw_x_bins * tau).ceil() as i32;
+    let radius_y = (bw_y_bins * tau).ceil() as i32;
     let sigma2_x = 2.0 * bw_x_bins * bw_x_bins;
     let sigma2_y = 2.0 * bw_y_bins * bw_y_bins;
 
-    let to_bin = |v: f64, mn: f64, step: f64| ((v - mn) / step).floor() as usize;
-
-    // 2-D histogram
-    let mut grid = vec![vec![0u32; nbins + 1]; nbins + 1];
+    // 2-D histogram on grid (nbins x nbins, matching R's bkde2D gridsize)
+    let grid_size = nbins;
+    let mut grid = vec![vec![0.0f64; grid_size]; grid_size];
+    // Use 2D linear binning (linbin2D), matching R's bkde2D:
+    // each point contributes proportionally to the 4 surrounding grid cells
     for i in 0..x.len() {
-        let bx = to_bin(x[i], x_min, x_step).min(nbins);
-        let by = to_bin(y[i], y_min, y_step).min(nbins);
-        grid[bx][by] += 1;
+        let fx = (x[i] - grid_x_min) / x_step;
+        let fy = (y[i] - grid_y_min) / y_step;
+        let ix = fx.floor() as i32;
+        let iy = fy.floor() as i32;
+        let sx = fx - ix as f64; // fractional x
+        let sy = fy - iy as f64; // fractional y
+        // Distribute weight to 4 corners
+        for (dx, wx) in [(0i32, 1.0 - sx), (1, sx)] {
+            for (dy, wy) in [(0i32, 1.0 - sy), (1, sy)] {
+                let gx = ix + dx;
+                let gy = iy + dy;
+                if gx >= 0 && (gx as usize) < grid_size && gy >= 0 && (gy as usize) < grid_size {
+                    grid[gx as usize][gy as usize] += wx * wy;
+                }
+            }
+        }
     }
 
-    // Anisotropic Gaussian smoothing with adaptive bandwidth
-    let mut smoothed = vec![vec![0.0f64; nbins + 1]; nbins + 1];
-    for bx in 0..=nbins {
-        for by in 0..=nbins {
-            if grid[bx][by] == 0 {
+    // Anisotropic Gaussian smoothing (matching bkde2D with tau=3.4)
+    let mut smoothed = vec![vec![0.0f64; grid_size]; grid_size];
+    for bx in 0..grid_size {
+        for by in 0..grid_size {
+            if grid[bx][by] == 0.0 {
                 continue;
             }
-            let c = grid[bx][by] as f64;
+            let c = grid[bx][by];
             for dx in -radius_x..=radius_x {
                 for dy in -radius_y..=radius_y {
                     let nx = bx as i32 + dx;
                     let ny = by as i32 + dy;
-                    if nx >= 0 && nx <= nbins as i32 && ny >= 0 && ny <= nbins as i32 {
+                    if nx >= 0
+                        && (nx as usize) < grid_size
+                        && ny >= 0
+                        && (ny as usize) < grid_size
+                    {
                         let w = (-(dx * dx) as f64 / sigma2_x
                             - (dy * dy) as f64 / sigma2_y)
                             .exp();
@@ -139,20 +160,24 @@ fn estimate_density(x: &[f64], y: &[f64], nbins: usize) -> Vec<f64> {
         }
     }
 
-    // Per-point density, normalised to [0,1] with cube-root transform to
-    // spread out the color range (matches R's densCols visual output
-    // where mid-density points appear as blue/green rather than black).
+    // Per-point density lookup using nearest grid point (matching R's
+    // mkBreaks + cut approach in densCols).
     let mut dens: Vec<f64> = (0..x.len())
         .map(|i| {
-            let bx = to_bin(x[i], x_min, x_step).min(nbins);
-            let by = to_bin(y[i], y_min, y_step).min(nbins);
+            let bx = ((x[i] - grid_x_min) / x_step).round() as usize;
+            let by = ((y[i] - grid_y_min) / y_step).round() as usize;
+            let bx = bx.min(grid_size - 1);
+            let by = by.min(grid_size - 1);
             smoothed[bx][by]
         })
         .collect();
+    let mn = dens.iter().cloned().fold(f64::INFINITY, f64::min);
     let mx = dens.iter().cloned().fold(0.0f64, f64::max);
-    if mx > 0.0 {
+    let range = mx - mn;
+
+    if range > 0.0 {
         for d in dens.iter_mut() {
-            *d = (*d / mx).powf(1.0 / 3.0); // cube-root transform to match R's densCols color spread
+            *d = (*d - mn) / range; // linear normalization matching R's densCols
         }
     }
     dens
@@ -302,19 +327,15 @@ where
         .label_style(("sans-serif", ps(12.0)))
         .draw()?;
 
-    // ── points (sorted by density → dense on top) ──────────────────────
-    // R uses pch=20 cex=0.25 → tiny filled dots
-    let mut order: Vec<(usize, f64)> =
-        densities.iter().enumerate().map(|(i, d)| (i, *d)).collect();
-    order.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-
-    // R uses pch=20 cex=0.25 → ~1 pixel filled dots
-    let pt_size = 1; // minimal size to match R pch=20 cex=0.25
-    for &(i, _) in &order {
+    // ── points (data order, matching R's plot() behavior) ─────────────
+    // R draws points in data order with pch=20 cex=0.25 → tiny filled dots.
+     // R's pch=20 with cex=0.25 draws tiny filled circles.
+    // Circle radius 1 at our scale gives the closest match.
+    for i in 0..xd.len() {
         let c = density_color(densities[i]);
         chart.draw_series(std::iter::once(Circle::new(
             (xd[i], yd[i]),
-            pt_size,
+            1,
             c.filled(),
         )))?;
     }
@@ -331,12 +352,14 @@ where
         })
         .collect();
     // Draw dotted: short on/off segments
-    let seg_on_len = 2;
-    let seg_off_len = 2;
+    // R lty=3 (dotted): ~2pt on, ~4pt off. Each curve point spans ~0.3px,
+    // so 2pt ≈ 6 points on, 4pt ≈ 12 points off at 2x scale.
+    let seg_on_len = (2.0 * pxs).round().max(2.0) as usize;
+    let seg_off_len = (4.0 * pxs).round().max(2.0) as usize;
     let mut seg_idx = 0;
     let mut seg_on = true;
     let mut seg_pts: Vec<(f64, f64)> = Vec::new();
-    let curve_sw = (pxs * 1.0).round().max(1.0) as u32;
+    let curve_sw = (pxs * 2.0).round().max(1.0) as u32; // match R lwd=2
     for pt in &curve_pts {
         if seg_on {
             seg_pts.push(*pt);
@@ -371,10 +394,10 @@ where
         pa_x.0 + (frac * (pa_x.1 - pa_x.0) as f64) as i32
     };
 
-    // R uses lty=2 (dashed): short dash, thin line
-    let dash = (pxs * 3.0) as i32;
-    let gap = (pxs * 2.0) as i32;
-    let sw = 1u32; // Always 1 pixel, matching R's thin dashed lines
+    // R uses lty=2 (dashed): short dash, standard line width
+    let dash = (pxs * 4.0) as i32;
+    let gap = (pxs * 4.0) as i32;
+    let sw = (pxs.round() as u32).max(1); // ~1pt matching R's lty=2 default lwd=1
 
     // "1 read/bp" → RPK = 1000 → log₁₀ = 3. R: col='red', lty=2 (dashed)
     let rpk_1k = 3.0f64;
