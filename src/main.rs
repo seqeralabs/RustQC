@@ -5,6 +5,7 @@
 //! in RNA-Seq datasets.
 
 mod cli;
+mod config;
 mod counting;
 mod dupmatrix;
 mod fitting;
@@ -23,6 +24,21 @@ fn main() -> Result<()> {
         .init();
 
     let args = cli::parse_args();
+
+    // Load configuration file if provided
+    let config = if let Some(ref config_path) = args.config {
+        let cfg = config::Config::from_file(Path::new(config_path))?;
+        info!("Loaded config from: {}", config_path);
+        if cfg.has_chromosome_mapping() {
+            info!(
+                "Chromosome name mapping: {} entries",
+                cfg.chromosome_mapping.len()
+            );
+        }
+        cfg
+    } else {
+        config::Config::default()
+    };
 
     let start = Instant::now();
     info!("dupRust v{}", env!("CARGO_PKG_VERSION"));
@@ -53,12 +69,15 @@ fn main() -> Result<()> {
     // Step 2: Count reads with featureCounts-compatible logic
     info!("Counting reads across 4 modes...");
     let count_start = Instant::now();
+    let chrom_mapping = config.bam_to_gtf_mapping();
     let count_result = counting::count_reads(
         &args.bam,
         &genes,
         args.stranded,
         args.paired,
         args.threads,
+        &chrom_mapping,
+        config.chromosome_prefix(),
     )?;
     info!(
         "Counting complete in {:.2}s",

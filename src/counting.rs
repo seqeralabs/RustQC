@@ -302,6 +302,8 @@ pub fn count_reads(
     stranded: u8,
     paired: bool,
     threads: usize,
+    chrom_mapping: &HashMap<String, String>,
+    chrom_prefix: Option<&str>,
 ) -> Result<CountResult> {
     // Build spatial index
     let index = build_index(genes);
@@ -407,7 +409,19 @@ pub fn count_reads(
         if tid < 0 || tid as usize >= tid_to_name.len() {
             continue;
         }
-        let chrom = &tid_to_name[tid as usize];
+        let bam_chrom = &tid_to_name[tid as usize];
+        // Apply chromosome name prefix and/or mapping (BAM name -> GTF name)
+        let prefixed_chrom;
+        let chrom = if let Some(mapped) = chrom_mapping.get(bam_chrom.as_str()) {
+            // Explicit mapping takes priority
+            mapped.as_str()
+        } else if let Some(prefix) = chrom_prefix {
+            // Apply prefix: e.g. "chr" + "1" -> "chr1"
+            prefixed_chrom = format!("{}{}", prefix, bam_chrom);
+            prefixed_chrom.as_str()
+        } else {
+            bam_chrom.as_str()
+        };
 
         // Find gene overlaps using CIGAR-aware aligned blocks
         let gene_hits = if let Some(chrom_idx) = index.get(chrom) {
@@ -520,6 +534,36 @@ pub fn count_reads(
         "Read {} total reads, {} mapped, {} fragments, {} duplicates, {} multimappers",
         total_reads, total_mapped, total_fragments, total_dup, total_multi
     );
+
+    // Detect chromosome name mismatch: if we processed mapped reads but
+    // no genes received any counts, the GTF and BAM likely use different
+    // chromosome naming conventions (e.g., "chr1" vs "1").
+    let genes_with_reads = gene_counts.values().filter(|c| c.all_multi > 0).count();
+    if total_mapped > 0 && genes_with_reads == 0 {
+        // Collect example chromosome names from each source for the error message
+        let bam_chroms: Vec<&str> = tid_to_name.iter().take(5).map(|s| s.as_str()).collect();
+        let gtf_chroms: Vec<&str> = index.keys().take(5).map(|s| s.as_str()).collect();
+        anyhow::bail!(
+            "Chromosome name mismatch: no BAM reads could be assigned to any gene.\n\
+             \n\
+             BAM chromosomes (first 5): {}\n\
+             GTF chromosomes (first 5): {}\n\
+             \n\
+             The BAM and GTF files appear to use different chromosome naming conventions.\n\
+             To fix this, create a YAML config file with a chromosome_mapping section and pass it via --config:\n\
+             \n\
+             Example config.yaml:\n\
+             \n\
+             chromosome_mapping:\n\
+             {}",
+            bam_chroms.join(", "),
+            gtf_chroms.join(", "),
+            bam_chroms.iter().zip(gtf_chroms.iter())
+                .map(|(b, g)| format!("  {}: {}", g, b))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
 
     Ok(CountResult {
         gene_counts,

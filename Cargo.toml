@@ -25,6 +25,10 @@ plotters = "0.3"
 plotters-backend = "0.3"
 plotters-svg = "0.3"
 
+# Configuration
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+
 # General utilities
 anyhow = "1"
 log = "0.4"

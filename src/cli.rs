@@ -38,6 +38,10 @@ pub struct Args {
     /// Output directory for results
     #[arg(short, long, default_value = ".")]
     pub outdir: String,
+
+    /// Path to a YAML configuration file (e.g. chromosome name mapping)
+    #[arg(short, long, value_name = "CONFIG")]
+    pub config: Option<String>,
 }
 
 /// Parse command-line arguments and return the Args struct.

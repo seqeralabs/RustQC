@@ -39,6 +39,7 @@ duprust <BAM> <GTF> [OPTIONS]
 | `--paired` | `false` | Set if the library is paired-end |
 | `--threads <N>` | `1` | Number of threads for BAM reading |
 | `--outdir <DIR>` | `.` | Output directory |
+| `--config <FILE>` | none | Path to a YAML configuration file (see [Configuration](#configuration)) |
 
 ### Example
 
@@ -48,6 +49,47 @@ duprust sample.markdup.bam genes.gtf --outdir results/
 
 # Paired-end, reverse-stranded
 duprust sample.markdup.bam genes.gtf --paired --stranded 2 --outdir results/
+
+# With chromosome name mapping (e.g. Ensembl BAM + UCSC GTF)
+duprust sample.markdup.bam genes.gtf --paired --config config.yaml --outdir results/
+```
+
+## Configuration
+
+An optional YAML configuration file can be provided with `--config` to control runtime behaviour. The file is designed to be extensible — unknown fields are silently ignored, so config files remain forward-compatible.
+
+### Chromosome name mapping
+
+When the BAM and GTF files use different chromosome naming conventions (e.g. Ensembl `1, 2, X` vs. UCSC `chr1, chr2, chrX`), dupRust will detect the mismatch and exit with a helpful error. You can resolve this with either a prefix or explicit mapping.
+
+**Prefix** — prepend a string to every BAM chromosome name before matching:
+
+```yaml
+chromosome_prefix: "chr"
+```
+
+**Explicit mapping** — for fine-grained control, map individual GTF names to BAM names:
+
+```yaml
+chromosome_mapping:
+  chr1: "1"
+  chr2: "2"
+  chrX: "X"
+  chrM: "MT"
+```
+
+Both options can be combined. The prefix is applied first, then explicit mappings override specific names.
+
+### Example config file
+
+```yaml
+# Prepend "chr" to all BAM chromosome names
+chromosome_prefix: "chr"
+
+# Override the mitochondrial chromosome mapping
+# (prefix would produce "chrMT", but GTF uses "chrM")
+chromosome_mapping:
+  chrM: "MT"
 ```
 
 ## Output files
