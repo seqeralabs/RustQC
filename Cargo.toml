@@ -29,6 +29,9 @@ plotters-svg = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 
+# Parallelism
+rayon = "1.10"
+
 # General utilities
 anyhow = "1"
 log = "0.4"

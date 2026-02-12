@@ -130,33 +130,55 @@ fn main() -> Result<()> {
         }
     };
 
-    // Step 6: Generate plots
+    // Step 6: Generate plots (in parallel — all plots read shared immutable data)
     info!("Generating plots...");
     let plot_start = Instant::now();
 
-    if let Some(ref fit) = fit_ok {
-        // Compute RPKM threshold position in RPK space
+    let rpkm_threshold_rpk = fit_ok.as_ref().and_then(|_fit| {
         let rpkm_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.rpkm).collect();
-        let rpkm_threshold_rpk =
-            fitting::compute_rpkm_threshold_rpk(&rpk_values, &rpkm_values, 0.5);
+        fitting::compute_rpkm_threshold_rpk(&rpk_values, &rpkm_values, 0.5)
+    });
 
-        plots::density_scatter_plot(
-            &dup_matrix,
-            fit,
-            rpkm_threshold_rpk,
-            &outdir.join(format!("{}_duprateExpDens.png", bam_stem)),
-        )?;
-    }
+    let density_path = outdir.join(format!("{}_duprateExpDens.png", bam_stem));
+    let boxplot_path = outdir.join(format!("{}_duprateExpBoxplot.png", bam_stem));
+    let histogram_path = outdir.join(format!("{}_expressionHist.png", bam_stem));
 
-    plots::duprate_boxplot(
-        &dup_matrix,
-        &outdir.join(format!("{}_duprateExpBoxplot.png", bam_stem)),
-    )?;
+    std::thread::scope(|s| -> Result<()> {
+        // Density scatter plot (only if fit succeeded)
+        let density_handle = fit_ok.as_ref().map(|fit| {
+            let dm_ref = &dup_matrix;
+            let thresh = rpkm_threshold_rpk;
+            let path = &density_path;
+            s.spawn(move || plots::density_scatter_plot(dm_ref, fit, thresh, path))
+        });
 
-    plots::expression_histogram(
-        &dup_matrix,
-        &outdir.join(format!("{}_expressionHist.png", bam_stem)),
-    )?;
+        // Boxplot
+        let boxplot_handle = {
+            let dm_ref = &dup_matrix;
+            let path = &boxplot_path;
+            s.spawn(move || plots::duprate_boxplot(dm_ref, path))
+        };
+
+        // Histogram
+        let histogram_handle = {
+            let dm_ref = &dup_matrix;
+            let path = &histogram_path;
+            s.spawn(move || plots::expression_histogram(dm_ref, path))
+        };
+
+        // Collect results
+        if let Some(handle) = density_handle {
+            handle
+                .join()
+                .expect("density scatter plot thread panicked")?;
+        }
+        boxplot_handle.join().expect("boxplot thread panicked")?;
+        histogram_handle
+            .join()
+            .expect("histogram thread panicked")?;
+
+        Ok(())
+    })?;
 
     info!(
         "Plots generated in {:.2}s",
