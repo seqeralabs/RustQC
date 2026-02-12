@@ -27,14 +27,14 @@ const fn s(v: u32) -> u32 {
     v * SCALE
 }
 
-/// Density color palette (black → blue → green → yellow → red),
-/// matching R's `colorRampPalette(c("black","blue","green","yellow","red"))`.
+/// Density color palette matching R's dupRadar `duprateExpDensPlot()` which uses
+/// `colorRampPalette(c("cyan", "blue", "green", "yellow", "red"))`.
 const DENSITY_COLORS: [(u8, u8, u8); 5] = [
-    (0, 0, 0),     // black  (lowest density)
+    (0, 255, 255), // cyan       (lowest density)
     (0, 0, 255),   // blue
     (0, 255, 0),   // green
     (255, 255, 0), // yellow
-    (255, 0, 0),   // red    (highest density)
+    (255, 0, 0),   // red        (highest density)
 ];
 
 // ---------------------------------------------------------------------------
@@ -162,7 +162,11 @@ fn estimate_density(x: &[f64], y: &[f64], nbins: usize) -> Vec<f64> {
 /// axis style: `"0.01"`, `"0.1"`, `"1"`, `"10"`, `"100"`, `"1000"`.
 fn format_rpk_tick(log_val: f64) -> String {
     let val = 10.0_f64.powf(log_val);
-    if val >= 1.0 {
+    if val >= 10000.0 {
+        // Match R's format: 1e+04, 1e+05
+        let exp = log_val.round() as i32;
+        format!("1e+{:02}", exp)
+    } else if val >= 1.0 {
         format!("{}", val as u64)
     } else if val >= 0.01 {
         let s = format!("{:.2}", val);
@@ -255,8 +259,12 @@ where
     // X-axis range: R does round(range(log10(RPK))) → e.g. -1..3
     let raw_min = xd.iter().cloned().fold(f64::INFINITY, f64::min);
     let raw_max = xd.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    let x_min = raw_min.round().min(raw_min - 0.1);
-    let x_max = raw_max.round().max(raw_max + 0.1);
+    // R's plot() auto-pads the data range by ~4%.  Use rounded ticks but data-based range.
+    let tick_min = raw_min.round() as i32; // for tick positions
+    let tick_max = raw_max.round() as i32;
+    let pad = (raw_max - raw_min) * 0.04;
+    let x_min = (raw_min - pad).max(tick_min as f64); // don't go below first tick
+    let x_max = (raw_max + pad).min(tick_max as f64 + 1.0); // a little past last tick
 
     // ── chart frame ────────────────────────────────────────────────────
     let mut chart = ChartBuilder::on(&root)
@@ -300,11 +308,13 @@ where
         densities.iter().enumerate().map(|(i, d)| (i, *d)).collect();
     order.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
+    // R uses pch=20 cex=0.25 → ~1 pixel filled dots
+    let pt_size = 1; // minimal size to match R pch=20 cex=0.25
     for &(i, _) in &order {
         let c = density_color(densities[i]);
         chart.draw_series(std::iter::once(Circle::new(
             (xd[i], yd[i]),
-            ps(1.0),
+            pt_size,
             c.filled(),
         )))?;
     }
@@ -321,12 +331,12 @@ where
         })
         .collect();
     // Draw dotted: short on/off segments
-    let seg_on_len = 3;
-    let seg_off_len = 3;
+    let seg_on_len = 2;
+    let seg_off_len = 2;
     let mut seg_idx = 0;
     let mut seg_on = true;
     let mut seg_pts: Vec<(f64, f64)> = Vec::new();
-    let curve_sw = (pxs * 1.5).round().max(1.0) as u32;
+    let curve_sw = (pxs * 1.0).round().max(1.0) as u32;
     for pt in &curve_pts {
         if seg_on {
             seg_pts.push(*pt);
@@ -361,10 +371,10 @@ where
         pa_x.0 + (frac * (pa_x.1 - pa_x.0) as f64) as i32
     };
 
-    // R uses lty=2 (dashed): moderate dash, thin line
-    let dash = (pxs * 5.0) as i32;
-    let gap = (pxs * 3.0) as i32;
-    let sw = (pxs * 0.75).round().max(1.0) as u32;
+    // R uses lty=2 (dashed): short dash, thin line
+    let dash = (pxs * 3.0) as i32;
+    let gap = (pxs * 2.0) as i32;
+    let sw = 1u32; // Always 1 pixel, matching R's thin dashed lines
 
     // "1 read/bp" → RPK = 1000 → log₁₀ = 3. R: col='red', lty=2 (dashed)
     let rpk_1k = 3.0f64;
@@ -410,7 +420,7 @@ where
         ))?;
         cy += line_h;
         root.draw(&Text::new(
-            format!("Sl: {:.1}", fit.slope),
+            format!("Sl: {:.2}", fit.slope),
             (tx, cy),
             ("sans-serif", fsz).into_font().color(&BLACK),
         ))?;
@@ -466,13 +476,13 @@ pub fn density_scatter_plot(
     output_path: &std::path::Path,
 ) -> Result<()> {
     // PNG (high-res)
-    let png_path = output_path.to_path_buf();
-    let root = BitMapBackend::new(&png_path, (s(640), s(480))).into_drawing_area();
+    let png_path = output_path.with_extension("png");
+    let root = BitMapBackend::new(&png_path, (s(480), s(480))).into_drawing_area();
     render_density_scatter(root, dm, fit, rpkm_threshold, SCALE as f64)?;
 
-    // SVG (base resolution)
+    // SVG
     let svg_path = output_path.with_extension("svg");
-    let root = SVGBackend::new(&svg_path, (640, 480)).into_drawing_area();
+    let root = SVGBackend::new(&svg_path, (480, 480)).into_drawing_area();
     render_density_scatter(root, dm, fit, rpkm_threshold, 1.0)?;
 
     Ok(())
@@ -561,7 +571,7 @@ where
         .margin_right(ps(15.0))
         .margin_bottom(ps(10.0))
         .margin_left(ps(10.0))
-        .x_label_area_size(ps(105.0))
+        .x_label_area_size(ps(150.0))
         .y_label_area_size(ps(50.0))
         .build_cartesian_2d(0.0f64..n_bins as f64, 0.0f64..1.0)?;
 
@@ -570,22 +580,32 @@ where
         .disable_mesh()
         .y_desc("duplication (%)")
         .x_desc("mean expression (reads/kbp)")
-        .x_label_formatter(&|v| {
-            let i = *v as usize;
-            if i < labels.len() && (*v - i as f64).abs() < 0.01 {
-                labels[i].clone()
-            } else {
-                String::new()
-            }
-        })
+        .x_label_formatter(&|_v| String::new()) // Disable auto x labels - we draw manually
         .x_labels(n_bins)
-        .x_label_style(("sans-serif", ps(8.0)).into_font().transform(FontTransform::Rotate270))
+        .y_labels(6)
         .y_label_formatter(&|v| format!("{:.1}", v))
         .axis_desc_style(("sans-serif", ps(13.0)))
         .label_style(("sans-serif", ps(11.0)))
         .draw()?;
 
-    let gray_fill = RGBAColor(190, 190, 190, 0.5);
+    // Draw rotated x-axis labels manually
+    {
+        let plot_area = chart.plotting_area();
+        let font_size = ps(5.0) as f64;
+        for (i, label) in labels.iter().enumerate() {
+            // Map x position to pixel coordinate (center of bin)
+            let x_coord = i as f64 + 0.5;
+            let (px, py) = plot_area.map_coordinate(&(x_coord, 0.0f64));
+            // Draw text below the plot area, rotated 90 degrees
+            let text_style = ("sans-serif", font_size)
+                .into_font()
+                .color(&BLACK)
+                .transform(FontTransform::Rotate270);
+            root.draw_text(label, &text_style, (px - 3, py + 5))?;
+        }
+    }
+
+    let gray_fill = RGBAColor(190, 190, 190, 1.0);
 
     for (idx, vals) in bins.iter().enumerate() {
         if vals.is_empty() {
@@ -650,11 +670,11 @@ where
 /// Produces both `<output_path>.png` (high-res) and `<output_path>.svg`.
 pub fn duprate_boxplot(dm: &DupMatrix, output_path: &std::path::Path) -> Result<()> {
     // PNG
-    let root = BitMapBackend::new(output_path, (s(640), s(480))).into_drawing_area();
+    let root = BitMapBackend::new(output_path, (s(480), s(480))).into_drawing_area();
     render_boxplot(root, dm, SCALE as f64)?;
     // SVG
     let svg = output_path.with_extension("svg");
-    let root = SVGBackend::new(&svg, (640, 480)).into_drawing_area();
+    let root = SVGBackend::new(&svg, (480, 480)).into_drawing_area();
     render_boxplot(root, dm, 1.0)?;
     Ok(())
 }
@@ -686,10 +706,13 @@ where
         anyhow::bail!("No valid data for expression histogram");
     }
 
-    // Match R's hist(breaks=100): R chooses "pretty" breaks with width 0.05
-    let bw = 0.05_f64;
+    // Match R's hist(breaks=100): R uses ~100 breaks over the data range.
+    // Compute bin width dynamically to produce approximately 100 bins.
     let raw_min = log_rpk.iter().cloned().fold(f64::INFINITY, f64::min);
     let raw_max = log_rpk.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let target_bins = 100;
+    let bw = ((raw_max - raw_min) / target_bins as f64 * 20.0).round() / 20.0; // round to nearest 0.05
+    let bw = bw.max(0.05); // minimum bin width
     let x_min = (raw_min / bw).floor() * bw;
     let x_max = (raw_max / bw).ceil() * bw;
     let n_bins = ((x_max - x_min) / bw).round() as usize;
@@ -719,6 +742,7 @@ where
             let r = (*v * 10.0).round() / 10.0;
             if (r - r.round()).abs() < 0.01 { format_rpk_tick(r) } else { String::new() }
         })
+        .y_labels(6)
         .y_label_formatter(&|v| {
             if *v == v.floor() && *v >= 0.0 { format!("{}", *v as i32) } else { String::new() }
         })
@@ -737,16 +761,16 @@ where
         )))?;
         chart.draw_series(std::iter::once(Rectangle::new(
             [(x0, 0.0), (x1, c as f64)],
-            BLACK.stroke_width(ps(1.0)),
+            BLACK.stroke_width(1),
         )))?;
     }
 
-    // Threshold at RPK = 1000 (log₁₀ = 3)
+    // Threshold at RPK = 1000 (log₁₀ = 3). R uses col='red'.
     let thr = 3.0f64;
     if thr >= x_min && thr <= x_max {
         chart.draw_series(LineSeries::new(
             vec![(thr, 0.0), (thr, y_max * 1.08)],
-            BLACK.stroke_width(ps(2.0)),
+            RED.stroke_width(ps(1.0)),
         ))?;
     }
 
@@ -759,11 +783,11 @@ where
 /// Produces both `<output_path>.png` (high-res) and `<output_path>.svg`.
 pub fn expression_histogram(dm: &DupMatrix, output_path: &std::path::Path) -> Result<()> {
     // PNG
-    let root = BitMapBackend::new(output_path, (s(640), s(480))).into_drawing_area();
+    let root = BitMapBackend::new(output_path, (s(480), s(480))).into_drawing_area();
     render_histogram(root, dm, SCALE as f64)?;
     // SVG
     let svg = output_path.with_extension("svg");
-    let root = SVGBackend::new(&svg, (640, 480)).into_drawing_area();
+    let root = SVGBackend::new(&svg, (480, 480)).into_drawing_area();
     render_histogram(root, dm, 1.0)?;
     Ok(())
 }
@@ -856,9 +880,12 @@ mod tests {
     #[test]
     fn test_density_color_endpoints() {
         let c0 = density_color(0.0);
-        assert_eq!((c0.0, c0.1, c0.2), (0, 0, 0));
+        assert_eq!((c0.0, c0.1, c0.2), (0, 255, 255)); // cyan
         let c1 = density_color(1.0);
-        assert_eq!((c1.0, c1.1, c1.2), (255, 0, 0));
+        assert_eq!((c1.0, c1.1, c1.2), (255, 0, 0)); // red
+        // Mid-point should be green
+        let c_mid = density_color(0.5);
+        assert_eq!((c_mid.0, c_mid.1, c_mid.2), (0, 255, 0)); // green
     }
 
     #[test]
