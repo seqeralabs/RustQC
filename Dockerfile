@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     liblzma-dev \
     libcurl4-openssl-dev \
     libssl-dev \
+    libfontconfig1-dev \
     pkg-config \
     clang \
     && rm -rf /var/lib/apt/lists/*

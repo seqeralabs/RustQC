@@ -79,7 +79,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake zlib1g-dev libbz2-dev liblzma-dev \
-            libcurl4-openssl-dev libssl-dev pkg-config clang
+            libcurl4-openssl-dev libssl-dev libfontconfig1-dev pkg-config clang
 
       # macOS build dependencies
       - name: Install macOS build deps

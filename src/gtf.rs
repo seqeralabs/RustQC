@@ -192,7 +192,8 @@ mod tests {
 
     #[test]
     fn test_get_attribute() {
-        let attrs = r#"gene_id "ENSG00000223972"; transcript_id "ENST00000456328"; gene_name "DDX11L1";"#;
+        let attrs =
+            r#"gene_id "ENSG00000223972"; transcript_id "ENST00000456328"; gene_name "DDX11L1";"#;
         assert_eq!(
             get_attribute(attrs, "gene_id"),
             Some("ENSG00000223972".to_string())

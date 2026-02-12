@@ -137,9 +137,7 @@ impl ChromIndex {
 
         // Binary search for the first interval that could overlap
         // An interval overlaps [start, end) if interval.start < end AND interval.end > start
-        let search_start = self
-            .intervals
-            .partition_point(|iv| iv.end <= start);
+        let search_start = self.intervals.partition_point(|iv| iv.end <= start);
 
         for iv in &self.intervals[search_start..] {
             if iv.start >= end {
@@ -326,9 +324,7 @@ pub fn count_reads(
     // Get chromosome names from header
     let header = bam.header().clone();
     let tid_to_name: Vec<String> = (0..header.target_count())
-        .map(|tid| {
-            String::from_utf8_lossy(header.tid2name(tid)).to_string()
-        })
+        .map(|tid| String::from_utf8_lossy(header.tid2name(tid)).to_string())
         .collect();
 
     // Track statistics
@@ -427,8 +423,7 @@ pub fn count_reads(
         let gene_hits = if let Some(chrom_idx) = index.get(chrom) {
             // Extract aligned blocks from CIGAR (M/=/X operations only).
             // This avoids false overlaps with genes in introns of spliced reads.
-            let aligned_blocks =
-                cigar_to_aligned_blocks(record.pos() as u64, &record.cigar());
+            let aligned_blocks = cigar_to_aligned_blocks(record.pos() as u64, &record.cigar());
 
             let mut overlaps = Vec::new();
             for (block_start, block_end) in &aligned_blocks {
@@ -438,9 +433,7 @@ pub fn count_reads(
             // Filter by strand and deduplicate gene IDs
             let mut genes_hit: Vec<String> = overlaps
                 .iter()
-                .filter(|iv| {
-                    strand_matches(is_reverse, is_read1, paired, iv.strand, stranded)
-                })
+                .filter(|iv| strand_matches(is_reverse, is_read1, paired, iv.strand, stranded))
                 .map(|iv| iv.gene_id.clone())
                 .collect();
             genes_hit.sort_unstable();
@@ -482,7 +475,11 @@ pub fn count_reads(
             // For the fragment, use read1's dup/multi status (featureCounts
             // considers a fragment as duplicate if read1 is flagged as duplicate)
             let frag_is_dup = if is_read1 { is_dup } else { mate_info.is_dup };
-            let frag_is_multi = if is_read1 { is_multi } else { mate_info.is_multi };
+            let frag_is_multi = if is_read1 {
+                is_multi
+            } else {
+                mate_info.is_multi
+            };
 
             // Update N totals (once per fragment)
             n_multi_dup += 1;
@@ -499,7 +496,12 @@ pub fn count_reads(
             combined_genes.dedup();
 
             // Assign to gene if unambiguous (exactly one gene from combined overlaps)
-            assign_fragment_to_gene(&combined_genes, &mut gene_counts, frag_is_dup, frag_is_multi);
+            assign_fragment_to_gene(
+                &combined_genes,
+                &mut gene_counts,
+                frag_is_dup,
+                frag_is_multi,
+            );
         } else {
             // First mate seen - buffer it and wait for the other mate
             mate_buffer.insert(
@@ -527,7 +529,12 @@ pub fn count_reads(
             n_unique_nodup += 1;
         }
 
-        assign_fragment_to_gene(&mate_info.gene_hits, &mut gene_counts, mate_info.is_dup, mate_info.is_multi);
+        assign_fragment_to_gene(
+            &mate_info.gene_hits,
+            &mut gene_counts,
+            mate_info.is_dup,
+            mate_info.is_multi,
+        );
     }
 
     info!(
