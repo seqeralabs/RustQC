@@ -11,6 +11,7 @@
 
 use crate::gtf::Gene;
 use anyhow::{Context, Result};
+use coitrees::{COITree, Interval, IntervalTree};
 use indexmap::IndexMap;
 use log::{debug, info};
 use rust_htslib::bam::{self, Read as BamRead};
@@ -152,114 +153,58 @@ pub struct CountResult {
     pub total_reads_unique_nodup: u64,
 }
 
-/// An interval tree node for efficient overlap queries.
-/// Uses a simple sorted-interval approach with binary search.
-#[derive(Debug, Clone)]
-struct GeneInterval {
-    /// Start position (0-based, half-open for internal use)
-    start: u64,
-    /// End position (0-based, half-open)
-    end: u64,
+/// Metadata stored with each interval in the cache-oblivious interval tree.
+#[derive(Debug, Clone, Copy, Default)]
+struct IvMeta {
     /// Interned gene ID index (avoids String cloning in hot path)
     gene_idx: GeneIdx,
-    /// Strand
+    /// Strand of the exon ('+', '-', or '.')
     strand: char,
 }
 
-/// A simple interval index for a single chromosome.
-/// Intervals are sorted by start position for binary search.
-/// Augmented with max_end for efficient overlap queries.
-#[derive(Debug)]
-struct ChromIndex {
-    intervals: Vec<GeneInterval>,
-    /// For each position i, the maximum end value among intervals[0..=i].
-    /// This allows pruning the scan: if max_end[i] <= query_start, all
-    /// intervals from 0..=i can be skipped.
-    max_end: Vec<u64>,
-}
-
-impl ChromIndex {
-    fn new(mut intervals: Vec<GeneInterval>) -> Self {
-        intervals.sort_by_key(|iv| (iv.start, iv.end));
-
-        // Build max_end array
-        let mut max_end = Vec::with_capacity(intervals.len());
-        let mut running_max = 0u64;
-        for iv in &intervals {
-            running_max = running_max.max(iv.end);
-            max_end.push(running_max);
-        }
-
-        ChromIndex { intervals, max_end }
-    }
-
-    /// Find all gene intervals overlapping the query range [start, end).
-    /// An interval overlaps if interval.start < end AND interval.end > start.
-    fn query(&self, start: u64, end: u64) -> Vec<&GeneInterval> {
-        let mut results = Vec::new();
-        if self.intervals.is_empty() {
-            return results;
-        }
-
-        // Quick check: if the max end of all intervals <= start, no overlaps possible
-        if *self.max_end.last().unwrap() <= start {
-            return results;
-        }
-
-        // Find the first interval where iv.start >= end using binary search.
-        // All intervals at or after this index have start >= end, so they can't overlap.
-        let upper = self.intervals.partition_point(|iv| iv.start < end);
-
-        // Now scan intervals [0..upper) and check if iv.end > start.
-        // Use max_end to find a lower bound: find the leftmost position where
-        // max_end > start. All intervals before that can't overlap.
-        // Binary search on max_end (which is monotonically non-decreasing).
-        let lower = self.max_end[..upper].partition_point(|&me| me <= start);
-
-        for iv in &self.intervals[lower..upper] {
-            if iv.end > start {
-                results.push(iv);
-            }
-        }
-
-        results
-    }
-}
+/// Per-chromosome interval index backed by a cache-oblivious interval tree
+/// (coitrees). Provides very fast overlap queries on sorted genomic intervals.
+type ChromIndex = COITree<IvMeta, u32>;
 
 /// Build a spatial index from gene annotations for fast overlap queries.
 ///
-/// Uses the interner to store compact gene ID indices in each interval,
+/// Constructs a `COITree` per chromosome from exon intervals. Uses the
+/// interner to store compact gene ID indices as interval metadata,
 /// avoiding per-exon String cloning.
 fn build_index(
     genes: &IndexMap<String, Gene>,
     interner: &GeneIdInterner,
 ) -> HashMap<String, ChromIndex> {
-    let mut chrom_intervals: HashMap<String, Vec<GeneInterval>> = HashMap::new();
+    let mut chrom_intervals: HashMap<String, Vec<Interval<IvMeta>>> = HashMap::new();
 
     for gene in genes.values() {
         // Look up the interned gene index once per gene
         let gene_idx = interner
             .get(&gene.gene_id)
             .expect("gene must be in interner"); // safe: interner built from same gene map
-                                                 // Add each exon as an interval (featureCounts assigns reads at exon level)
+
+        // Add each exon as an interval (featureCounts assigns reads at exon level)
         for exon in &gene.exons {
-            let interval = GeneInterval {
-                // Convert from 1-based inclusive GTF to 0-based half-open
-                start: exon.start - 1,
-                end: exon.end,
-                gene_idx,
-                strand: exon.strand,
-            };
+            // Convert from 1-based inclusive GTF to 0-based half-open, then
+            // to coitrees' end-inclusive coordinates: [start-1, end-1].
+            let iv = Interval::new(
+                (exon.start - 1) as i32,
+                (exon.end - 1) as i32,
+                IvMeta {
+                    gene_idx,
+                    strand: exon.strand,
+                },
+            );
             chrom_intervals
                 .entry(exon.chrom.clone())
                 .or_default()
-                .push(interval);
+                .push(iv);
         }
     }
 
     chrom_intervals
         .into_iter()
-        .map(|(chrom, intervals)| (chrom, ChromIndex::new(intervals)))
+        .map(|(chrom, intervals)| (chrom, COITree::new(&intervals)))
         .collect()
 }
 
@@ -451,7 +396,6 @@ pub fn count_reads(
     // Reusable buffers to avoid per-read heap allocations.
     // These are cleared and reused each iteration of the main loop.
     let mut aligned_blocks_buf: Vec<(u64, u64)> = Vec::new();
-    let mut overlaps_buf: Vec<&GeneInterval> = Vec::new();
     let mut gene_hits: Vec<GeneIdx> = Vec::new();
 
     // Iterate over all records
@@ -542,18 +486,18 @@ pub fn count_reads(
                 &mut aligned_blocks_buf,
             );
 
-            overlaps_buf.clear();
-            for (block_start, block_end) in &aligned_blocks_buf {
-                overlaps_buf.extend(chrom_idx.query(*block_start, *block_end));
+            // Query the cache-oblivious interval tree for each aligned block.
+            // coitrees uses end-inclusive coordinates, so convert half-open
+            // [start, end) to inclusive [start, end-1]. Filter by strand and
+            // collect gene indices directly via the callback (no intermediate buffer).
+            for &(block_start, block_end) in &aligned_blocks_buf {
+                chrom_idx.query(block_start as i32, (block_end - 1) as i32, |node| {
+                    let meta = node.metadata;
+                    if strand_matches(is_reverse, is_read1, paired, meta.strand, stranded) {
+                        gene_hits.push(meta.gene_idx);
+                    }
+                });
             }
-
-            // Filter by strand and deduplicate gene indices (no string cloning)
-            gene_hits.extend(
-                overlaps_buf
-                    .iter()
-                    .filter(|iv| strand_matches(is_reverse, is_read1, paired, iv.strand, stranded))
-                    .map(|iv| iv.gene_idx),
-            );
             gene_hits.sort_unstable();
             gene_hits.dedup();
         }

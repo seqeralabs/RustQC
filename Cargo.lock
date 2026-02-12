@@ -262,6 +262,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "coitrees"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "240f9610db0e586042f50260506972820ef10d5eb9a0e867a00f8cfe0a238be3"
+
+[[package]]
 name = "color_quant"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -449,6 +455,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "coitrees",
  "env_logger",
  "indexmap",
  "log",
