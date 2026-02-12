@@ -21,8 +21,8 @@ A small test BAM file (`test.bam`) with a chr6-only GTF annotation, included in 
 | --- | ---: | ---: | ---: |
 | **allCounts (unique)** | 20,449 | 20,449 | 100% |
 | **filteredCounts (unique)** | 17,879 | 17,879 | 100% |
-| **allCountsMulti** | 22,812 | 22,821 | 99.6% |
-| **filteredCountsMulti** | 20,034 | 20,048 | 99.6% |
+| **allCountsMulti** | 22,812 | 22,812 | **100%** |
+| **filteredCountsMulti** | 20,034 | 20,034 | **100%** |
 
 ### Replication
 
@@ -56,7 +56,7 @@ Paired-end, unstranded, aligned to GRCh38 (Ensembl chromosome names).
 | **Slope** | 1.6774 | 1.6774 |
 | **Genes total** | 63,086 | 63,086 |
 | **Genes with reads (unique)** | 23,597 | 23,597 |
-| **Genes with reads (multi)** | 24,719 | 24,720 |
+| **Genes with reads (multi)** | 24,719 | 24,719 |
 
 ### Count comparison
 
@@ -64,10 +64,10 @@ Paired-end, unstranded, aligned to GRCh38 (Ensembl chromosome names).
 | --- | ---: | ---: | ---: |
 | **allCounts (unique)** | 14,654,579 | 14,654,579 | **100%** |
 | **filteredCounts (unique)** | 3,599,832 | 3,599,832 | **100%** |
-| **allCountsMulti** | 16,089,488 | 16,023,820 | 95.6% |
-| **filteredCountsMulti** | 4,503,920 | 4,459,432 | 95.1% |
+| **allCountsMulti** | 16,089,488 | 16,089,488 | **100%** |
+| **filteredCountsMulti** | 4,503,920 | 4,503,920 | **100%** |
 
-Unique-mapper counts (**allCounts** and **filteredCounts**) match exactly across all 63,086 genes. Multi-mapper total counts differ by ~0.4% and filtered multi-mapper counts by ~1.0%, due to minor differences in how secondary alignments are paired and assigned.
+All four count columns match exactly across all 63,086 genes — both unique-mapper and multi-mapper counts.
 
 Model fit parameters (**intercept** and **slope**) match to the displayed precision.
 
@@ -121,6 +121,6 @@ cargo build --release
 
 ### Known differences
 
-- Unique-mapper counts and model fit parameters match exactly across all 63,086 genes.
-- Multi-mapper count differences (~4–5% of genes affected) stem from minor differences in how secondary alignments are paired and assigned. Total multi-mapper counts differ by ~0.4% (allCountsMulti) and ~1.0% (filteredCountsMulti).
-- Genes with reads are nearly identical between tools: unique-mapper gene sets match exactly (23,597), and multi-mapper gene sets differ by only 1–2 genes.
+Both benchmarks achieve **100% exact match** across all four count columns (unique and multi-mapper) and all genes. Model fit parameters match to at least 10 significant digits.
+
+Runtime may vary depending on hardware — the times above were measured on a single machine for relative comparison.

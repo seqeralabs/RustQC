@@ -303,10 +303,13 @@ struct MateInfo {
     is_multi: bool,
 }
 
-/// Key for the mate buffer: (read_name, expected_pair_key)
-/// For a read at position P with mate at position M, the pair key is (min(P,M), max(P,M))
-/// so both mates of the same alignment pair produce the same key.
-type MateBufferKey = (Vec<u8>, (i64, i64));
+/// Key for the mate buffer, matching featureCounts' `SAM_pairer_get_read_full_name()`.
+///
+/// featureCounts pairs mates using: (read_name, r1_refID, r1_pos, r2_refID, r2_pos, HI_tag).
+/// R1/R2 roles are determined by the FLAG 0x40 bit (BAM_FREAD1), so both mates of the
+/// same alignment pair always compute an identical key. The HI (Hit Index) tag disambiguates
+/// multiple alignment pairs of the same multi-mapped read.
+type MateBufferKey = (Vec<u8>, i32, i64, i32, i64, i32);
 
 /// Count reads from a BAM file and assign them to genes.
 ///
@@ -314,9 +317,10 @@ type MateBufferKey = (Vec<u8>, (i64, i64));
 /// - With/without multimappers
 /// - With/without PCR duplicates
 ///
-/// For paired-end data, this function buffers mates by read name and combines
-/// their gene overlaps to match featureCounts' fragment-level counting behavior.
-/// A fragment is assigned to a gene if either mate overlaps that gene's exons.
+/// For paired-end data, this function buffers mates by a composite key matching
+/// featureCounts' `SAM_pairer_get_read_full_name()` (read name, R1/R2 refIDs,
+/// R1/R2 positions, HI tag). Gene assignment uses featureCounts' scoring strategy:
+/// genes overlapped by both mates score higher than genes overlapped by only one.
 ///
 /// # Arguments
 /// * `bam_path` - Path to the duplicate-marked BAM file
@@ -374,9 +378,9 @@ pub fn count_reads(
     let mut n_unique_dup: u64 = 0;
     let mut n_unique_nodup: u64 = 0;
 
-    // For paired-end: buffer mates by (read_name, position_pair) to combine
-    // their overlaps. Using position pairs ensures secondary alignments at
-    // different locations form separate fragments (matching featureCounts).
+    // For paired-end: buffer mates using a composite key matching featureCounts'
+    // SAM_pairer_get_read_full_name(): (name, r1_tid, r1_pos, r2_tid, r2_pos, HI_tag).
+    // The HI tag disambiguates secondary alignment pairs for multi-mapped reads.
     let mut mate_buffer: HashMap<MateBufferKey, MateInfo> = HashMap::new();
 
     // Iterate over all records
@@ -504,25 +508,53 @@ pub fn count_reads(
 
         // --- Paired-end counting: buffer mates and combine ---
         //
-        // featureCounts with isPairedEnd=TRUE and countReadPairs=TRUE assigns
-        // a fragment to a gene if EITHER mate overlaps that gene's exons.
-        // We buffer the first mate we see and combine overlaps when the second
-        // mate arrives. The duplicate flag from read1 is used for the fragment.
+        // featureCounts with isPairedEnd=TRUE and countReadPairs=TRUE scores
+        // each gene by how many ends overlap it (both > one > none). We buffer
+        // the first mate and combine gene overlaps when the second arrives.
+        // The duplicate flag from read1 is used for the fragment.
         //
-        // For multi-mapped reads with secondary alignments, each alignment
-        // location pair is counted as a separate fragment. We use
-        // (read_name, position_pair) as the buffer key to distinguish them.
+        // The buffer key matches featureCounts' SAM_pairer_get_read_full_name():
+        // (read_name, r1_tid, r1_pos, r2_tid, r2_pos, HI_tag). This correctly
+        // pairs secondary alignments for multi-mapped reads.
         let read_name = record.qname().to_vec();
         let own_pos = record.pos();
+        let own_tid = record.tid();
         let mate_pos_val = record.mpos();
+        let mate_tid = record.mtid();
 
-        // Create a position pair key that both mates will compute identically
-        let pos_pair = if own_pos <= mate_pos_val {
-            (own_pos, mate_pos_val)
-        } else {
-            (mate_pos_val, own_pos)
+        // Read the HI (Hit Index) tag if present; defaults to -1 (matching featureCounts).
+        // This disambiguates multiple alignment pairs of the same multi-mapped read.
+        let hi_tag: i32 = match record.aux(b"HI") {
+            Ok(rust_htslib::bam::record::Aux::U8(v)) => v as i32,
+            Ok(rust_htslib::bam::record::Aux::U16(v)) => v as i32,
+            Ok(rust_htslib::bam::record::Aux::U32(v)) => v as i32,
+            Ok(rust_htslib::bam::record::Aux::I8(v)) => v as i32,
+            Ok(rust_htslib::bam::record::Aux::I16(v)) => v as i32,
+            Ok(rust_htslib::bam::record::Aux::I32(v)) => v,
+            _ => -1,
         };
-        let buffer_key: MateBufferKey = (read_name.clone(), pos_pair);
+
+        // Build the mate pairing key matching featureCounts' SAM_pairer_get_read_full_name().
+        // R1/R2 roles are determined by FLAG 0x40, so both mates compute an identical key.
+        let buffer_key: MateBufferKey = if is_read1 {
+            (
+                read_name.clone(),
+                own_tid,
+                own_pos,
+                mate_tid,
+                mate_pos_val,
+                hi_tag,
+            )
+        } else {
+            (
+                read_name.clone(),
+                mate_tid,
+                mate_pos_val,
+                own_tid,
+                own_pos,
+                hi_tag,
+            )
+        };
 
         if let Some(mate_info) = mate_buffer.remove(&buffer_key) {
             // We've seen the other mate - combine overlaps and assign
@@ -545,43 +577,40 @@ pub fn count_reads(
                 n_unique_nodup += 1;
             }
 
-            // Combine gene hits from both mates using INTERSECTION strategy
-            // (matching featureCounts behaviour).
+            // Combine gene hits from both mates using featureCounts' scoring strategy.
             //
-            // If both mates overlap genes, we use the INTERSECTION of their
-            // gene sets.  This resolves spurious ambiguity when one mate
-            // barely clips a neighbouring gene's exon while the other mate
-            // clearly overlaps only the intended gene.
+            // featureCounts (readSummary.c `vote_and_add_count`) scores each gene by
+            // how many "ends" (mates) overlap it:
+            //   - score 2: both mates overlap the gene
+            //   - score 1: only one mate overlaps the gene
             //
-            // If only one mate has gene hits (the other overlaps nothing),
-            // we use that mate's gene set directly.
+            // The gene(s) with the highest score win. If multiple genes share the
+            // highest score, the fragment is marked ambiguous. If only one mate has
+            // gene hits (the other overlaps nothing), that mate's genes all score 1.
             let combined_genes: Vec<String> =
                 if mate_info.gene_hits.is_empty() && gene_hits.is_empty() {
                     Vec::new()
-                } else if mate_info.gene_hits.is_empty() {
-                    gene_hits
-                } else if gene_hits.is_empty() {
-                    mate_info.gene_hits
                 } else {
-                    // Both mates have gene hits - use INTERSECTION
-                    let set_a: std::collections::HashSet<&String> =
-                        mate_info.gene_hits.iter().collect();
-                    let intersection: Vec<String> = gene_hits
-                        .iter()
-                        .filter(|g| set_a.contains(g))
-                        .cloned()
-                        .collect();
-                    if intersection.is_empty() {
-                        // Mates disagree on gene assignment - treat as ambiguous
-                        // by returning the union (which will have len > 1)
-                        let mut union = mate_info.gene_hits;
-                        union.extend(gene_hits);
-                        union.sort_unstable();
-                        union.dedup();
-                        union
-                    } else {
-                        intersection
+                    // Build a score map: gene_id -> number of ends overlapping (1 or 2)
+                    let mut scores: HashMap<&str, u8> = HashMap::new();
+                    for g in &mate_info.gene_hits {
+                        *scores.entry(g.as_str()).or_insert(0) += 1;
                     }
+                    for g in &gene_hits {
+                        *scores.entry(g.as_str()).or_insert(0) += 1;
+                    }
+
+                    // Find the maximum score
+                    let max_score = scores.values().copied().max().unwrap_or(0);
+
+                    // Collect all genes with the maximum score
+                    let mut best: Vec<String> = scores
+                        .iter()
+                        .filter(|(_, &s)| s == max_score)
+                        .map(|(&g, _)| g.to_string())
+                        .collect();
+                    best.sort_unstable();
+                    best
                 };
 
             // Assign to gene if unambiguous (exactly one gene from combined overlaps)

@@ -1,8 +1,8 @@
 # ![dupRust](dupRust_logo.png)
 
-> A fast Rust reimplementation of [dupRadar](https://github.com/ssayols/dupRadar) for assessing PCR duplicate rates in RNA-Seq datasets.
+<h4 align="center">A fast Rust reimplementation of <a href="https://github.com/ssayols/dupRadar">dupRadar</a> for assessing PCR duplicate rates in RNA-Seq datasets.</h4>
 
-dupRust analyzes duplicate-marked BAM files to compute per-gene duplication rates as a function of expression level. It produces the same outputs as the original dupRadar R/Bioconductor package, but runs significantly faster and compiles to a single static binary with no runtime dependencies.
+**dupRust** analyzes duplicate-marked BAM files to compute per-gene duplication rates as a function of expression level. It produces the same outputs as the original **dupRadar** R/Bioconductor package, but runs significantly faster and compiles to a single static binary with no runtime dependencies.
 
 ## Comparison with dupRadar
 
@@ -23,7 +23,7 @@ dupRust analyzes duplicate-marked BAM files to compute per-gene duplication rate
 | **Intercept** | 0.8245 | 0.8245 |
 | **Slope** | 1.6774 | 1.6774 |
 
-Unique-mapper gene counts match **exactly** across all 63,086 genes (100%). Multi-mapper counts match 95.6%.
+All gene counts — unique and multi-mapper — match **exactly** across all 63,086 genes (100%).
 
 See the [benchmark README](benchmark/README.md) for full results and replication instructions.
 
