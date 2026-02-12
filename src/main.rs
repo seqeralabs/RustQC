@@ -187,10 +187,7 @@ fn main() -> Result<()> {
         stats.f_regions_duplication * 100.0
     );
 
-    info!(
-        "Total runtime: {:.2}s",
-        start.elapsed().as_secs_f64()
-    );
+    info!("Total runtime: {:.2}s", start.elapsed().as_secs_f64());
 
     Ok(())
 }

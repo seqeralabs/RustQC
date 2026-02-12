@@ -23,6 +23,7 @@ const BAM_FUNMAP: u16 = 0x4;
 /// Flag indicating the read failed quality checks (0x200).
 const BAM_FQCFAIL: u16 = 0x200;
 /// Flag indicating a secondary alignment (0x100).
+#[allow(dead_code)]
 const BAM_FSECONDARY: u16 = 0x100;
 /// Flag indicating a supplementary alignment (0x800).
 const BAM_FSUPPLEMENTARY: u16 = 0x800;
@@ -353,9 +354,7 @@ pub fn count_reads(
     // Get chromosome names from header
     let header = bam.header().clone();
     let tid_to_name: Vec<String> = (0..header.target_count())
-        .map(|tid| {
-            String::from_utf8_lossy(header.tid2name(tid)).to_string()
-        })
+        .map(|tid| String::from_utf8_lossy(header.tid2name(tid)).to_string())
         .collect();
 
     // Track statistics
@@ -386,7 +385,7 @@ pub fn count_reads(
         result.context("Error reading BAM record")?;
         total_reads += 1;
 
-        if total_reads % 5_000_000 == 0 {
+        if total_reads.is_multiple_of(5_000_000) {
             debug!("Processed {} reads...", total_reads);
         }
 
@@ -460,8 +459,7 @@ pub fn count_reads(
         let gene_hits = if let Some(chrom_idx) = index.get(chrom) {
             // Extract aligned blocks from CIGAR (M/=/X operations only).
             // This avoids false overlaps with genes in introns of spliced reads.
-            let aligned_blocks =
-                cigar_to_aligned_blocks(record.pos() as u64, &record.cigar());
+            let aligned_blocks = cigar_to_aligned_blocks(record.pos() as u64, &record.cigar());
 
             let mut overlaps = Vec::new();
             for (block_start, block_end) in &aligned_blocks {
@@ -471,9 +469,7 @@ pub fn count_reads(
             // Filter by strand and deduplicate gene IDs
             let mut genes_hit: Vec<String> = overlaps
                 .iter()
-                .filter(|iv| {
-                    strand_matches(is_reverse, is_read1, paired, iv.strand, stranded)
-                })
+                .filter(|iv| strand_matches(is_reverse, is_read1, paired, iv.strand, stranded))
                 .map(|iv| iv.gene_id.clone())
                 .collect();
             genes_hit.sort_unstable();
@@ -535,7 +531,11 @@ pub fn count_reads(
             // For the fragment, use read1's dup/multi status (featureCounts
             // considers a fragment as duplicate if read1 is flagged as duplicate)
             let frag_is_dup = if is_read1 { is_dup } else { mate_info.is_dup };
-            let frag_is_multi = if is_read1 { is_multi } else { mate_info.is_multi };
+            let frag_is_multi = if is_read1 {
+                is_multi
+            } else {
+                mate_info.is_multi
+            };
 
             // Update N totals (once per fragment)
             n_multi_dup += 1;
@@ -555,39 +555,46 @@ pub fn count_reads(
             //
             // If only one mate has gene hits (the other overlaps nothing),
             // we use that mate's gene set directly.
-            let combined_genes: Vec<String> = if mate_info.gene_hits.is_empty() && gene_hits.is_empty() {
-                Vec::new()
-            } else if mate_info.gene_hits.is_empty() {
-                gene_hits
-            } else if gene_hits.is_empty() {
-                mate_info.gene_hits
-            } else {
-                // Both mates have gene hits - use INTERSECTION
-                let set_a: std::collections::HashSet<&String> = mate_info.gene_hits.iter().collect();
-                let intersection: Vec<String> = gene_hits
-                    .iter()
-                    .filter(|g| set_a.contains(g))
-                    .cloned()
-                    .collect();
-                if intersection.is_empty() {
-                    // Mates disagree on gene assignment - treat as ambiguous
-                    // by returning the union (which will have len > 1)
-                    let mut union = mate_info.gene_hits;
-                    union.extend(gene_hits);
-                    union.sort_unstable();
-                    union.dedup();
-                    union
+            let combined_genes: Vec<String> =
+                if mate_info.gene_hits.is_empty() && gene_hits.is_empty() {
+                    Vec::new()
+                } else if mate_info.gene_hits.is_empty() {
+                    gene_hits
+                } else if gene_hits.is_empty() {
+                    mate_info.gene_hits
                 } else {
-                    intersection
-                }
-            };
+                    // Both mates have gene hits - use INTERSECTION
+                    let set_a: std::collections::HashSet<&String> =
+                        mate_info.gene_hits.iter().collect();
+                    let intersection: Vec<String> = gene_hits
+                        .iter()
+                        .filter(|g| set_a.contains(g))
+                        .cloned()
+                        .collect();
+                    if intersection.is_empty() {
+                        // Mates disagree on gene assignment - treat as ambiguous
+                        // by returning the union (which will have len > 1)
+                        let mut union = mate_info.gene_hits;
+                        union.extend(gene_hits);
+                        union.sort_unstable();
+                        union.dedup();
+                        union
+                    } else {
+                        intersection
+                    }
+                };
 
             // Assign to gene if unambiguous (exactly one gene from combined overlaps)
             if combined_genes.is_empty() {
                 stat_no_features += 1;
             } else if combined_genes.len() > 1 {
                 stat_ambiguous += 1;
-            } else if assign_fragment_to_gene(&combined_genes, &mut gene_counts, frag_is_dup, frag_is_multi) {
+            } else if assign_fragment_to_gene(
+                &combined_genes,
+                &mut gene_counts,
+                frag_is_dup,
+                frag_is_multi,
+            ) {
                 stat_assigned += 1;
             }
         } else {
@@ -621,7 +628,12 @@ pub fn count_reads(
             stat_no_features += 1;
         } else if mate_info.gene_hits.len() > 1 {
             stat_ambiguous += 1;
-        } else if assign_fragment_to_gene(&mate_info.gene_hits, &mut gene_counts, mate_info.is_dup, mate_info.is_multi) {
+        } else if assign_fragment_to_gene(
+            &mate_info.gene_hits,
+            &mut gene_counts,
+            mate_info.is_dup,
+            mate_info.is_multi,
+        ) {
             stat_assigned += 1;
         }
     }

@@ -248,19 +248,11 @@ fn test_all_output_files_generated() {
 
     for file in &expected_files {
         let path = format!("{}/{}", outdir, file);
-        assert!(
-            Path::new(&path).exists(),
-            "Missing output file: {}",
-            file
-        );
+        assert!(Path::new(&path).exists(), "Missing output file: {}", file);
 
         // Check file is non-empty
         let metadata = fs::metadata(&path).unwrap();
-        assert!(
-            metadata.len() > 0,
-            "Output file is empty: {}",
-            file
-        );
+        assert!(metadata.len() > 0, "Output file is empty: {}", file);
     }
 
     // Cleanup
@@ -328,10 +320,7 @@ fn test_mqc_intercept_format() {
     // Check MultiQC intercept file format
     let content = fs::read_to_string(format!("{}/test_dup_intercept_mqc.txt", outdir)).unwrap();
     // Skip YAML comment lines (starting with #)
-    let data_lines: Vec<&str> = content
-        .lines()
-        .filter(|l| !l.starts_with('#'))
-        .collect();
+    let data_lines: Vec<&str> = content.lines().filter(|l| !l.starts_with('#')).collect();
     assert!(data_lines.len() >= 2, "MultiQC intercept file too short");
 
     // First data line should be a header with "Sample" and "dupRadar_intercept"
@@ -369,10 +358,7 @@ fn test_mqc_curve_format() {
     let content =
         fs::read_to_string(format!("{}/test_duprateExpDensCurve_mqc.txt", outdir)).unwrap();
     // Skip YAML comment lines (starting with #)
-    let data_lines: Vec<&str> = content
-        .lines()
-        .filter(|l| !l.starts_with('#'))
-        .collect();
+    let data_lines: Vec<&str> = content.lines().filter(|l| !l.starts_with('#')).collect();
     // Header + at least some data points (101 evenly spaced + header = 102)
     assert!(
         data_lines.len() >= 3,
@@ -382,11 +368,7 @@ fn test_mqc_curve_format() {
 
     // Should have a header line with 2 columns
     let header_parts: Vec<&str> = data_lines[0].split('\t').collect();
-    assert_eq!(
-        header_parts.len(),
-        2,
-        "Curve header should have 2 columns"
-    );
+    assert_eq!(header_parts.len(), 2, "Curve header should have 2 columns");
 
     // Data lines should have numeric values
     for line in &data_lines[1..] {

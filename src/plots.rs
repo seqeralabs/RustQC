@@ -121,7 +121,7 @@ fn estimate_density(x: &[f64], y: &[f64], nbins: usize) -> Vec<f64> {
         let iy = fy.floor() as i32;
         let sx = fx - ix as f64; // fractional x
         let sy = fy - iy as f64; // fractional y
-        // Distribute weight to 4 corners
+                                 // Distribute weight to 4 corners
         for (dx, wx) in [(0i32, 1.0 - sx), (1, sx)] {
             for (dy, wy) in [(0i32, 1.0 - sy), (1, sy)] {
                 let gx = ix + dx;
@@ -135,6 +135,7 @@ fn estimate_density(x: &[f64], y: &[f64], nbins: usize) -> Vec<f64> {
 
     // Anisotropic Gaussian smoothing (matching bkde2D with tau=3.4)
     let mut smoothed = vec![vec![0.0f64; grid_size]; grid_size];
+    #[allow(clippy::needless_range_loop)] // bx/by used as integer coordinates for offset arithmetic
     for bx in 0..grid_size {
         for by in 0..grid_size {
             if grid[bx][by] == 0.0 {
@@ -145,14 +146,9 @@ fn estimate_density(x: &[f64], y: &[f64], nbins: usize) -> Vec<f64> {
                 for dy in -radius_y..=radius_y {
                     let nx = bx as i32 + dx;
                     let ny = by as i32 + dy;
-                    if nx >= 0
-                        && (nx as usize) < grid_size
-                        && ny >= 0
-                        && (ny as usize) < grid_size
+                    if nx >= 0 && (nx as usize) < grid_size && ny >= 0 && (ny as usize) < grid_size
                     {
-                        let w = (-(dx * dx) as f64 / sigma2_x
-                            - (dy * dy) as f64 / sigma2_y)
-                            .exp();
+                        let w = (-(dx * dx) as f64 / sigma2_x - (dy * dy) as f64 / sigma2_y).exp();
                         smoothed[nx as usize][ny as usize] += c * w;
                     }
                 }
@@ -228,6 +224,7 @@ fn quantile(sorted: &[f64], p: f64) -> f64 {
 ///
 /// plotters has no native dashed-line support, so we draw small segments
 /// separated by gaps.
+#[allow(clippy::too_many_arguments)]
 fn draw_dotted_vline<DB: DrawingBackend>(
     root: &DrawingArea<DB, plotters::coord::Shift>,
     x: i32,
@@ -241,8 +238,11 @@ fn draw_dotted_vline<DB: DrawingBackend>(
     let mut y = y_top;
     while y < y_bot {
         let ye = (y + dash).min(y_bot);
-        root.draw(&PathElement::new(vec![(x, y), (x, ye)], color.stroke_width(sw)))
-            .ok();
+        root.draw(&PathElement::new(
+            vec![(x, y), (x, ye)],
+            color.stroke_width(sw),
+        ))
+        .ok();
         y = ye + gap;
     }
 }
@@ -317,7 +317,7 @@ where
         .y_labels(21) // step=5 on 0-100, then filter to multiples of 25
         .y_label_formatter(&|v| {
             let iv = v.round() as i32;
-            if iv >= 0 && iv <= 100 && iv % 25 == 0 && (*v - iv as f64).abs() < 0.1 {
+            if (0..=100).contains(&iv) && iv % 25 == 0 && (*v - iv as f64).abs() < 0.1 {
                 format!("{}", iv)
             } else {
                 String::new()
@@ -329,15 +329,11 @@ where
 
     // ── points (data order, matching R's plot() behavior) ─────────────
     // R draws points in data order with pch=20 cex=0.25 → tiny filled dots.
-     // R's pch=20 with cex=0.25 draws tiny filled circles.
+    // R's pch=20 with cex=0.25 draws tiny filled circles.
     // Circle radius 1 at our scale gives the closest match.
     for i in 0..xd.len() {
         let c = density_color(densities[i]);
-        chart.draw_series(std::iter::once(Circle::new(
-            (xd[i], yd[i]),
-            1,
-            c.filled(),
-        )))?;
+        chart.draw_series(std::iter::once(Circle::new((xd[i], yd[i]), 1, c.filled())))?;
     }
 
     // ── fit curve: R uses col='black', lwd=2, lty=3 (dotted) ──────────
@@ -369,7 +365,7 @@ where
         if seg_idx >= limit {
             if seg_on && seg_pts.len() >= 2 {
                 chart.draw_series(LineSeries::new(
-                    seg_pts.drain(..).collect::<Vec<_>>(),
+                    std::mem::take(&mut seg_pts),
                     BLACK.stroke_width(curve_sw),
                 ))?;
             }
@@ -428,7 +424,11 @@ where
         let ly = pa_y.0 + (pxs * 8.0) as i32;
         root.draw(&Rectangle::new(
             [(lx, ly), (lx + lw, ly + lh)],
-            ShapeStyle { color: WHITE.to_rgba(), filled: true, stroke_width: 0 },
+            ShapeStyle {
+                color: WHITE.to_rgba(),
+                filled: true,
+                stroke_width: 0,
+            },
         ))?;
         root.draw(&Rectangle::new(
             [(lx, ly), (lx + lw, ly + lh)],
@@ -459,7 +459,11 @@ where
         let samp_x = lx + (pxs * 4.0) as i32;
         root.draw(&Rectangle::new(
             [(lx, ly), (lx + lw, ly + lh)],
-            ShapeStyle { color: WHITE.to_rgba(), filled: true, stroke_width: 0 },
+            ShapeStyle {
+                color: WHITE.to_rgba(),
+                filled: true,
+                stroke_width: 0,
+            },
         ))?;
         root.draw(&Rectangle::new(
             [(lx, ly), (lx + lw, ly + lh)],
@@ -467,8 +471,16 @@ where
         ))?;
         let mut cy = ly + (pxs * 5.0) as i32;
         // "1 read/bp" with red dashed sample line
-        draw_dotted_vline(&root, samp_x + (pxs * 7.0) as i32, cy, cy + line_h - 2, &RED, sw,
-                          (pxs * 3.0) as i32, (pxs * 2.0) as i32);
+        draw_dotted_vline(
+            &root,
+            samp_x + (pxs * 7.0) as i32,
+            cy,
+            cy + line_h - 2,
+            &RED,
+            sw,
+            (pxs * 3.0) as i32,
+            (pxs * 2.0) as i32,
+        );
         root.draw(&Text::new(
             "1 read/bp",
             (txt_x, cy),
@@ -476,8 +488,16 @@ where
         ))?;
         cy += line_h;
         // "0.5 RPKM" with green dashed sample line
-        draw_dotted_vline(&root, samp_x + (pxs * 7.0) as i32, cy, cy + line_h - 2, &GREEN, sw,
-                          (pxs * 3.0) as i32, (pxs * 2.0) as i32);
+        draw_dotted_vline(
+            &root,
+            samp_x + (pxs * 7.0) as i32,
+            cy,
+            cy + line_h - 2,
+            &GREEN,
+            sw,
+            (pxs * 3.0) as i32,
+            (pxs * 2.0) as i32,
+        );
         root.draw(&Text::new(
             "0.5 RPKM",
             (txt_x, cy),
@@ -585,7 +605,12 @@ where
         } else {
             format!("{:.1}", mean_rpk)
         };
-        labels.push(format!("{} - {} % / {}", (pl * 100.0) as u32, (ph * 100.0) as u32, rpk_s));
+        labels.push(format!(
+            "{} - {} % / {}",
+            (pl * 100.0) as u32,
+            (ph * 100.0) as u32,
+            rpk_s
+        ));
         bins.push(vals);
     }
 
@@ -641,8 +666,17 @@ where
         let med = quantile(&sv, 0.5);
         let q3 = quantile(&sv, 0.75);
         let iqr = q3 - q1;
-        let wl = sv.iter().find(|&&v| v >= q1 - 1.5 * iqr).copied().unwrap_or(q1);
-        let wh = sv.iter().rev().find(|&&v| v <= q3 + 1.5 * iqr).copied().unwrap_or(q3);
+        let wl = sv
+            .iter()
+            .find(|&&v| v >= q1 - 1.5 * iqr)
+            .copied()
+            .unwrap_or(q1);
+        let wh = sv
+            .iter()
+            .rev()
+            .find(|&&v| v <= q3 + 1.5 * iqr)
+            .copied()
+            .unwrap_or(q3);
 
         let bl = idx as f64 + 0.2;
         let br = idx as f64 + 0.8;
@@ -652,7 +686,11 @@ where
         // box fill
         chart.draw_series(std::iter::once(Rectangle::new(
             [(bl, q1), (br, q3)],
-            ShapeStyle { color: gray_fill, filled: true, stroke_width: ps(1.0) },
+            ShapeStyle {
+                color: gray_fill,
+                filled: true,
+                stroke_width: ps(1.0),
+            },
         )))?;
         // box border
         chart.draw_series(std::iter::once(Rectangle::new(
@@ -666,7 +704,10 @@ where
         ))?;
         // whiskers + caps
         for &(from, to, cap_y) in &[(q1, wl, wl), (q3, wh, wh)] {
-            chart.draw_series(LineSeries::new(vec![(cx, from), (cx, to)], BLACK.stroke_width(ps(1.0))))?;
+            chart.draw_series(LineSeries::new(
+                vec![(cx, from), (cx, to)],
+                BLACK.stroke_width(ps(1.0)),
+            ))?;
             chart.draw_series(LineSeries::new(
                 vec![(bl + cap, cap_y), (br - cap, cap_y)],
                 BLACK.stroke_width(ps(1.0)),
@@ -763,11 +804,19 @@ where
         .y_desc("Frequency")
         .x_label_formatter(&|v| {
             let r = (*v * 10.0).round() / 10.0;
-            if (r - r.round()).abs() < 0.01 { format_rpk_tick(r) } else { String::new() }
+            if (r - r.round()).abs() < 0.01 {
+                format_rpk_tick(r)
+            } else {
+                String::new()
+            }
         })
         .y_labels(6)
         .y_label_formatter(&|v| {
-            if *v == v.floor() && *v >= 0.0 { format!("{}", *v as i32) } else { String::new() }
+            if *v == v.floor() && *v >= 0.0 {
+                format!("{}", *v as i32)
+            } else {
+                String::new()
+            }
         })
         .axis_desc_style(("sans-serif", ps(14.0)))
         .label_style(("sans-serif", ps(12.0)))
@@ -775,12 +824,18 @@ where
 
     let gray = RGBAColor(190, 190, 190, 1.0);
     for (i, &c) in hist.iter().enumerate() {
-        if c == 0 { continue; }
+        if c == 0 {
+            continue;
+        }
         let x0 = x_min + i as f64 * bw;
         let x1 = x0 + bw;
         chart.draw_series(std::iter::once(Rectangle::new(
             [(x0, 0.0), (x1, c as f64)],
-            ShapeStyle { color: gray, filled: true, stroke_width: 0 },
+            ShapeStyle {
+                color: gray,
+                filled: true,
+                stroke_width: 0,
+            },
         )))?;
         chart.draw_series(std::iter::once(Rectangle::new(
             [(x0, 0.0), (x1, c as f64)],
@@ -842,7 +897,10 @@ pub fn write_mqc_intercept(
     writeln!(f, "#     dupRadar_intercept:")?;
     writeln!(f, "#         title: 'dupRadar int'")?;
     writeln!(f, "#         namespace: 'dupRadar'")?;
-    writeln!(f, "#         description: 'dupRadar duplication rate at low read counts'")?;
+    writeln!(
+        f,
+        "#         description: 'dupRadar duplication rate at low read counts'"
+    )?;
     writeln!(f, "#         max: 100")?;
     writeln!(f, "#         min: 0")?;
     writeln!(f, "#         format: '{{:.2f}}'")?;
@@ -852,11 +910,7 @@ pub fn write_mqc_intercept(
 }
 
 /// Write a MultiQC-compatible line-graph curve file.
-pub fn write_mqc_curve(
-    fit: &FitResult,
-    dm: &DupMatrix,
-    path: &std::path::Path,
-) -> Result<()> {
+pub fn write_mqc_curve(fit: &FitResult, dm: &DupMatrix, path: &std::path::Path) -> Result<()> {
     use std::io::Write;
     let mut f = std::fs::File::create(path)?;
     writeln!(f, "# id: 'dupradar'")?;
@@ -871,7 +925,12 @@ pub fn write_mqc_curve(
     writeln!(f, "#     ymax: 100")?;
     writeln!(f, "#     xlog: True")?;
 
-    let rpks: Vec<f64> = dm.rows.iter().filter(|r| r.rpk > 0.0).map(|r| r.rpk).collect();
+    let rpks: Vec<f64> = dm
+        .rows
+        .iter()
+        .filter(|r| r.rpk > 0.0)
+        .map(|r| r.rpk)
+        .collect();
     if rpks.is_empty() {
         return Ok(());
     }
@@ -906,7 +965,7 @@ mod tests {
         assert_eq!((c0.0, c0.1, c0.2), (0, 255, 255)); // cyan
         let c1 = density_color(1.0);
         assert_eq!((c1.0, c1.1, c1.2), (255, 0, 0)); // red
-        // Mid-point should be green
+                                                     // Mid-point should be green
         let c_mid = density_color(0.5);
         assert_eq!((c_mid.0, c_mid.1, c_mid.2), (0, 255, 0)); // green
     }
