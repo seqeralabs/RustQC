@@ -16,6 +16,54 @@ use log::{debug, info};
 use rust_htslib::bam::{self, Read as BamRead};
 use std::collections::HashMap;
 
+// ===================================================================
+// Gene ID interning
+// ===================================================================
+
+/// Interned gene ID index. Avoids cloning gene ID strings in the hot loop.
+type GeneIdx = u32;
+
+/// Maps gene ID strings to compact integer indices for fast, allocation-free
+/// lookups in the counting hot path.
+#[derive(Debug)]
+struct GeneIdInterner {
+    /// Maps gene ID string to its index
+    id_to_idx: HashMap<String, GeneIdx>,
+    /// Maps index back to gene ID string (for output)
+    idx_to_id: Vec<String>,
+}
+
+impl GeneIdInterner {
+    /// Build an interner from the gene map, preserving insertion order.
+    fn from_genes(genes: &IndexMap<String, Gene>) -> Self {
+        let mut id_to_idx = HashMap::with_capacity(genes.len());
+        let mut idx_to_id = Vec::with_capacity(genes.len());
+        for (i, gene_id) in genes.keys().enumerate() {
+            id_to_idx.insert(gene_id.clone(), i as GeneIdx);
+            idx_to_id.push(gene_id.clone());
+        }
+        GeneIdInterner {
+            id_to_idx,
+            idx_to_id,
+        }
+    }
+
+    /// Look up the index for a gene ID. Returns None if the gene is unknown.
+    fn get(&self, gene_id: &str) -> Option<GeneIdx> {
+        self.id_to_idx.get(gene_id).copied()
+    }
+
+    /// Get the gene ID string for an index.
+    fn name(&self, idx: GeneIdx) -> &str {
+        &self.idx_to_id[idx as usize]
+    }
+
+    /// Number of interned gene IDs.
+    fn len(&self) -> usize {
+        self.idx_to_id.len()
+    }
+}
+
 /// Flag indicating the read is a PCR or optical duplicate (0x400).
 const BAM_FDUP: u16 = 0x400;
 /// Flag indicating the read is unmapped (0x4).
@@ -72,14 +120,15 @@ impl GeneCounts {
 /// Assign a fragment to a gene if exactly one gene was hit.
 /// Returns true if the fragment was assigned to a gene.
 fn assign_fragment_to_gene(
-    gene_hits: &[String],
-    gene_counts: &mut IndexMap<String, GeneCounts>,
+    gene_hits: &[GeneIdx],
+    gene_counts: &mut [GeneCounts],
     is_dup: bool,
     is_multi: bool,
 ) -> bool {
     if gene_hits.len() == 1 {
-        if let Some(counts) = gene_counts.get_mut(gene_hits[0].as_str()) {
-            counts.count_fragment(is_dup, is_multi);
+        let idx = gene_hits[0] as usize;
+        if idx < gene_counts.len() {
+            gene_counts[idx].count_fragment(is_dup, is_multi);
             return true;
         }
     }
@@ -111,8 +160,8 @@ struct GeneInterval {
     start: u64,
     /// End position (0-based, half-open)
     end: u64,
-    /// Gene ID index in the genes map
-    gene_id: String,
+    /// Interned gene ID index (avoids String cloning in hot path)
+    gene_idx: GeneIdx,
     /// Strand
     strand: char,
 }
@@ -178,17 +227,27 @@ impl ChromIndex {
 }
 
 /// Build a spatial index from gene annotations for fast overlap queries.
-fn build_index(genes: &IndexMap<String, Gene>) -> HashMap<String, ChromIndex> {
+///
+/// Uses the interner to store compact gene ID indices in each interval,
+/// avoiding per-exon String cloning.
+fn build_index(
+    genes: &IndexMap<String, Gene>,
+    interner: &GeneIdInterner,
+) -> HashMap<String, ChromIndex> {
     let mut chrom_intervals: HashMap<String, Vec<GeneInterval>> = HashMap::new();
 
     for gene in genes.values() {
-        // Add each exon as an interval (featureCounts assigns reads at exon level)
+        // Look up the interned gene index once per gene
+        let gene_idx = interner
+            .get(&gene.gene_id)
+            .expect("gene must be in interner"); // safe: interner built from same gene map
+                                                 // Add each exon as an interval (featureCounts assigns reads at exon level)
         for exon in &gene.exons {
             let interval = GeneInterval {
                 // Convert from 1-based inclusive GTF to 0-based half-open
                 start: exon.start - 1,
                 end: exon.end,
-                gene_id: gene.gene_id.clone(),
+                gene_idx,
                 strand: exon.strand,
             };
             chrom_intervals
@@ -295,8 +354,8 @@ fn cigar_to_aligned_blocks(
 /// properly determine gene overlap (featureCounts checks both mates
 /// independently). This struct stores the information we need from each mate.
 struct MateInfo {
-    /// Gene IDs this mate overlaps (after strand filtering, deduplicated)
-    gene_hits: Vec<String>,
+    /// Interned gene ID indices this mate overlaps (after strand filtering, deduplicated)
+    gene_hits: Vec<GeneIdx>,
     /// Whether this read is a PCR/optical duplicate
     is_dup: bool,
     /// Whether this read is a multimapper (NH > 1)
@@ -337,14 +396,15 @@ pub fn count_reads(
     chrom_mapping: &HashMap<String, String>,
     chrom_prefix: Option<&str>,
 ) -> Result<CountResult> {
-    // Build spatial index
-    let index = build_index(genes);
+    // Build gene ID interner for allocation-free lookups in the hot loop
+    let interner = GeneIdInterner::from_genes(genes);
 
-    // Initialize gene counts
-    let mut gene_counts: IndexMap<String, GeneCounts> = IndexMap::new();
-    for gene_id in genes.keys() {
-        gene_counts.insert(gene_id.clone(), GeneCounts::default());
-    }
+    // Build spatial index (uses interned gene indices)
+    let index = build_index(genes, &interner);
+
+    // Initialize gene counts as a flat Vec indexed by GeneIdx
+    // (faster than IndexMap lookups in the hot path)
+    let mut gene_counts: Vec<GeneCounts> = vec![GeneCounts::default(); interner.len()];
 
     // Open BAM file
     let mut bam = bam::Reader::from_path(bam_path)
@@ -460,7 +520,7 @@ pub fn count_reads(
         };
 
         // Find gene overlaps using CIGAR-aware aligned blocks
-        let gene_hits = if let Some(chrom_idx) = index.get(chrom) {
+        let gene_hits: Vec<GeneIdx> = if let Some(chrom_idx) = index.get(chrom) {
             // Extract aligned blocks from CIGAR (M/=/X operations only).
             // This avoids false overlaps with genes in introns of spliced reads.
             let aligned_blocks = cigar_to_aligned_blocks(record.pos() as u64, &record.cigar());
@@ -470,11 +530,11 @@ pub fn count_reads(
                 overlaps.extend(chrom_idx.query(*block_start, *block_end));
             }
 
-            // Filter by strand and deduplicate gene IDs
-            let mut genes_hit: Vec<String> = overlaps
+            // Filter by strand and deduplicate gene indices (no string cloning)
+            let mut genes_hit: Vec<GeneIdx> = overlaps
                 .iter()
                 .filter(|iv| strand_matches(is_reverse, is_read1, paired, iv.strand, stranded))
-                .map(|iv| iv.gene_id.clone())
+                .map(|iv| iv.gene_idx)
                 .collect();
             genes_hit.sort_unstable();
             genes_hit.dedup();
@@ -587,27 +647,27 @@ pub fn count_reads(
             // The gene(s) with the highest score win. If multiple genes share the
             // highest score, the fragment is marked ambiguous. If only one mate has
             // gene hits (the other overlaps nothing), that mate's genes all score 1.
-            let combined_genes: Vec<String> =
+            let combined_genes: Vec<GeneIdx> =
                 if mate_info.gene_hits.is_empty() && gene_hits.is_empty() {
                     Vec::new()
                 } else {
-                    // Build a score map: gene_id -> number of ends overlapping (1 or 2)
-                    let mut scores: HashMap<&str, u8> = HashMap::new();
-                    for g in &mate_info.gene_hits {
-                        *scores.entry(g.as_str()).or_insert(0) += 1;
+                    // Build a score map: gene_idx -> number of ends overlapping (1 or 2)
+                    let mut scores: HashMap<GeneIdx, u8> = HashMap::new();
+                    for &g in &mate_info.gene_hits {
+                        *scores.entry(g).or_insert(0) += 1;
                     }
-                    for g in &gene_hits {
-                        *scores.entry(g.as_str()).or_insert(0) += 1;
+                    for &g in &gene_hits {
+                        *scores.entry(g).or_insert(0) += 1;
                     }
 
                     // Find the maximum score
                     let max_score = scores.values().copied().max().unwrap_or(0);
 
                     // Collect all genes with the maximum score
-                    let mut best: Vec<String> = scores
+                    let mut best: Vec<GeneIdx> = scores
                         .iter()
                         .filter(|(_, &s)| s == max_score)
-                        .map(|(&g, _)| g.to_string())
+                        .map(|(&g, _)| g)
                         .collect();
                     best.sort_unstable();
                     best
@@ -679,7 +739,7 @@ pub fn count_reads(
     // Detect chromosome name mismatch: if we processed mapped reads but
     // no genes received any counts, the GTF and BAM likely use different
     // chromosome naming conventions (e.g., "chr1" vs "1").
-    let genes_with_reads = gene_counts.values().filter(|c| c.all_multi > 0).count();
+    let genes_with_reads = gene_counts.iter().filter(|c| c.all_multi > 0).count();
     if total_mapped > 0 && genes_with_reads == 0 {
         // Collect example chromosome names from each source for the error message
         let bam_chroms: Vec<&str> = tid_to_name.iter().take(5).map(|s| s.as_str()).collect();
@@ -706,8 +766,18 @@ pub fn count_reads(
         );
     }
 
+    // Convert flat Vec<GeneCounts> back to IndexMap<String, GeneCounts> for output,
+    // preserving the original gene insertion order from the GTF.
+    let gene_counts_map: IndexMap<String, GeneCounts> = (0..interner.len())
+        .map(|i| {
+            let name = interner.name(i as GeneIdx).to_string();
+            let counts = std::mem::take(&mut gene_counts[i]);
+            (name, counts)
+        })
+        .collect();
+
     Ok(CountResult {
-        gene_counts,
+        gene_counts: gene_counts_map,
         total_reads_multi_dup: n_multi_dup,
         total_reads_multi_nodup: n_multi_nodup,
         total_reads_unique_dup: n_unique_dup,
