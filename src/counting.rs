@@ -118,34 +118,58 @@ struct GeneInterval {
 
 /// A simple interval index for a single chromosome.
 /// Intervals are sorted by start position for binary search.
+/// Augmented with max_end for efficient overlap queries.
 #[derive(Debug)]
 struct ChromIndex {
     intervals: Vec<GeneInterval>,
+    /// For each position i, the maximum end value among intervals[0..=i].
+    /// This allows pruning the scan: if max_end[i] <= query_start, all
+    /// intervals from 0..=i can be skipped.
+    max_end: Vec<u64>,
 }
 
 impl ChromIndex {
     fn new(mut intervals: Vec<GeneInterval>) -> Self {
         intervals.sort_by_key(|iv| (iv.start, iv.end));
-        ChromIndex { intervals }
+
+        // Build max_end array
+        let mut max_end = Vec::with_capacity(intervals.len());
+        let mut running_max = 0u64;
+        for iv in &intervals {
+            running_max = running_max.max(iv.end);
+            max_end.push(running_max);
+        }
+
+        ChromIndex { intervals, max_end }
     }
 
     /// Find all gene intervals overlapping the query range [start, end).
-    /// Returns gene_ids of overlapping genes (may contain duplicates if
-    /// multiple exons of the same gene overlap).
+    /// An interval overlaps if interval.start < end AND interval.end > start.
     fn query(&self, start: u64, end: u64) -> Vec<&GeneInterval> {
         let mut results = Vec::new();
+        if self.intervals.is_empty() {
+            return results;
+        }
 
-        // Binary search for the first interval that could overlap
-        // An interval overlaps [start, end) if interval.start < end AND interval.end > start
-        let search_start = self.intervals.partition_point(|iv| iv.end <= start);
+        // Quick check: if the max end of all intervals <= start, no overlaps possible
+        if *self.max_end.last().unwrap() <= start {
+            return results;
+        }
 
-        for iv in &self.intervals[search_start..] {
-            if iv.start >= end {
-                break;
+        // Find the first interval where iv.start >= end using binary search.
+        // All intervals at or after this index have start >= end, so they can't overlap.
+        let upper = self.intervals.partition_point(|iv| iv.start < end);
+
+        // Now scan intervals [0..upper) and check if iv.end > start.
+        // Use max_end to find a lower bound: find the leftmost position where
+        // max_end > start. All intervals before that can't overlap.
+        // Binary search on max_end (which is monotonically non-decreasing).
+        let lower = self.max_end[..upper].partition_point(|&me| me <= start);
+
+        for iv in &self.intervals[lower..upper] {
+            if iv.end > start {
+                results.push(iv);
             }
-            // iv.start < end (guaranteed since we didn't break)
-            // iv.end > start (guaranteed since partition_point excludes iv.end <= start)
-            results.push(iv);
         }
 
         results
@@ -278,6 +302,11 @@ struct MateInfo {
     is_multi: bool,
 }
 
+/// Key for the mate buffer: (read_name, expected_pair_key)
+/// For a read at position P with mate at position M, the pair key is (min(P,M), max(P,M))
+/// so both mates of the same alignment pair produce the same key.
+type MateBufferKey = (Vec<u8>, (i64, i64));
+
 /// Count reads from a BAM file and assign them to genes.
 ///
 /// Performs four simultaneous counting modes matching dupRadar's approach:
@@ -334,15 +363,20 @@ pub fn count_reads(
     let mut total_multi: u64 = 0;
     let mut total_fragments: u64 = 0;
 
+    // featureCounts-style assignment statistics
+    let mut stat_assigned: u64 = 0;
+    let mut stat_ambiguous: u64 = 0;
+    let mut stat_no_features: u64 = 0;
     // Totals for N calculation (mapped reads per mode)
     let mut n_multi_dup: u64 = 0;
     let mut n_multi_nodup: u64 = 0;
     let mut n_unique_dup: u64 = 0;
     let mut n_unique_nodup: u64 = 0;
 
-    // For paired-end: buffer mates by read name to combine their overlaps.
-    // Key is read_name; when the second mate arrives we combine gene hits.
-    let mut mate_buffer: HashMap<Vec<u8>, MateInfo> = HashMap::new();
+    // For paired-end: buffer mates by (read_name, position_pair) to combine
+    // their overlaps. Using position pairs ensures secondary alignments at
+    // different locations form separate fragments (matching featureCounts).
+    let mut mate_buffer: HashMap<MateBufferKey, MateInfo> = HashMap::new();
 
     // Iterate over all records
     let mut record = bam::Record::new();
@@ -361,8 +395,9 @@ pub fn count_reads(
             continue;
         }
 
-        // Skip secondary and supplementary alignments
-        if flags & BAM_FSECONDARY != 0 || flags & BAM_FSUPPLEMENTARY != 0 {
+        // Skip supplementary alignments (but NOT secondary - featureCounts processes
+        // secondary alignments as separate counting events for multi-mapped reads)
+        if flags & BAM_FSUPPLEMENTARY != 0 {
             continue;
         }
 
@@ -456,7 +491,13 @@ pub fn count_reads(
             total_fragments += 1;
 
             // Assign to gene if unambiguous
-            assign_fragment_to_gene(&gene_hits, &mut gene_counts, is_dup, is_multi);
+            if gene_hits.is_empty() {
+                stat_no_features += 1;
+            } else if gene_hits.len() > 1 {
+                stat_ambiguous += 1;
+            } else if assign_fragment_to_gene(&gene_hits, &mut gene_counts, is_dup, is_multi) {
+                stat_assigned += 1;
+            }
             continue;
         }
 
@@ -466,9 +507,23 @@ pub fn count_reads(
         // a fragment to a gene if EITHER mate overlaps that gene's exons.
         // We buffer the first mate we see and combine overlaps when the second
         // mate arrives. The duplicate flag from read1 is used for the fragment.
+        //
+        // For multi-mapped reads with secondary alignments, each alignment
+        // location pair is counted as a separate fragment. We use
+        // (read_name, position_pair) as the buffer key to distinguish them.
         let read_name = record.qname().to_vec();
+        let own_pos = record.pos();
+        let mate_pos_val = record.mpos();
 
-        if let Some(mate_info) = mate_buffer.remove(&read_name) {
+        // Create a position pair key that both mates will compute identically
+        let pos_pair = if own_pos <= mate_pos_val {
+            (own_pos, mate_pos_val)
+        } else {
+            (mate_pos_val, own_pos)
+        };
+        let buffer_key: MateBufferKey = (read_name.clone(), pos_pair);
+
+        if let Some(mate_info) = mate_buffer.remove(&buffer_key) {
             // We've seen the other mate - combine overlaps and assign
             total_fragments += 1;
 
@@ -489,23 +544,55 @@ pub fn count_reads(
                 n_unique_nodup += 1;
             }
 
-            // Combine gene hits from both mates
-            let mut combined_genes = mate_info.gene_hits;
-            combined_genes.extend(gene_hits);
-            combined_genes.sort_unstable();
-            combined_genes.dedup();
+            // Combine gene hits from both mates using INTERSECTION strategy
+            // (matching featureCounts behaviour).
+            //
+            // If both mates overlap genes, we use the INTERSECTION of their
+            // gene sets.  This resolves spurious ambiguity when one mate
+            // barely clips a neighbouring gene's exon while the other mate
+            // clearly overlaps only the intended gene.
+            //
+            // If only one mate has gene hits (the other overlaps nothing),
+            // we use that mate's gene set directly.
+            let combined_genes: Vec<String> = if mate_info.gene_hits.is_empty() && gene_hits.is_empty() {
+                Vec::new()
+            } else if mate_info.gene_hits.is_empty() {
+                gene_hits
+            } else if gene_hits.is_empty() {
+                mate_info.gene_hits
+            } else {
+                // Both mates have gene hits - use INTERSECTION
+                let set_a: std::collections::HashSet<&String> = mate_info.gene_hits.iter().collect();
+                let intersection: Vec<String> = gene_hits
+                    .iter()
+                    .filter(|g| set_a.contains(g))
+                    .cloned()
+                    .collect();
+                if intersection.is_empty() {
+                    // Mates disagree on gene assignment - treat as ambiguous
+                    // by returning the union (which will have len > 1)
+                    let mut union = mate_info.gene_hits;
+                    union.extend(gene_hits);
+                    union.sort_unstable();
+                    union.dedup();
+                    union
+                } else {
+                    intersection
+                }
+            };
 
             // Assign to gene if unambiguous (exactly one gene from combined overlaps)
-            assign_fragment_to_gene(
-                &combined_genes,
-                &mut gene_counts,
-                frag_is_dup,
-                frag_is_multi,
-            );
+            if combined_genes.is_empty() {
+                stat_no_features += 1;
+            } else if combined_genes.len() > 1 {
+                stat_ambiguous += 1;
+            } else if assign_fragment_to_gene(&combined_genes, &mut gene_counts, frag_is_dup, frag_is_multi) {
+                stat_assigned += 1;
+            }
         } else {
             // First mate seen - buffer it and wait for the other mate
             mate_buffer.insert(
-                read_name,
+                buffer_key,
                 MateInfo {
                     gene_hits,
                     is_dup,
@@ -519,7 +606,7 @@ pub fn count_reads(
     // These are reads whose mate was filtered out (e.g., mate unmapped,
     // mate on a different chromosome and filtered by featureCounts, etc.)
     // featureCounts by default still counts these as fragments.
-    for (_name, mate_info) in mate_buffer.drain() {
+    for (_key, mate_info) in mate_buffer.drain() {
         total_fragments += 1;
 
         n_multi_dup += 1;
@@ -529,17 +616,22 @@ pub fn count_reads(
             n_unique_nodup += 1;
         }
 
-        assign_fragment_to_gene(
-            &mate_info.gene_hits,
-            &mut gene_counts,
-            mate_info.is_dup,
-            mate_info.is_multi,
-        );
+        if mate_info.gene_hits.is_empty() {
+            stat_no_features += 1;
+        } else if mate_info.gene_hits.len() > 1 {
+            stat_ambiguous += 1;
+        } else if assign_fragment_to_gene(&mate_info.gene_hits, &mut gene_counts, mate_info.is_dup, mate_info.is_multi) {
+            stat_assigned += 1;
+        }
     }
 
     info!(
         "Read {} total reads, {} mapped, {} fragments, {} duplicates, {} multimappers",
         total_reads, total_mapped, total_fragments, total_dup, total_multi
+    );
+    info!(
+        "Assignment stats: {} assigned, {} ambiguous, {} no_features (total fragments: {})",
+        stat_assigned, stat_ambiguous, stat_no_features, total_fragments
     );
 
     // Detect chromosome name mismatch: if we processed mapped reads but

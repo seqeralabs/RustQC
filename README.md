@@ -4,6 +4,59 @@ A fast Rust reimplementation of [dupRadar](https://github.com/ssayols/dupRadar) 
 
 dupRust analyzes duplicate-marked BAM files to compute per-gene duplication rates as a function of expression level. It produces the same outputs as the original dupRadar R/Bioconductor package, but runs significantly faster and compiles to a single static binary with no runtime dependencies.
 
+## Comparison with dupRadar
+
+| Feature | dupRadar (R) | dupRust |
+|---------|-------------|---------|
+| Language | R | Rust |
+| Dependencies | R, Bioconductor, Rsubread | None (static binary) |
+| BAM counting | 4 separate featureCounts calls | Single-pass BAM reading |
+| Speed | Minutes per sample | Seconds per sample (~7x faster) |
+| Memory | High (R overhead) | Low |
+| Output format | Identical | Identical |
+
+### Benchmarked on GM12878 REP1 (~10 GB paired-end BAM)
+
+| Metric | dupRadar (R) | dupRust |
+| --- | --- | --- |
+| **Runtime** | 1,428 s | 198 s |
+| **Intercept** | 0.8245 | 0.8245 |
+| **Slope** | 1.6774 | 1.6774 |
+
+Unique-mapper gene counts match **exactly** across all 63,086 genes (100%). Multi-mapper counts match 95.6%.
+
+See the [benchmark README](benchmark/README.md) for full results and replication instructions.
+
+### Density scatter plots
+
+<table>
+<tr><th>dupRadar (R)</th><th>dupRust</th></tr>
+<tr>
+<td><img src="benchmark/large/dupRadar/duprateExpDens.png" width="400"></td>
+<td><img src="benchmark/large/dupRust/GM12878_REP1.markdup.sorted_duprateExpDens.png" width="400"></td>
+</tr>
+</table>
+
+### Boxplots
+
+<table>
+<tr><th>dupRadar (R)</th><th>dupRust</th></tr>
+<tr>
+<td><img src="benchmark/large/dupRadar/duprateExpBoxplot.png" width="400"></td>
+<td><img src="benchmark/large/dupRust/GM12878_REP1.markdup.sorted_duprateExpBoxplot.png" width="400"></td>
+</tr>
+</table>
+
+### Expression histograms
+
+<table>
+<tr><th>dupRadar (R)</th><th>dupRust</th></tr>
+<tr>
+<td><img src="benchmark/large/dupRadar/expressionHist.png" width="400"></td>
+<td><img src="benchmark/large/dupRust/GM12878_REP1.markdup.sorted_expressionHist.png" width="400"></td>
+</tr>
+</table>
+
 ## Installation
 
 ### From source
@@ -134,25 +187,6 @@ For an input BAM file named `sample.bam`, the following files are generated:
 4. **Logistic regression**: Fits a binomial GLM (`dupRate ~ log10(RPK)`) using iteratively reweighted least squares (IRLS) to model the relationship between expression and duplication.
 5. **Plots**: Generates density scatter, boxplot, and histogram visualizations.
 6. **MultiQC integration**: Outputs files compatible with [MultiQC](https://multiqc.info/) for pipeline reporting.
-
-## Comparison with dupRadar
-
-| Feature | dupRadar (R) | dupRust |
-|---------|-------------|---------|
-| Language | R | Rust |
-| Dependencies | R, Bioconductor, Rsubread | None (static binary) |
-| BAM counting | 4 separate featureCounts calls | Single-pass BAM reading |
-| Speed | Minutes per sample | Seconds per sample |
-| Memory | High (R overhead) | Low |
-| Output format | Identical | Identical |
-
-### Density scatter plots (GM12878 REP1, ~10 GB BAM)
-
-| dupRadar (R) | dupRust |
-|---|---|
-| ![R density](benchmark/large/r_output/duprateExpDens.png) | ![Rust density](benchmark/large/rust_output/GM12878_REP1.markdup.sorted_duprateExpDens.png) |
-
-For detailed benchmark results including runtime, count correlation, and replication instructions, see the [benchmark README](benchmark/README.md).
 
 ## Interpreting the results
 

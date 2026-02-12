@@ -2,7 +2,7 @@ library(dupRadar)
 
 bam <- "benchmark/large/GM12878_REP1.markdup.sorted.bam"
 gtf <- "benchmark/large/genes.gtf"
-outdir <- "benchmark/large/r_output"
+outdir <- "benchmark/large/dupRadar"
 dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
 
 cat("Starting R dupRadar benchmark...\n")
@@ -23,16 +23,25 @@ fit <- duprateExpFit(DupMatrix = dm)
 cat(sprintf("Intercept: %.4f\n", fit$intercept))
 cat(sprintf("Slope: %.4f\n", fit$slope))
 
-# Generate plots
+# Generate plots (PDF and PNG)
 pdf(file.path(outdir, "duprateExpDens.pdf"))
+duprateExpDensPlot(DupMatrix = dm, fit = fit)
+dev.off()
+png(file.path(outdir, "duprateExpDens.png"), width = 960, height = 960, res = 144, bg = "white")
 duprateExpDensPlot(DupMatrix = dm, fit = fit)
 dev.off()
 
 pdf(file.path(outdir, "duprateExpBoxplot.pdf"))
 duprateExpBoxplot(DupMatrix = dm)
 dev.off()
+png(file.path(outdir, "duprateExpBoxplot.png"), width = 960, height = 960, res = 144, bg = "white")
+duprateExpBoxplot(DupMatrix = dm)
+dev.off()
 
 pdf(file.path(outdir, "expressionHist.pdf"))
+expressionHist(DupMatrix = dm)
+dev.off()
+png(file.path(outdir, "expressionHist.png"), width = 960, height = 960, res = 144, bg = "white")
 expressionHist(DupMatrix = dm)
 dev.off()
 

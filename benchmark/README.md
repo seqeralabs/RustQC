@@ -1,4 +1,4 @@
-# 🧬 dupRust Benchmarks 🦀
+# dupRust Benchmarks
 
 Comparison of [dupRadar](https://bioconductor.org/packages/dupRadar/) (R/Bioconductor) and dupRust on the same input data.
 
@@ -11,18 +11,27 @@ A small test BAM file (`test.bam`) with a chr6-only GTF annotation, included in 
 | Metric | dupRadar (R) | dupRust |
 | --- | --- | --- |
 | **Intercept** | 0.03 | 0.03 |
-| **Slope** | 1.6 | 1.5 |
+| **Slope** | 1.60 | 1.60 |
 | **Genes total** | 2,905 | 2,905 |
-| **Genes with reads** | 621 | 621 |
+| **Genes with reads** | 636 | 636 |
+
+#### Count comparison
+
+| Metric | dupRadar (R) | dupRust | Exact match |
+| --- | ---: | ---: | ---: |
+| **allCounts (unique)** | 20,449 | 20,449 | 100% |
+| **filteredCounts (unique)** | 17,879 | 17,879 | 100% |
+| **allCountsMulti** | 22,812 | 22,821 | 99.6% |
+| **filteredCountsMulti** | 20,034 | 20,048 | 99.6% |
 
 ### Replication
 
 ```bash
 # dupRadar (R)
-Rscript benchmark/run_dupRadar_R.R
+Rscript benchmark/small/run_dupRadar_R.R
 
 # dupRust
-cargo run --release -- benchmark/test.bam benchmark/chr6.gtf -o benchmark/rust_output
+cargo run --release -- benchmark/small/test.bam benchmark/small/chr6.gtf -p -o benchmark/small/dupRust
 ```
 
 ---
@@ -43,35 +52,25 @@ Paired-end, unstranded, aligned to GRCh38 (Ensembl chromosome names).
 
 | Metric | dupRadar (R) | dupRust |
 | --- | --- | --- |
-| **Runtime** | 1,428 s (23.8 min) | 178 s (3.0 min) |
-| **Speedup** | — | **~8x** |
-| **Intercept** | 0.8245 | 0.8213 |
-| **Slope** | 1.6774 | 1.6859 |
+| **Runtime** | 1,428 s (23.8 min) | 198 s (3.3 min) |
+| **Speedup** | — | **~7x** |
+| **Intercept** | 0.8245 | 0.8245 |
+| **Slope** | 1.6774 | 1.6774 |
 | **Genes total** | 63,086 | 63,086 |
-| **Genes with reads** | 24,719 | 23,159 |
+| **Genes with reads** | 24,719 | 23,597 |
 
 ### Count comparison
 
-| Metric | dupRadar (R) | dupRust | Ratio |
+| Metric | dupRadar (R) | dupRust | Exact match |
 | --- | ---: | ---: | ---: |
-| **Total allCountsMulti** | 16,097,284 | 14,237,148 | 0.88 |
-| **Total filteredCountsMulti** | 4,671,832 | 4,020,122 | 0.86 |
-| **Total allCounts (unique)** | 14,710,916 | 13,694,224 | 0.93 |
-| **Total filteredCounts (unique)** | 4,305,768 | 3,830,538 | 0.89 |
+| **allCounts (unique)** | 14,654,579 | 14,654,579 | **100%** |
+| **filteredCounts (unique)** | 3,599,832 | 3,599,832 | **100%** |
+| **allCountsMulti** | 16,089,488 | 16,023,820 | 95.6% |
+| **filteredCountsMulti** | 4,503,920 | 4,459,432 | 95.1% |
 
-#### Count correlation (excluding mitochondrial genes)
+Unique-mapper counts (**allCounts** and **filteredCounts**) match exactly across all 63,086 genes. Multi-mapper counts are within ~0.4% due to minor differences in secondary alignment handling.
 
-| Metric | Pearson r |
-| --- | --- |
-| allCountsMulti | 0.973 |
-| allCounts (unique) | 0.985 |
-
-#### Per-gene exact match rates
-
-| Metric | Exact matches | Percentage |
-| --- | ---: | ---: |
-| allCountsMulti | 51,670 / 63,086 | 81.9% |
-| allCounts (unique) | 56,436 / 63,086 | 89.5% |
+Model fit parameters (**intercept** and **slope**) match to the displayed precision.
 
 ### Replication
 
@@ -117,12 +116,12 @@ cargo build --release
   benchmark/large/GM12878_REP1.markdup.sorted.bam \
   benchmark/large/genes.gtf \
   -p \
-  -o benchmark/large/rust_output \
+  -o benchmark/large/dupRust \
   -c benchmark/large/config.yaml
 ```
 
 ### Known differences
 
-- **1,221 genes** have reads in R but not Rust — these are on alternative contigs / patches not present in the BAM reference.
-- Count differences stem from Rsubread's `featureCounts` (used by dupRadar) vs dupRust's CIGAR-aware exon overlap counting. featureCounts runs 4 separate counting passes with different duplicate/multimap filters; dupRust does a single pass tracking all flags simultaneously.
-- Model fit parameters (intercept, slope) agree within ~0.5%.
+- **1,122 genes** have reads in dupRadar but not dupRust — these are on alternative contigs / patches not present in the BAM reference, or are mitochondrial genes (the BAM uses `MT` but the GTF uses `chrM`).
+- Multi-mapper count differences (~4%) stem from minor differences in how secondary alignments are paired and assigned.
+- Unique-mapper counts and model fit parameters match exactly.
