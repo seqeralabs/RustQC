@@ -1,0 +1,26 @@
+WARNING: The requested image's platform (linux/amd64) does not match the detected host platform (linux/arm64/v8) and no specific platform was requested
+reading reference bed file:  /data/chr6.bed  ...  Done! Total 15503 known splicing junctions.
+Load BAM file ...  Done
+shuffling alignments ... Done
+sampling 5% (1172) splicing reads. 552 splicing junctions. 520 known splicing junctions. 32 novel splicing junctions.
+sampling 10% (2344) splicing reads. 905 splicing junctions. 857 known splicing junctions. 48 novel splicing junctions.
+sampling 15% (3516) splicing reads. 1181 splicing junctions. 1111 known splicing junctions. 70 novel splicing junctions.
+sampling 20% (4689) splicing reads. 1438 splicing junctions. 1348 known splicing junctions. 90 novel splicing junctions.
+sampling 25% (5861) splicing reads. 1670 splicing junctions. 1557 known splicing junctions. 113 novel splicing junctions.
+sampling 30% (7033) splicing reads. 1856 splicing junctions. 1726 known splicing junctions. 130 novel splicing junctions.
+sampling 35% (8205) splicing reads. 2034 splicing junctions. 1885 known splicing junctions. 149 novel splicing junctions.
+sampling 40% (9378) splicing reads. 2195 splicing junctions. 2029 known splicing junctions. 166 novel splicing junctions.
+sampling 45% (10550) splicing reads. 2315 splicing junctions. 2131 known splicing junctions. 184 novel splicing junctions.
+sampling 50% (11722) splicing reads. 2445 splicing junctions. 2247 known splicing junctions. 198 novel splicing junctions.
+sampling 55% (12894) splicing reads. 2555 splicing junctions. 2348 known splicing junctions. 207 novel splicing junctions.
+sampling 60% (14067) splicing reads. 2667 splicing junctions. 2449 known splicing junctions. 218 novel splicing junctions.
+sampling 65% (15239) splicing reads. 2771 splicing junctions. 2533 known splicing junctions. 238 novel splicing junctions.
+sampling 70% (16411) splicing reads. 2872 splicing junctions. 2613 known splicing junctions. 259 novel splicing junctions.
+sampling 75% (17583) splicing reads. 2956 splicing junctions. 2687 known splicing junctions. 269 novel splicing junctions.
+sampling 80% (18756) splicing reads. 3022 splicing junctions. 2740 known splicing junctions. 282 novel splicing junctions.
+sampling 85% (19928) splicing reads. 3103 splicing junctions. 2813 known splicing junctions. 290 novel splicing junctions.
+sampling 90% (21100) splicing reads. 3149 splicing junctions. 2854 known splicing junctions. 295 novel splicing junctions.
+sampling 95% (22272) splicing reads. 3211 splicing junctions. 2903 known splicing junctions. 308 novel splicing junctions.
+sampling 100% (23445) splicing reads. 3261 splicing junctions. 2944 known splicing junctions. 317 novel splicing junctions.
+null device 
+          1 

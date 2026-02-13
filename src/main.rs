@@ -6,6 +6,7 @@
 //! level in RNA-Seq datasets. It also produces featureCounts-compatible output
 //! files and biotype count summaries in a single pass.
 
+mod bam_stat;
 mod cli;
 mod config;
 mod counting;
@@ -33,6 +34,7 @@ fn main() -> Result<()> {
 
     match cli.command {
         cli::Commands::Rna(args) => run_rna(args),
+        cli::Commands::BamStat(args) => run_bam_stat(args),
     }
 }
 
@@ -682,6 +684,48 @@ fn process_single_bam(
         bam_stem,
         bam_start.elapsed().as_secs_f64()
     );
+
+    Ok(())
+}
+
+// ============================================================================
+// bam-stat subcommand
+// ============================================================================
+
+/// Run the bam-stat analysis for one or more BAM files.
+fn run_bam_stat(args: cli::BamStatArgs) -> Result<()> {
+    let start = Instant::now();
+    let outdir = Path::new(&args.outdir);
+    std::fs::create_dir_all(outdir)
+        .with_context(|| format!("Failed to create output directory: {}", args.outdir))?;
+
+    for bam_path in &args.input {
+        let bam_start = Instant::now();
+        let bam_stem = Path::new(bam_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("output");
+
+        info!("[{}] Running bam_stat analysis...", bam_stem);
+
+        let result = bam_stat::bam_stat(bam_path, args.mapq_cut, args.reference.as_deref())?;
+
+        let output_path = outdir.join(format!("{}.bam_stat.txt", bam_stem));
+        bam_stat::write_bam_stat(&result, args.mapq_cut, &output_path)?;
+
+        info!(
+            "[{}] bam_stat completed in {:.2}s",
+            bam_stem,
+            bam_start.elapsed().as_secs_f64()
+        );
+    }
+
+    if args.input.len() > 1 {
+        info!(
+            "All BAM files processed in {:.2}s",
+            start.elapsed().as_secs_f64()
+        );
+    }
 
     Ok(())
 }

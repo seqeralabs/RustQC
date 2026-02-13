@@ -1,0 +1,10 @@
+WARNING: The requested image's platform (linux/amd64) does not match the detected host platform (linux/arm64/v8) and no specific platform was requested
+Reading reference gene model /data/chr6.bed ... Done
+Loading SAM/BAM file ...  Finished
+Total 41215 usable reads were sampled
+
+
+This is PairEnd Data
+Fraction of reads failed to determine: 0.0775
+Fraction of reads explained by "1++,1--,2+-,2-+": 0.0051
+Fraction of reads explained by "1+-,1-+,2++,2--": 0.9174

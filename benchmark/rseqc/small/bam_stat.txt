@@ -1,0 +1,24 @@
+WARNING: The requested image's platform (linux/amd64) does not match the detected host platform (linux/arm64/v8) and no specific platform was requested
+Load BAM file ...  Done
+
+#==================================================
+#All numbers are READ count
+#==================================================
+
+Total records:                          52839
+
+QC failed:                              0
+Optical/PCR duplicate:                  6097
+Non primary hits                        3266
+Unmapped reads:                         0
+mapq < mapq_cut (non-unique):           1742
+
+mapq >= mapq_cut (unique):              41734
+Read-1:                                 20871
+Read-2:                                 20863
+Reads map to '+':                       20869
+Reads map to '-':                       20865
+Non-splice reads:                       22214
+Splice reads:                           19520
+Reads mapped in proper pairs:           41722
+Proper-paired reads map to different chrom:0

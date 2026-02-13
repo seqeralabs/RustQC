@@ -1,0 +1,20 @@
+WARNING: The requested image's platform (linux/amd64) does not match the detected host platform (linux/arm64/v8) and no specific platform was requested
+processing /data/chr6.bed ... Done
+processing /data/test.bam ... Finished
+
+Total Reads                   43476
+Total Tags                    68660
+Total Assigned Tags           66693
+=====================================================================
+Group               Total_bases         Tag_count           Tags/Kb             
+CDS_Exons           1785696             49589               27.77             
+5'UTR_Exons         1437256             2439                1.70              
+3'UTR_Exons         2907837             11438               3.93              
+Introns             76001214            2905                0.04              
+TSS_up_1kb          1653858             20                  0.01              
+TSS_up_5kb          7587428             79                  0.01              
+TSS_up_10kb         13916043            112                 0.01              
+TES_down_1kb        1776688             106                 0.06              
+TES_down_5kb        7973699             185                 0.02              
+TES_down_10kb       14299868            210                 0.01              
+=====================================================================

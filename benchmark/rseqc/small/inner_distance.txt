@@ -1,0 +1,8 @@
+WARNING: The requested image's platform (linux/amd64) does not match the detected host platform (linux/arm64/v8) and no specific platform was requested
+Get exon regions from /data/chr6.bed ...
+Load BAM file ...  Done
+Total read pairs  used 20861
+Name	Mean	Median	sd
+/out/inner_distance	-38.8501697356239	-72.5	94.3778907273145
+null device 
+          1 
