@@ -14,7 +14,8 @@ Initial release of RustQC — fast quality control tools for sequencing data, wr
 - **Multiple BAM file support** — pass multiple BAM files as positional arguments and process them in parallel; duplicate BAM stems are detected and rejected
 - Single-end and paired-end library support
 - Strand-aware counting (unstranded, forward, reverse-stranded)
-- Multi-threaded BAM processing across chromosomes (`--threads`)
+- SAM, BAM, and CRAM input support (auto-detected; `--reference` for CRAM)
+- Multi-threaded alignment processing across chromosomes (`--threads`)
 - 14-column duplication matrix, density scatter plot, boxplot, and expression histogram
 - MultiQC-compatible output files
 - YAML configuration for chromosome name mapping
@@ -24,7 +25,7 @@ Initial release of RustQC — fast quality control tools for sequencing data, wr
 ### Performance
 
 - ~7x faster than R dupRadar single-threaded, ~27x faster with 10 threads
-- Parallel BAM processing using rayon thread pool
+- Parallel alignment processing using rayon thread pool
 - Multi-BAM parallelism — GTF is parsed once and shared, threads are distributed across BAM files
 - Cache-oblivious interval trees (coitrees) for fast overlap queries
 - Interned gene IDs and reusable buffers to minimise allocations

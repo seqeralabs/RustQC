@@ -55,15 +55,30 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         config::Config::default()
     };
 
+    // Warn early if CRAM input is likely but no reference is provided
+    if args.input.iter().any(|f| f.ends_with(".cram"))
+        && args.reference.is_none()
+        && std::env::var("REF_PATH").is_err()
+        && std::env::var("REF_CACHE").is_err()
+    {
+        anyhow::bail!(
+            "CRAM input requires a reference FASTA. \
+             Pass --reference <FASTA> or set the REF_PATH environment variable."
+        );
+    }
+
     let start = Instant::now();
-    let n_bams = args.bam.len();
+    let n_bams = args.input.len();
     info!("RustQC rna v{}", env!("CARGO_PKG_VERSION"));
     info!(
-        "BAM file{}: {}",
+        "Input file{}: {}",
         if n_bams > 1 { "s" } else { "" },
-        args.bam.join(", ")
+        args.input.join(", ")
     );
     info!("GTF file: {}", args.gtf);
+    if let Some(ref reference) = args.reference {
+        info!("Reference FASTA: {}", reference);
+    }
     info!(
         "Stranded: {}",
         match args.stranded {
@@ -86,13 +101,13 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         gtf_start.elapsed().as_secs_f64()
     );
 
-    let chrom_mapping = config.bam_to_gtf_mapping();
+    let chrom_mapping = config.alignment_to_gtf_mapping();
     let chrom_prefix = config.chromosome_prefix().map(|s| s.to_owned());
 
     // Validate that BAM file stems are unique (otherwise outputs would collide).
     if n_bams > 1 {
         let mut seen_stems = HashSet::new();
-        for bam_path in &args.bam {
+        for bam_path in &args.input {
             let stem = Path::new(bam_path)
                 .file_stem()
                 .and_then(|s| s.to_str())
@@ -128,11 +143,11 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
     let outdir = Path::new(&args.outdir);
     std::fs::create_dir_all(outdir)?;
 
-    // Step 2: Process all BAM files (in parallel when multiple)
+    // Step 2: Process all alignment files (in parallel when multiple)
     let bam_results: Vec<Result<()>> = if n_bams == 1 {
-        // Single BAM: use all threads directly, no outer rayon pool needed
+        // Single file: use all threads directly, no outer rayon pool needed
         vec![process_single_bam(
-            &args.bam[0],
+            &args.input[0],
             &genes,
             args.stranded,
             args.paired,
@@ -140,16 +155,21 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
             &chrom_mapping,
             chrom_prefix.as_deref(),
             outdir,
+            args.reference.as_deref(),
+            args.skip_dup_check,
         )]
     } else {
-        // Multiple BAMs: process in parallel with a dedicated rayon pool
+        // Multiple files: process in parallel with a dedicated rayon pool
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(n_parallel)
             .build()
             .context("Failed to create rayon thread pool for parallel BAM processing")?;
 
+        let reference = args.reference.as_deref();
+        let skip_dup_check = args.skip_dup_check;
+
         pool.install(|| {
-            args.bam
+            args.input
                 .par_iter()
                 .map(|bam_path| {
                     process_single_bam(
@@ -161,6 +181,8 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
                         &chrom_mapping,
                         chrom_prefix.as_deref(),
                         outdir,
+                        reference,
+                        skip_dup_check,
                     )
                 })
                 .collect()
@@ -170,7 +192,7 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
     // Report results
     let mut n_ok = 0;
     let mut n_err = 0;
-    for (bam_path, result) in args.bam.iter().zip(bam_results.into_iter()) {
+    for (bam_path, result) in args.input.iter().zip(bam_results.into_iter()) {
         match result {
             Ok(()) => n_ok += 1,
             Err(e) => {
@@ -182,7 +204,7 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
 
     if n_bams > 1 {
         info!(
-            "Processed {} BAM file{}: {} succeeded, {} failed",
+            "Processed {} file{}: {} succeeded, {} failed",
             n_bams,
             if n_bams > 1 { "s" } else { "" },
             n_ok,
@@ -193,27 +215,29 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
     info!("Total runtime: {:.2}s", start.elapsed().as_secs_f64());
 
     if n_err > 0 {
-        anyhow::bail!("{} BAM file(s) failed to process", n_err);
+        anyhow::bail!("{} file(s) failed to process", n_err);
     }
 
     Ok(())
 }
 
-/// Process a single BAM file through the full analysis pipeline.
+/// Process a single alignment file through the full analysis pipeline.
 ///
-/// This runs the complete dupRadar-equivalent analysis for one BAM:
+/// This runs the complete dupRadar-equivalent analysis for one file:
 /// counting, matrix construction, model fitting, plotting, and MultiQC output.
 ///
 /// # Arguments
 ///
-/// * `bam_path` - Path to the duplicate-marked BAM file
+/// * `bam_path` - Path to the duplicate-marked alignment file (SAM/BAM/CRAM)
 /// * `genes` - Parsed GTF gene annotations (shared, read-only)
 /// * `stranded` - Library strandedness (0/1/2)
 /// * `paired` - Whether the library is paired-end
-/// * `threads` - Number of threads for this BAM's read counting
-/// * `chrom_mapping` - BAM-to-GTF chromosome name mapping
+/// * `threads` - Number of threads for this file's read counting
+/// * `chrom_mapping` - Alignment-to-GTF chromosome name mapping
 /// * `chrom_prefix` - Optional chromosome name prefix
 /// * `outdir` - Output directory for results
+/// * `reference` - Optional reference FASTA for CRAM files
+/// * `skip_dup_check` - Whether to skip duplicate-marking validation
 #[allow(clippy::too_many_arguments)]
 fn process_single_bam(
     bam_path: &str,
@@ -224,12 +248,14 @@ fn process_single_bam(
     chrom_mapping: &HashMap<String, String>,
     chrom_prefix: Option<&str>,
     outdir: &Path,
+    reference: Option<&str>,
+    skip_dup_check: bool,
 ) -> Result<()> {
     let bam_stem = Path::new(bam_path)
         .file_stem()
-        .context("BAM path has no filename")?
+        .context("Input path has no filename")?
         .to_str()
-        .context("BAM filename is not valid UTF-8")?;
+        .context("Input filename is not valid UTF-8")?;
 
     let bam_start = Instant::now();
     info!("[{}] Counting reads across 4 modes...", bam_stem);
@@ -242,6 +268,8 @@ fn process_single_bam(
         threads,
         chrom_mapping,
         chrom_prefix,
+        reference,
+        skip_dup_check,
     )?;
     info!(
         "[{}] Counting complete in {:.2}s",
@@ -314,21 +342,21 @@ fn process_single_bam(
             let dm_ref = &dup_matrix;
             let thresh = rpkm_threshold_rpk;
             let path = &density_path;
-            s.spawn(move || plots::density_scatter_plot(dm_ref, fit, thresh, path))
+            s.spawn(move || plots::density_scatter_plot(dm_ref, fit, thresh, bam_stem, path))
         });
 
         // Boxplot
         let boxplot_handle = {
             let dm_ref = &dup_matrix;
             let path = &boxplot_path;
-            s.spawn(move || plots::duprate_boxplot(dm_ref, path))
+            s.spawn(move || plots::duprate_boxplot(dm_ref, bam_stem, path))
         };
 
         // Histogram
         let histogram_handle = {
             let dm_ref = &dup_matrix;
             let path = &histogram_path;
-            s.spawn(move || plots::expression_histogram(dm_ref, path))
+            s.spawn(move || plots::expression_histogram(dm_ref, bam_stem, path))
         };
 
         // Collect results

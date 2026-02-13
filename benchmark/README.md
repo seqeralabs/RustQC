@@ -101,8 +101,8 @@ Rscript benchmark/large/run_dupRadar_R.R
 
 #### 3. Run RustQC
 
-The BAM uses Ensembl chromosome names (`1`, `2`, ...) but the GENCODE GTF uses UCSC names (`chr1`, `chr2`, ...).
-A config file is used to add the `chr` prefix to BAM chromosome names:
+The alignment file uses Ensembl chromosome names (`1`, `2`, ...) but the GENCODE GTF uses UCSC names (`chr1`, `chr2`, ...).
+A config file is used to add the `chr` prefix to alignment chromosome names:
 
 ```yaml
 # benchmark/large/config.yaml
