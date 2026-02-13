@@ -14,8 +14,8 @@ RustQC is a fast quality control toolkit for sequencing data, written in Rust. I
 RNA-seq quality control typically involves running multiple tools written in R and Python, each with their own dependencies, interpreters, and runtime overhead. RustQC consolidates these into a single fast binary.
 
 <div class="benchmark-chart">
-  <img class="only-dark" src="/RustQC/benchmarks/benchmark_dark.svg" alt="Benchmark: RustQC 54s vs featureCounts 16m vs dupRadar 30m" />
-  <img class="only-light" src="/RustQC/benchmarks/benchmark_light.svg" alt="Benchmark: RustQC 54s vs featureCounts 16m vs dupRadar 30m" />
+  <img class="only-dark" src="/benchmarks/benchmark_dark.svg" alt="Benchmark: RustQC 54s vs featureCounts 16m vs dupRadar 30m" />
+  <img class="only-light" src="/benchmarks/benchmark_light.svg" alt="Benchmark: RustQC 54s vs featureCounts 16m vs dupRadar 30m" />
   <p align="center"><em>Run time for dupRadar + featureCounts analysis on a 10 GB paired-end BAM</em></p>
 </div>
 
@@ -59,4 +59,4 @@ Most RSeQC tools require a BED12 gene model file (`-b`) instead of a GTF. All ac
 
 ## Credits
 
-RustQC stands on the shoulders of the original tools. If you use RustQC, please cite [dupRadar](https://bioconductor.org/packages/dupRadar/), [Subread/featureCounts](http://subread.sourceforge.net/), and [RSeQC](https://rseqc.sourceforge.net/). See [Credits & Citation](/RustQC/about/credits/) for full details.
+RustQC stands on the shoulders of the original tools. If you use RustQC, please cite [dupRadar](https://bioconductor.org/packages/dupRadar/), [Subread/featureCounts](http://subread.sourceforge.net/), and [RSeQC](https://rseqc.sourceforge.net/). See [Credits & Citation](/about/credits/) for full details.

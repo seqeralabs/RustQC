@@ -71,11 +71,11 @@ The plots below compare the R dupRadar output (left) with RustQC output (right) 
 
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
   <figure style="margin: 0; text-align: center;">
-    <img src="/RustQC/benchmarks/large/dupRadar/duprateExpDens.png" alt="dupRadar (R) density scatter plot" style="width: 100%;" />
+    <img src="/benchmarks/large/dupRadar/duprateExpDens.png" alt="dupRadar (R) density scatter plot" style="width: 100%;" />
     <figcaption>dupRadar (R)</figcaption>
   </figure>
   <figure style="margin: 0; text-align: center;">
-    <img src="/RustQC/benchmarks/large/RustQC/GM12878_REP1.markdup.sorted_duprateExpDens.png" alt="RustQC density scatter plot" style="width: 100%;" />
+    <img src="/benchmarks/large/RustQC/GM12878_REP1.markdup.sorted_duprateExpDens.png" alt="RustQC density scatter plot" style="width: 100%;" />
     <figcaption>RustQC</figcaption>
   </figure>
 </div>
@@ -84,11 +84,11 @@ The plots below compare the R dupRadar output (left) with RustQC output (right) 
 
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
   <figure style="margin: 0; text-align: center;">
-    <img src="/RustQC/benchmarks/large/dupRadar/duprateExpBoxplot.png" alt="dupRadar (R) duplication rate boxplot" style="width: 100%;" />
+    <img src="/benchmarks/large/dupRadar/duprateExpBoxplot.png" alt="dupRadar (R) duplication rate boxplot" style="width: 100%;" />
     <figcaption>dupRadar (R)</figcaption>
   </figure>
   <figure style="margin: 0; text-align: center;">
-    <img src="/RustQC/benchmarks/large/RustQC/GM12878_REP1.markdup.sorted_duprateExpBoxplot.png" alt="RustQC duplication rate boxplot" style="width: 100%;" />
+    <img src="/benchmarks/large/RustQC/GM12878_REP1.markdup.sorted_duprateExpBoxplot.png" alt="RustQC duplication rate boxplot" style="width: 100%;" />
     <figcaption>RustQC</figcaption>
   </figure>
 </div>
@@ -97,11 +97,11 @@ The plots below compare the R dupRadar output (left) with RustQC output (right) 
 
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
   <figure style="margin: 0; text-align: center;">
-    <img src="/RustQC/benchmarks/large/dupRadar/expressionHist.png" alt="dupRadar (R) expression histogram" style="width: 100%;" />
+    <img src="/benchmarks/large/dupRadar/expressionHist.png" alt="dupRadar (R) expression histogram" style="width: 100%;" />
     <figcaption>dupRadar (R)</figcaption>
   </figure>
   <figure style="margin: 0; text-align: center;">
-    <img src="/RustQC/benchmarks/large/RustQC/GM12878_REP1.markdup.sorted_expressionHist.png" alt="RustQC expression histogram" style="width: 100%;" />
+    <img src="/benchmarks/large/RustQC/GM12878_REP1.markdup.sorted_expressionHist.png" alt="RustQC expression histogram" style="width: 100%;" />
     <figcaption>RustQC</figcaption>
   </figure>
 </div>

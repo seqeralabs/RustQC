@@ -40,7 +40,7 @@ After running, you will find in the output directory:
 | `sample.markdup.featureCounts.tsv.summary` | Counting summary statistics |
 
 Plus SVG versions of all plots, biotype count tables, and MultiQC-compatible report files.
-See [dupRadar Outputs](/RustQC/outputs/dupradar/) and [featureCounts Outputs](/RustQC/outputs/featurecounts/) for full details.
+See [dupRadar Outputs](/outputs/dupradar/) and [featureCounts Outputs](/outputs/featurecounts/) for full details.
 
 ## RSeQC quality control tools
 
@@ -70,7 +70,7 @@ rustqc junction-saturation sample.bam -b genes.bed -o results/
 rustqc inner-distance sample.bam -b genes.bed -o results/
 ```
 
-See [RSeQC Outputs](/RustQC/outputs/rseqc/) for details on output files.
+See [RSeQC Outputs](/outputs/rseqc/) for details on output files.
 
 ## Multiple BAM files
 
@@ -112,8 +112,8 @@ rustqc bam-stat sample.bam -q 20 -o results/
 
 ## Next steps
 
-- [CLI Reference](/RustQC/usage/cli-reference/) for all available options and subcommands
-- [dupRadar Outputs](/RustQC/outputs/dupradar/) for duplication analysis output details
-- [featureCounts Outputs](/RustQC/outputs/featurecounts/) for read counting output details
-- [RSeQC Outputs](/RustQC/outputs/rseqc/) for RSeQC tool output details
-- [Configuration](/RustQC/usage/configuration/) for YAML config options
+- [CLI Reference](/usage/cli-reference/) for all available options and subcommands
+- [dupRadar Outputs](/outputs/dupradar/) for duplication analysis output details
+- [featureCounts Outputs](/outputs/featurecounts/) for read counting output details
+- [RSeQC Outputs](/outputs/rseqc/) for RSeQC tool output details
+- [Configuration](/usage/configuration/) for YAML config options

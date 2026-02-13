@@ -13,8 +13,10 @@ head:
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
+export const base = import.meta.env.BASE_URL;
+
 <div class="hero" role="banner">
-  <img src="/RustQC/RustQC-icon.svg" alt="" width="400" height="400" />
+  <img src={`${base}RustQC-icon.svg`} alt="" width="400" height="400" />
   <div class="sl-flex stack">
     <div class="sl-flex copy">
       <h1 id="_top">Welcome to RustQC</h1>
@@ -26,8 +28,8 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
       </div>
     </div>
     <div class="benchmark-chart">
-      <img class="only-dark" src="/RustQC/benchmarks/benchmark_dark.svg" alt="Benchmark: RustQC 54s vs featureCounts 16m vs dupRadar 30m" />
-      <img class="only-light" src="/RustQC/benchmarks/benchmark_light.svg" alt="Benchmark: RustQC 54s vs featureCounts 16m vs dupRadar 30m" />
+      <img class="only-dark" src={`${base}benchmarks/benchmark_dark.svg`} alt="Benchmark: RustQC 54s vs featureCounts 16m vs dupRadar 30m" />
+      <img class="only-light" src={`${base}benchmarks/benchmark_light.svg`} alt="Benchmark: RustQC 54s vs featureCounts 16m vs dupRadar 30m" />
       <p><em>Run time for a 10 GB paired-end BAM</em></p>
     </div>
     <div class="sl-flex actions not-content">
@@ -160,4 +162,4 @@ RustQC is a reimplementation of the excellent [dupRadar](https://bioconductor.or
 Bioconductor package by Sergi Sayols, and uses the same counting approach as
 [Subread featureCounts](https://subread.sourceforge.net/) by Yang Liao and Wei Shi.
 
-**If you use RustQC, please cite the original tools** — see the [Credits & Citation](/RustQC/about/credits/) page.
+**If you use RustQC, please cite the original tools** — see the [Credits & Citation](about/credits/) page.

@@ -57,7 +57,7 @@ where `x` is `log10(reads per kilobase)`.
 
 ## Output files
 
-All dupRadar output files use the BAM file stem as a prefix (e.g., `sample.bam` produces `sample_dupMatrix.txt`). Each output can be individually enabled or disabled via the [configuration file](/RustQC/usage/configuration/).
+All dupRadar output files use the BAM file stem as a prefix (e.g., `sample.bam` produces `sample_dupMatrix.txt`). Each output can be individually enabled or disabled via the [configuration file](/usage/configuration/).
 
 <FileTree>
 - sample_dupMatrix.txt Duplication matrix (core data table)
@@ -198,7 +198,7 @@ Duplication rates near zero across all expression levels, including highly expre
 
 ## Configuring outputs
 
-Use a [YAML configuration file](/RustQC/usage/configuration/) to control which dupRadar outputs are generated. All outputs are enabled by default. Set any to `false` to skip generation:
+Use a [YAML configuration file](/usage/configuration/) to control which dupRadar outputs are generated. All outputs are enabled by default. Set any to `false` to skip generation:
 
 ```yaml
 dupradar:

@@ -125,7 +125,7 @@ printed and biotype counting is skipped.
 
 Path to a YAML configuration file for advanced settings such as chromosome name
 mapping and per-output-file toggles. See the
-[Configuration](/RustQC/usage/configuration/) page for the full reference.
+[Configuration](/usage/configuration/) page for the full reference.
 
 ### Examples
 
@@ -188,7 +188,7 @@ rustqc bam-stat sample.bam -o results/
 ### Output
 
 `{sample}.bam_stat.txt` -- A formatted text report matching the RSeQC
-`bam_stat.py` output format. See [RSeQC Outputs](/RustQC/outputs/rseqc/) for
+`bam_stat.py` output format. See [RSeQC Outputs](/outputs/rseqc/) for
 details.
 
 ---
@@ -237,7 +237,7 @@ rustqc infer-experiment sample.bam -b genes.bed -o results/
 
 `{sample}.infer_experiment.txt` -- Strandedness fractions (fraction failing to
 determine, fraction consistent with forward/reverse protocols). See
-[RSeQC Outputs](/RustQC/outputs/rseqc/) for interpretation guidance.
+[RSeQC Outputs](/outputs/rseqc/) for interpretation guidance.
 
 ---
 
@@ -278,7 +278,7 @@ rustqc read-duplication sample.bam -o results/
 - `{sample}.pos.DupRate.xls` -- Position-based duplication histogram
 - `{sample}.seq.DupRate.xls` -- Sequence-based duplication histogram
 
-See [RSeQC Outputs](/RustQC/outputs/rseqc/) for details.
+See [RSeQC Outputs](/outputs/rseqc/) for details.
 
 ---
 
@@ -323,7 +323,7 @@ rustqc read-distribution sample.bam -b genes.bed -o results/
 
 `{sample}.read_distribution.txt` -- Tabular report with total reads, total
 tags, and per-region breakdown (CDS Exons, 5'UTR, 3'UTR, Introns, TSS/TES
-flanking regions). See [RSeQC Outputs](/RustQC/outputs/rseqc/) for details.
+flanking regions). See [RSeQC Outputs](/outputs/rseqc/) for details.
 
 ---
 
@@ -374,7 +374,7 @@ rustqc junction-annotation sample.bam -b genes.bed -o results/
 - `{sample}.junction_plot.r` -- R script for pie chart visualisation
 - `{sample}.junction_annotation.txt` -- Summary counts
 
-See [RSeQC Outputs](/RustQC/outputs/rseqc/) for details.
+See [RSeQC Outputs](/outputs/rseqc/) for details.
 
 ---
 
@@ -430,7 +430,7 @@ rustqc junction-saturation sample.bam -b genes.bed -l 10 -u 100 -s 10
 - `{sample}.junctionSaturation_plot.r` -- R script for saturation curve
 - `{sample}.junctionSaturation_summary.txt` -- Tabular data (percentage vs junction counts)
 
-See [RSeQC Outputs](/RustQC/outputs/rseqc/) for details.
+See [RSeQC Outputs](/outputs/rseqc/) for details.
 
 ---
 
@@ -486,7 +486,7 @@ rustqc inner-distance sample.bam -b genes.bed -l -500 -u 500 -s 10
 - `{sample}.inner_distance_plot.r` -- R script for histogram and density plot
 - `{sample}.inner_distance_summary.txt` -- Summary counts by classification
 
-See [RSeQC Outputs](/RustQC/outputs/rseqc/) for details.
+See [RSeQC Outputs](/outputs/rseqc/) for details.
 
 ---
 

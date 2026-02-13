@@ -19,7 +19,7 @@ cargo build
 cargo build --release
 ```
 
-See the [Installation](/RustQC/getting-started/installation/) page for system
+See the [Installation](/getting-started/installation/) page for system
 dependency requirements (cmake, zlib, bz2, lzma, curl, ssl, clang).
 
 ## Running tests

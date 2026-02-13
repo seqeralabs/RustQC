@@ -27,7 +27,7 @@ The key difference is that RustQC performs counting and duplicate analysis in a 
 
 ## Output files
 
-All featureCounts output files use the BAM file stem as a prefix. Each output can be individually enabled or disabled via the [configuration file](/RustQC/usage/configuration/).
+All featureCounts output files use the BAM file stem as a prefix. Each output can be individually enabled or disabled via the [configuration file](/usage/configuration/).
 
 <FileTree>
 - sample.featureCounts.tsv Per-gene read counts
@@ -113,7 +113,7 @@ If neither attribute is found, biotype outputs are skipped with a warning. You c
 
 ## Configuring outputs
 
-Use a [YAML configuration file](/RustQC/usage/configuration/) to control which featureCounts outputs are generated. All outputs are enabled by default. Set any to `false` to skip generation:
+Use a [YAML configuration file](/usage/configuration/) to control which featureCounts outputs are generated. All outputs are enabled by default. Set any to `false` to skip generation:
 
 ```yaml
 featurecounts:
