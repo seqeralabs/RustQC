@@ -489,7 +489,7 @@ where
 
     chart
         .configure_mesh()
-        .bold_line_style(RGBColor(200, 200, 200).stroke_width(ps(1.0).max(1)))
+        .bold_line_style(TRANSPARENT)
         .light_line_style(TRANSPARENT)
         .x_desc("expression (reads/kbp)")
         .y_desc("% duplicate reads")
@@ -872,7 +872,7 @@ where
 
     chart
         .configure_mesh()
-        .bold_line_style(RGBColor(200, 200, 200).stroke_width(ps(1.0).max(1)))
+        .bold_line_style(TRANSPARENT)
         .light_line_style(TRANSPARENT)
         .y_desc("duplication (%)")
         .x_desc("mean expression (reads/kbp)")
@@ -1067,7 +1067,7 @@ where
 
     chart
         .configure_mesh()
-        .bold_line_style(RGBColor(200, 200, 200).stroke_width(ps(1.0).max(1)))
+        .bold_line_style(TRANSPARENT)
         .light_line_style(TRANSPARENT)
         .x_desc("reads per kilobase (RPK)")
         .y_desc("Frequency")

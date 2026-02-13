@@ -9,23 +9,6 @@ duplication (%)
 <text x="262" y="475" dy="-0.5ex" text-anchor="middle" font-family="sans-serif" font-size="10.483870967741936" opacity="1" fill="#000000">
 mean expression (reads/kbp)
 </text>
-<line opacity="1" stroke="#C8C8C8" stroke-width="1" x1="60" y1="404" x2="60" y2="40"/>
-<line opacity="1" stroke="#C8C8C8" stroke-width="1" x1="100" y1="404" x2="100" y2="40"/>
-<line opacity="1" stroke="#C8C8C8" stroke-width="1" x1="140" y1="404" x2="140" y2="40"/>
-<line opacity="1" stroke="#C8C8C8" stroke-width="1" x1="181" y1="404" x2="181" y2="40"/>
-<line opacity="1" stroke="#C8C8C8" stroke-width="1" x1="221" y1="404" x2="221" y2="40"/>
-<line opacity="1" stroke="#C8C8C8" stroke-width="1" x1="262" y1="404" x2="262" y2="40"/>
-<line opacity="1" stroke="#C8C8C8" stroke-width="1" x1="302" y1="404" x2="302" y2="40"/>
-<line opacity="1" stroke="#C8C8C8" stroke-width="1" x1="342" y1="404" x2="342" y2="40"/>
-<line opacity="1" stroke="#C8C8C8" stroke-width="1" x1="383" y1="404" x2="383" y2="40"/>
-<line opacity="1" stroke="#C8C8C8" stroke-width="1" x1="423" y1="404" x2="423" y2="40"/>
-<line opacity="1" stroke="#C8C8C8" stroke-width="1" x1="464" y1="404" x2="464" y2="40"/>
-<line opacity="1" stroke="#C8C8C8" stroke-width="1" x1="60" y1="404" x2="464" y2="404"/>
-<line opacity="1" stroke="#C8C8C8" stroke-width="1" x1="60" y1="332" x2="464" y2="332"/>
-<line opacity="1" stroke="#C8C8C8" stroke-width="1" x1="60" y1="259" x2="464" y2="259"/>
-<line opacity="1" stroke="#C8C8C8" stroke-width="1" x1="60" y1="186" x2="464" y2="186"/>
-<line opacity="1" stroke="#C8C8C8" stroke-width="1" x1="60" y1="113" x2="464" y2="113"/>
-<line opacity="1" stroke="#C8C8C8" stroke-width="1" x1="60" y1="40" x2="464" y2="40"/>
 <polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="59,40 59,404 "/>
 <text x="50" y="404" dy="0.5ex" text-anchor="end" font-family="sans-serif" font-size="8.870967741935484" opacity="1" fill="#000000">
 0.0
