@@ -10,7 +10,6 @@ use crate::counting::CountResult;
 use crate::gtf::Gene;
 use anyhow::Result;
 use indexmap::IndexMap;
-use log::info;
 use std::io::Write;
 use std::path::Path;
 
@@ -177,7 +176,7 @@ pub fn write_biotype_counts(path: &Path, biotype_counts: &IndexMap<String, u64>)
 pub fn write_biotype_counts_mqc(
     path: &Path,
     biotype_counts: &IndexMap<String, u64>,
-    sample_name: &str,
+    _sample_name: &str,
 ) -> Result<()> {
     let file = std::fs::File::create(path)?;
     let mut w = std::io::BufWriter::new(file);
@@ -201,11 +200,6 @@ pub fn write_biotype_counts_mqc(
     for (biotype, count) in biotype_counts.iter() {
         writeln!(w, "{}\t{}", biotype, count)?;
     }
-
-    info!(
-        "Biotype counts MultiQC file written for sample '{}'",
-        sample_name
-    );
 
     Ok(())
 }

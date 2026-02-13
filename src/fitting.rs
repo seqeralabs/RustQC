@@ -51,6 +51,12 @@ impl FitResult {
 /// # Returns
 /// FitResult with coefficients matching dupRadar's `duprateExpFit()` output.
 pub fn duprate_exp_fit(rpk: &[f64], dup_rate: &[f64]) -> Result<FitResult> {
+    anyhow::ensure!(
+        rpk.len() == dup_rate.len(),
+        "rpk and dup_rate must have the same length ({} vs {})",
+        rpk.len(),
+        dup_rate.len()
+    );
     // Filter to genes with valid data: RPK > 0 and finite dupRate
     let mut x_vals: Vec<f64> = Vec::new();
     let mut y_vals: Vec<f64> = Vec::new();

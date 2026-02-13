@@ -128,7 +128,7 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
     let mut genes: IndexMap<String, Gene> = IndexMap::new();
 
     for line in reader.lines() {
-        let line = line?;
+        let line = line.context("Failed to read line from GTF file")?;
 
         // Skip comments and empty lines
         if line.starts_with('#') || line.is_empty() {
@@ -152,6 +152,13 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
         let end: u64 = fields[4]
             .parse()
             .with_context(|| format!("Invalid end position: {}", fields[4]))?;
+        anyhow::ensure!(
+            start <= end,
+            "Malformed GTF: start ({}) > end ({}) for exon on {}",
+            start,
+            end,
+            fields[0]
+        );
         let strand = fields[6].chars().next().unwrap_or('.');
 
         let attr_str = fields[8];
@@ -193,6 +200,15 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
                     attributes: attrs,
                 }
             });
+    }
+
+    // Warn if no genes were extracted — likely indicates a format problem
+    if genes.is_empty() {
+        log::warn!(
+            "No genes extracted from GTF file '{}'. Check that the file is in GTF (not GFF3) \
+             format and contains exon features with gene_id attributes.",
+            path
+        );
     }
 
     // Compute effective lengths for all genes

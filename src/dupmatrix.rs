@@ -73,6 +73,7 @@ impl DupMatrix {
         // The non-Multi columns use the unique+dup counts and N.
 
         let mut rows = Vec::with_capacity(genes.len());
+        let default_counts = GeneCounts::default();
 
         for (gene_id, gene) in genes.iter() {
             let gene_length = gene.effective_length;
@@ -80,7 +81,6 @@ impl DupMatrix {
                 continue;
             }
 
-            let default_counts = GeneCounts::default();
             let gc = counts.gene_counts.get(gene_id).unwrap_or(&default_counts);
 
             let all_counts_multi = gc.all_multi;
@@ -236,6 +236,12 @@ pub struct DupMatStats {
 fn format_float(v: f64) -> String {
     if v.is_nan() {
         "NA".to_string()
+    } else if v.is_infinite() {
+        if v.is_sign_positive() {
+            "Inf".to_string()
+        } else {
+            "-Inf".to_string()
+        }
     } else if v == 0.0 {
         "0".to_string()
     } else {

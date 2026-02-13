@@ -15,9 +15,9 @@ mod fitting;
 mod gtf;
 mod plots;
 
-use anyhow::{Context, Result};
+use anyhow::{ensure, Context, Result};
 use indexmap::IndexMap;
-use log::info;
+use log::{info, warn};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -88,6 +88,13 @@ fn shell_escape(s: &str) -> String {
 /// rayon. The GTF annotation is parsed once and shared across all BAM files.
 /// Available threads are distributed across the parallel BAM processing jobs.
 fn run_rna(args: cli::RnaArgs) -> Result<()> {
+    // Validate thread count
+    ensure!(
+        args.threads >= 1,
+        "--threads must be at least 1 (got {})",
+        args.threads
+    );
+
     // Load configuration file if provided
     let config = if let Some(ref config_path) = args.config {
         let cfg = config::Config::from_file(Path::new(config_path))?;
@@ -180,14 +187,14 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
                 }
             }
             if !found {
-                info!(
-                    "Warning: biotype attribute '{}' not found in GTF, skipping biotype outputs",
+                warn!(
+                    "Biotype attribute '{}' not found in GTF, skipping biotype outputs",
                     configured_biotype
                 );
             }
         } else {
-            info!(
-                "Warning: biotype attribute '{}' not found in GTF, skipping biotype outputs",
+            warn!(
+                "Biotype attribute '{}' not found in GTF, skipping biotype outputs",
                 biotype_attribute
             );
         }
@@ -246,7 +253,8 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
 
     // Create output directory
     let outdir = Path::new(&args.outdir);
-    std::fs::create_dir_all(outdir)?;
+    std::fs::create_dir_all(outdir)
+        .with_context(|| format!("Failed to create output directory: {}", outdir.display()))?;
 
     // Determine if biotype attribute was found in the GTF
     let biotype_in_gtf = extra_attributes.contains(&biotype_attribute);
@@ -313,7 +321,7 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
             Ok(()) => n_ok += 1,
             Err(e) => {
                 n_err += 1;
-                log::error!("Failed to process {}: {:?}", bam_path, e);
+                log::error!("Failed to process {}: {:#}", bam_path, e);
             }
         }
     }
@@ -321,10 +329,7 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
     if n_bams > 1 {
         info!(
             "Processed {} file{}: {} succeeded, {} failed",
-            n_bams,
-            if n_bams > 1 { "s" } else { "" },
-            n_ok,
-            n_err,
+            n_bams, "s", n_ok, n_err,
         );
     }
 
@@ -550,7 +555,7 @@ fn process_single_bam(
                     Some(fit.clone())
                 }
                 Err(e) => {
-                    info!("[{}] Warning: Could not fit model: {}", bam_stem, e);
+                    warn!("[{}] Could not fit model: {}", bam_stem, e);
                     None
                 }
             }
@@ -614,13 +619,17 @@ fn process_single_bam(
                 if let Some(handle) = density_handle {
                     handle
                         .join()
-                        .expect("density scatter plot thread panicked")?;
+                        .map_err(|_| anyhow::anyhow!("density scatter plot thread panicked"))??;
                 }
                 if let Some(handle) = boxplot_handle {
-                    handle.join().expect("boxplot thread panicked")?;
+                    handle
+                        .join()
+                        .map_err(|_| anyhow::anyhow!("boxplot thread panicked"))??;
                 }
                 if let Some(handle) = histogram_handle {
-                    handle.join().expect("histogram thread panicked")?;
+                    handle
+                        .join()
+                        .map_err(|_| anyhow::anyhow!("histogram thread panicked"))??;
                 }
 
                 Ok(())

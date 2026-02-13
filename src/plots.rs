@@ -79,9 +79,10 @@ fn estimate_density(x: &[f64], y: &[f64], nbins: usize) -> Vec<f64> {
     // R's densCols bandwidth: diff(quantile(x, c(0.05, 0.95))) / 25
     // This is the 90% interquantile range divided by 25.
     let mut x_sorted = x.to_vec();
-    x_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    // Safety: NaN values are filtered by the caller (rpk > 0.0 && dup_rate.is_finite())
+    x_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let mut y_sorted = y.to_vec();
-    y_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    y_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let bw_x = (quantile(&x_sorted, 0.95) - quantile(&x_sorted, 0.05)) / 25.0;
     let bw_y = (quantile(&y_sorted, 0.95) - quantile(&y_sorted, 0.05)) / 25.0;
 
@@ -876,7 +877,7 @@ where
     let bw = bw.max(0.05); // minimum bin width
     let x_min = (raw_min / bw).floor() * bw;
     let x_max = (raw_max / bw).ceil() * bw;
-    let n_bins = ((x_max - x_min) / bw).round() as usize;
+    let n_bins = ((x_max - x_min) / bw).round().max(1.0) as usize;
 
     let mut hist = vec![0u32; n_bins];
     for &v in &log_rpk {
