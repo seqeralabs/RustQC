@@ -48,10 +48,25 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         config::Config::default()
     };
 
+    // Warn early if CRAM input is likely but no reference is provided
+    if args.input.ends_with(".cram")
+        && args.reference.is_none()
+        && std::env::var("REF_PATH").is_err()
+        && std::env::var("REF_CACHE").is_err()
+    {
+        anyhow::bail!(
+            "CRAM input requires a reference FASTA. \
+             Pass --reference <FASTA> or set the REF_PATH environment variable."
+        );
+    }
+
     let start = Instant::now();
     info!("RustQC rna v{}", env!("CARGO_PKG_VERSION"));
-    info!("BAM file: {}", args.bam);
+    info!("Input file: {}", args.input);
     info!("GTF file: {}", args.gtf);
+    if let Some(ref reference) = args.reference {
+        info!("Reference FASTA: {}", reference);
+    }
     info!(
         "Stranded: {}",
         match args.stranded {
@@ -77,15 +92,16 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
     // Step 2: Count reads with featureCounts-compatible logic
     info!("Counting reads across 4 modes...");
     let count_start = Instant::now();
-    let chrom_mapping = config.bam_to_gtf_mapping();
+    let chrom_mapping = config.alignment_to_gtf_mapping();
     let count_result = counting::count_reads(
-        &args.bam,
+        &args.input,
         &genes,
         args.stranded,
         args.paired,
         args.threads,
         &chrom_mapping,
         config.chromosome_prefix(),
+        args.reference.as_deref(),
     )?;
     info!(
         "Counting complete in {:.2}s",
@@ -105,13 +121,13 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
     // Step 4: Write duplication matrix
     let outdir = Path::new(&args.outdir);
     std::fs::create_dir_all(outdir)?;
-    let bam_stem = Path::new(&args.bam)
+    let input_stem = Path::new(&args.input)
         .file_stem()
-        .context("BAM path has no filename")?
+        .context("Input path has no filename")?
         .to_str()
-        .context("BAM filename is not valid UTF-8")?;
+        .context("Input filename is not valid UTF-8")?;
 
-    let matrix_path = outdir.join(format!("{}_dupMatrix.txt", bam_stem));
+    let matrix_path = outdir.join(format!("{}_dupMatrix.txt", input_stem));
     dup_matrix.write_tsv(&matrix_path)?;
     info!("Duplication matrix written to {}", matrix_path.display());
 
@@ -127,7 +143,7 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
                 "Model fit: intercept={:.6}, slope={:.6}",
                 fit.intercept, fit.slope
             );
-            let fit_path = outdir.join(format!("{}_intercept_slope.txt", bam_stem));
+            let fit_path = outdir.join(format!("{}_intercept_slope.txt", input_stem));
             plots::write_intercept_slope(fit, &fit_path)?;
             info!("Fit results written to {}", fit_path.display());
             Some(fit.clone())
@@ -147,9 +163,9 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         fitting::compute_rpkm_threshold_rpk(&rpk_values, &rpkm_values, 0.5)
     });
 
-    let density_path = outdir.join(format!("{}_duprateExpDens.png", bam_stem));
-    let boxplot_path = outdir.join(format!("{}_duprateExpBoxplot.png", bam_stem));
-    let histogram_path = outdir.join(format!("{}_expressionHist.png", bam_stem));
+    let density_path = outdir.join(format!("{}_duprateExpDens.png", input_stem));
+    let boxplot_path = outdir.join(format!("{}_duprateExpBoxplot.png", input_stem));
+    let histogram_path = outdir.join(format!("{}_expressionHist.png", input_stem));
 
     std::thread::scope(|s| -> Result<()> {
         // Density scatter plot (only if fit succeeded)
@@ -195,10 +211,10 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
 
     // Step 7: Write MultiQC-compatible output files
     if let Some(ref fit) = fit_ok {
-        let mqc_intercept_path = outdir.join(format!("{}_dup_intercept_mqc.txt", bam_stem));
-        plots::write_mqc_intercept(fit, bam_stem, &mqc_intercept_path)?;
+        let mqc_intercept_path = outdir.join(format!("{}_dup_intercept_mqc.txt", input_stem));
+        plots::write_mqc_intercept(fit, input_stem, &mqc_intercept_path)?;
 
-        let mqc_curve_path = outdir.join(format!("{}_duprateExpDensCurve_mqc.txt", bam_stem));
+        let mqc_curve_path = outdir.join(format!("{}_duprateExpDensCurve_mqc.txt", input_stem));
         plots::write_mqc_curve(fit, &dup_matrix, &mqc_curve_path)?;
         info!("MultiQC output files written");
     }

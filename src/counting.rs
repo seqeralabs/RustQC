@@ -1,6 +1,6 @@
-//! Read counting engine for BAM files.
+//! Read counting engine for alignment files (SAM/BAM/CRAM).
 //!
-//! Assigns reads from a BAM file to genes based on GTF annotation,
+//! Assigns reads from an alignment file to genes based on GTF annotation,
 //! producing four count vectors matching the dupRadar approach:
 //! 1. All reads including multimappers (with duplicates)
 //! 2. All reads including multimappers (without duplicates)
@@ -268,7 +268,7 @@ fn strand_matches(
 ///
 /// # Arguments
 /// * `start` - The reference start position of the read
-/// * `cigar` - The CIGAR string view from the BAM record
+/// * `cigar` - The CIGAR string view from the alignment record
 /// * `blocks` - Reusable buffer for aligned blocks (cleared before use)
 fn cigar_to_aligned_blocks(
     start: u64,
@@ -400,9 +400,9 @@ impl ChromResult {
     }
 }
 
-/// Process a batch of chromosomes from a BAM file, counting reads against gene annotations.
+/// Process a batch of chromosomes from an alignment file, counting reads against gene annotations.
 ///
-/// Opens its own BAM reader and seeks to each chromosome in the batch.
+/// Opens its own indexed reader and seeks to each chromosome in the batch.
 /// Returns accumulated results for all chromosomes in the batch.
 #[allow(clippy::too_many_arguments)]
 fn process_chromosome_batch(
@@ -416,12 +416,17 @@ fn process_chromosome_batch(
     chrom_mapping: &HashMap<String, String>,
     chrom_prefix: Option<&str>,
     global_read_counter: &AtomicU64,
+    reference: Option<&str>,
 ) -> Result<ChromResult> {
     let mut result = ChromResult::new(num_genes);
 
-    // Open an indexed BAM reader for this thread
+    // Open an indexed reader for this thread (supports BAM with .bai/.csi and CRAM with .crai)
     let mut bam = bam::IndexedReader::from_path(bam_path)
-        .with_context(|| format!("Failed to open indexed BAM file: {}", bam_path))?;
+        .with_context(|| format!("Failed to open indexed alignment file: {}", bam_path))?;
+    if let Some(ref_path) = reference {
+        bam.set_reference(ref_path)
+            .with_context(|| format!("Failed to set reference FASTA: {}", ref_path))?;
+    }
 
     // Reusable buffers
     let mut aligned_blocks_buf: Vec<(u64, u64)> = Vec::new();
@@ -435,7 +440,7 @@ fn process_chromosome_batch(
             .with_context(|| format!("Failed to seek to tid {}", tid))?;
 
         while let Some(read_result) = bam.read(&mut record) {
-            read_result.context("Error reading BAM record")?;
+            read_result.context("Error reading alignment record")?;
             result.total_reads += 1;
 
             // Periodic progress logging (approximate, using atomic counter)
@@ -497,7 +502,7 @@ fn process_chromosome_batch(
                 continue;
             }
             let bam_chrom = &tid_to_name[rec_tid as usize];
-            // Apply chromosome name prefix and/or mapping (BAM name -> GTF name)
+            // Apply chromosome name prefix and/or mapping (alignment name -> GTF name)
             let prefixed_chrom;
             let chrom = if let Some(mapped) = chrom_mapping.get(bam_chrom.as_str()) {
                 mapped.as_str()
@@ -659,16 +664,17 @@ fn process_chromosome_batch(
     Ok(result)
 }
 
-/// Count reads from a BAM file and assign them to genes.
+/// Count reads from an alignment file (SAM/BAM/CRAM) and assign them to genes.
 ///
 /// Performs four simultaneous counting modes matching dupRadar's approach:
 /// - With/without multimappers
 /// - With/without PCR duplicates
 ///
-/// When `threads > 1`, processing is parallelized by chromosome: the BAM index
-/// is used to divide chromosomes among threads, each opening its own reader and
-/// processing independently. Per-chromosome results are merged, and any unmatched
-/// paired-end mates (from cross-chromosome pairs) are reconciled in a final pass.
+/// When `threads > 1`, processing is parallelized by chromosome: the alignment
+/// index is used to divide chromosomes among threads, each opening its own reader
+/// and processing independently. Per-chromosome results are merged, and any
+/// unmatched paired-end mates (from cross-chromosome pairs) are reconciled in a
+/// final pass.
 ///
 /// For paired-end data, this function buffers mates by a composite key matching
 /// featureCounts' `SAM_pairer_get_read_full_name()` (read name, R1/R2 refIDs,
@@ -676,11 +682,14 @@ fn process_chromosome_batch(
 /// genes overlapped by both mates score higher than genes overlapped by only one.
 ///
 /// # Arguments
-/// * `bam_path` - Path to the duplicate-marked BAM file (must have .bai index for threads > 1)
+/// * `bam_path` - Path to the duplicate-marked alignment file (BAM/CRAM must have
+///   an index for `threads > 1`; SAM files always use single-threaded mode)
 /// * `genes` - Gene annotation map from GTF parsing
 /// * `stranded` - Library strandedness (0, 1, or 2)
 /// * `paired` - Whether the library is paired-end
-/// * `threads` - Number of threads for BAM processing
+/// * `threads` - Number of threads for alignment processing
+/// * `reference` - Optional path to reference FASTA (required for CRAM files)
+#[allow(clippy::too_many_arguments)] // reference param added for CRAM support
 pub fn count_reads(
     bam_path: &str,
     genes: &IndexMap<String, Gene>,
@@ -689,6 +698,7 @@ pub fn count_reads(
     threads: usize,
     chrom_mapping: &HashMap<String, String>,
     chrom_prefix: Option<&str>,
+    reference: Option<&str>,
 ) -> Result<CountResult> {
     // Build gene ID interner for allocation-free lookups in the hot loop
     let interner = GeneIdInterner::from_genes(genes);
@@ -698,19 +708,35 @@ pub fn count_reads(
 
     // Get chromosome names from header using a temporary reader
     let tid_to_name: Vec<String> = {
-        let bam = bam::Reader::from_path(bam_path)
-            .with_context(|| format!("Failed to open BAM file: {}", bam_path))?;
+        let mut bam = bam::Reader::from_path(bam_path)
+            .with_context(|| format!("Failed to open alignment file: {}", bam_path))?;
+        if let Some(ref_path) = reference {
+            bam.set_reference(ref_path)
+                .with_context(|| format!("Failed to set reference FASTA: {}", ref_path))?;
+        }
         let header = bam.header().clone();
         (0..header.target_count())
             .map(|tid| String::from_utf8_lossy(header.tid2name(tid)).to_string())
             .collect()
     };
 
-    // Check if BAM index is available for parallel processing
-    let use_parallel = threads > 1 && bam::IndexedReader::from_path(bam_path).is_ok();
+    // Check if an alignment index is available for parallel processing
+    // (BAM uses .bai/.csi, CRAM uses .crai; SAM has no index format)
+    let use_parallel = threads > 1 && {
+        let idx_check = bam::IndexedReader::from_path(bam_path);
+        if let Ok(mut reader) = idx_check {
+            if let Some(ref_path) = reference {
+                reader.set_reference(ref_path).is_ok()
+            } else {
+                true
+            }
+        } else {
+            false
+        }
+    };
     if threads > 1 && !use_parallel {
         warn!(
-            "BAM index (.bai) not found for {}; falling back to single-threaded processing. \
+            "Alignment index not found for {}; falling back to single-threaded processing. \
              Create an index with 'samtools index' to enable parallel processing.",
             bam_path
         );
@@ -762,6 +788,7 @@ pub fn count_reads(
                         chrom_mapping,
                         chrom_prefix,
                         &global_read_counter,
+                        reference,
                     )
                 })
                 .collect()
@@ -774,15 +801,19 @@ pub fn count_reads(
         }
         merged
     } else {
-        // --- Single-threaded fallback (no BAM index or threads=1) ---
+        // --- Single-threaded fallback (no index or threads=1) ---
         //
-        // Process all reads sequentially through a single pass over the BAM file.
-        // This avoids the need for a BAM index (.bai file).
+        // Process all reads sequentially through a single pass over the alignment file.
+        // This avoids the need for an index file.
         let global_read_counter = AtomicU64::new(0);
         let mut result = ChromResult::new(interner.len());
 
         let mut bam = bam::Reader::from_path(bam_path)
-            .with_context(|| format!("Failed to open BAM file: {}", bam_path))?;
+            .with_context(|| format!("Failed to open alignment file: {}", bam_path))?;
+        if let Some(ref_path) = reference {
+            bam.set_reference(ref_path)
+                .with_context(|| format!("Failed to set reference FASTA: {}", ref_path))?;
+        }
 
         // Reusable buffers
         let mut aligned_blocks_buf: Vec<(u64, u64)> = Vec::new();
@@ -791,7 +822,7 @@ pub fn count_reads(
         let mut record = bam::Record::new();
 
         while let Some(read_result) = bam.read(&mut record) {
-            read_result.context("Error reading BAM record")?;
+            read_result.context("Error reading alignment record")?;
             result.total_reads += 1;
 
             let prev = global_read_counter.fetch_add(1, Ordering::Relaxed);
@@ -1118,12 +1149,12 @@ pub fn count_reads(
         let bam_chroms: Vec<&str> = tid_to_name.iter().take(5).map(|s| s.as_str()).collect();
         let gtf_chroms: Vec<&str> = index.keys().take(5).map(|s| s.as_str()).collect();
         anyhow::bail!(
-            "Chromosome name mismatch: no BAM reads could be assigned to any gene.\n\
+            "Chromosome name mismatch: no reads could be assigned to any gene.\n\
              \n\
-             BAM chromosomes (first 5): {}\n\
+             Alignment chromosomes (first 5): {}\n\
              GTF chromosomes (first 5): {}\n\
              \n\
-             The BAM and GTF files appear to use different chromosome naming conventions.\n\
+             The alignment and GTF files appear to use different chromosome naming conventions.\n\
              To fix this, create a YAML config file with a chromosome_mapping section and pass it via --config:\n\
              \n\
              Example config.yaml:\n\

@@ -1,7 +1,7 @@
 //! Configuration file support for RustQC.
 //!
 //! Supports an optional YAML configuration file that can provide settings
-//! like chromosome name mappings between BAM and GTF references.
+//! like chromosome name mappings between alignment file and GTF references.
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -15,20 +15,20 @@ use std::path::Path;
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
-    /// Prefix to prepend to BAM chromosome names before matching to GTF names.
+    /// Prefix to prepend to alignment file chromosome names before matching to GTF names.
     ///
     /// Applied before explicit chromosome_mapping lookups. For example, if the
-    /// BAM has "1", "2", "X" and the GTF has "chr1", "chr2", "chrX", set:
+    /// alignment file has "1", "2", "X" and the GTF has "chr1", "chr2", "chrX", set:
     /// ```yaml
     /// chromosome_prefix: "chr"
     /// ```
     #[serde(default)]
     pub chromosome_prefix: Option<String>,
 
-    /// Chromosome name mapping from GTF names to BAM names.
+    /// Chromosome name mapping from GTF names to alignment file names.
     ///
     /// Keys are chromosome names as they appear in the GTF file,
-    /// values are the corresponding names in the BAM file.
+    /// values are the corresponding names in the alignment file (SAM/BAM/CRAM).
     /// Applied after chromosome_prefix (so explicit mappings can override
     /// the prefix for specific chromosomes like chrM -> MT).
     ///
@@ -52,15 +52,15 @@ impl Config {
         Ok(config)
     }
 
-    /// Build a reverse mapping: BAM chromosome name -> GTF chromosome name.
+    /// Build a reverse mapping: alignment chromosome name -> GTF chromosome name.
     ///
-    /// The config file maps GTF -> BAM, but at lookup time we need BAM -> GTF
-    /// (since the index is keyed by GTF names).
+    /// The config file maps GTF -> alignment, but at lookup time we need
+    /// alignment -> GTF (since the index is keyed by GTF names).
     /// Explicit chromosome_mapping entries take priority over the prefix.
-    pub fn bam_to_gtf_mapping(&self) -> HashMap<String, String> {
+    pub fn alignment_to_gtf_mapping(&self) -> HashMap<String, String> {
         self.chromosome_mapping
             .iter()
-            .map(|(gtf_name, bam_name)| (bam_name.clone(), gtf_name.clone()))
+            .map(|(gtf_name, aln_name)| (aln_name.clone(), gtf_name.clone()))
             .collect()
     }
 
@@ -101,7 +101,7 @@ chromosome_mapping:
         assert_eq!(config.chromosome_mapping.get("chr1").unwrap(), "1");
         assert_eq!(config.chromosome_mapping.get("chrM").unwrap(), "MT");
 
-        let reverse = config.bam_to_gtf_mapping();
+        let reverse = config.alignment_to_gtf_mapping();
         assert_eq!(reverse.get("1").unwrap(), "chr1");
         assert_eq!(reverse.get("MT").unwrap(), "chrM");
     }

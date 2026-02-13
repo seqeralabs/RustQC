@@ -31,15 +31,14 @@ fn rustqc_binary() -> String {
 
 /// Helper: run rustqc rna on test data and return the output directory
 fn run_rustqc(outdir: &str) -> std::process::Output {
+    run_rustqc_with_input(outdir, "tests/data/test.bam")
+}
+
+/// Helper: run rustqc rna with a specified input file and return the output
+fn run_rustqc_with_input(outdir: &str, input: &str) -> std::process::Output {
     let binary = rustqc_binary();
     Command::new(&binary)
-        .args([
-            "rna",
-            "tests/data/test.bam",
-            "tests/data/test.gtf",
-            "--outdir",
-            outdir,
-        ])
+        .args(["rna", input, "tests/data/test.gtf", "--outdir", outdir])
         .output()
         .expect("Failed to execute rustqc")
 }
@@ -441,4 +440,62 @@ fn test_count_values_exact() {
 
     // Cleanup
     let _ = fs::remove_dir_all(outdir);
+}
+
+#[test]
+fn test_sam_input_matches_bam() {
+    // SAM input should produce identical results to BAM input.
+    // SAM files have no index, so this exercises the single-threaded code path.
+    let outdir_bam = "tests/output_integration_sam_bam";
+    let outdir_sam = "tests/output_integration_sam_sam";
+    let _ = fs::remove_dir_all(outdir_bam);
+    let _ = fs::remove_dir_all(outdir_sam);
+    fs::create_dir_all(outdir_bam).unwrap();
+    fs::create_dir_all(outdir_sam).unwrap();
+
+    let output_bam = run_rustqc_with_input(outdir_bam, "tests/data/test.bam");
+    assert!(
+        output_bam.status.success(),
+        "rustqc with BAM input failed: {}",
+        String::from_utf8_lossy(&output_bam.stderr)
+    );
+
+    let output_sam = run_rustqc_with_input(outdir_sam, "tests/data/test.sam");
+    assert!(
+        output_sam.status.success(),
+        "rustqc with SAM input failed: {}",
+        String::from_utf8_lossy(&output_sam.stderr)
+    );
+
+    // Compare dup matrices — SAM and BAM should produce identical output
+    let bam_matrix = parse_dup_matrix(&format!("{}/test_dupMatrix.txt", outdir_bam));
+    let sam_matrix = parse_dup_matrix(&format!("{}/test_dupMatrix.txt", outdir_sam));
+
+    assert_eq!(
+        bam_matrix.len(),
+        sam_matrix.len(),
+        "Different number of genes: BAM={}, SAM={}",
+        bam_matrix.len(),
+        sam_matrix.len()
+    );
+
+    for (bam_row, sam_row) in bam_matrix.iter().zip(sam_matrix.iter()) {
+        assert_eq!(
+            bam_row.0, sam_row.0,
+            "Gene order mismatch: BAM={}, SAM={}",
+            bam_row.0, sam_row.0
+        );
+
+        for (col_idx, (bam_val, sam_val)) in bam_row.1.iter().zip(sam_row.1.iter()).enumerate() {
+            assert_eq!(
+                bam_val, sam_val,
+                "Value mismatch at col {} for gene {}: BAM='{}', SAM='{}'",
+                col_idx, bam_row.0, bam_val, sam_val
+            );
+        }
+    }
+
+    // Cleanup
+    let _ = fs::remove_dir_all(outdir_bam);
+    let _ = fs::remove_dir_all(outdir_sam);
 }
