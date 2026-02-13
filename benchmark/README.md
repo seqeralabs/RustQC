@@ -2,6 +2,8 @@
 
 Comparison of [dupRadar](https://bioconductor.org/packages/dupRadar/) (R/Bioconductor) and RustQC on the same input data.
 
+In addition to dupRadar outputs, RustQC also generates featureCounts-compatible output files (counts TSV, summary, biotype counts, and MultiQC files) in the same pass.
+
 ## Small benchmark
 
 A small test BAM file (`test.bam`) with a chr6-only GTF annotation, included in this repository.
@@ -30,9 +32,11 @@ A small test BAM file (`test.bam`) with a chr6-only GTF annotation, included in 
 # dupRadar (R)
 Rscript benchmark/small/run_dupRadar_R.R
 
-# RustQC
+# RustQC (dupRadar + featureCounts outputs)
 cargo run --release -- rna benchmark/small/test.bam benchmark/small/chr6.gtf -p -o benchmark/small/RustQC
 ```
+
+The GTF for the small benchmark uses `gene_biotype` (Ensembl convention), so biotype counts are generated automatically.
 
 ## Large benchmark
 
@@ -118,7 +122,8 @@ cargo build --release
   benchmark/large/genes.gtf \
   -p \
   -o benchmark/large/RustQC \
-  -c benchmark/large/config.yaml
+  -c benchmark/large/config.yaml \
+  --biotype-attribute gene_type
 
 # Multi-threaded (8 threads)
 ./target/release/rustqc rna \
@@ -127,8 +132,12 @@ cargo build --release
   -p \
   -t 8 \
   -o benchmark/large/RustQC \
-  -c benchmark/large/config.yaml
+  -c benchmark/large/config.yaml \
+  --biotype-attribute gene_type
 ```
+
+> **Note:** The GENCODE GTF uses `gene_type` instead of the Ensembl default `gene_biotype`.
+> Use `--biotype-attribute gene_type` to get biotype counts with GENCODE annotations.
 
 ### Known differences
 

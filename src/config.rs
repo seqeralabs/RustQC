@@ -1,7 +1,7 @@
 //! Configuration file support for RustQC.
 //!
 //! Supports an optional YAML configuration file that can provide settings
-//! like chromosome name mappings between BAM and GTF references.
+//! like chromosome name mappings and per-tool output configuration.
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -11,7 +11,8 @@ use std::path::Path;
 /// Top-level configuration structure.
 ///
 /// Designed to be extensible — new sections can be added as optional fields
-/// without breaking existing config files.
+/// without breaking existing config files. Tool-specific settings are nested
+/// under their tool name (e.g. `dupradar:`, `featurecounts:`).
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
@@ -40,6 +41,122 @@ pub struct Config {
     ///   chrX: "X"
     /// ```
     pub chromosome_mapping: HashMap<String, String>,
+
+    /// dupRadar-specific output configuration.
+    #[serde(default)]
+    pub dupradar: DupradarConfig,
+
+    /// featureCounts-compatible output configuration.
+    #[serde(default)]
+    pub featurecounts: FeatureCountsConfig,
+}
+
+/// Configuration for dupRadar outputs.
+///
+/// Controls which dupRadar output files are generated.
+/// All outputs are enabled by default.
+///
+/// Example:
+/// ```yaml
+/// dupradar:
+///   dup_matrix: true
+///   intercept_slope: true
+///   density_scatter_plot: true
+///   boxplot: true
+///   expression_histogram: true
+///   multiqc_intercept: true
+///   multiqc_curve: true
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct DupradarConfig {
+    /// Write the duplication matrix TSV file.
+    pub dup_matrix: bool,
+
+    /// Write the intercept/slope fit results file.
+    pub intercept_slope: bool,
+
+    /// Generate the density scatter plot (PNG + SVG).
+    pub density_scatter_plot: bool,
+
+    /// Generate the duplication rate boxplot (PNG + SVG).
+    pub boxplot: bool,
+
+    /// Generate the expression histogram (PNG + SVG).
+    pub expression_histogram: bool,
+
+    /// Write the MultiQC intercept file.
+    pub multiqc_intercept: bool,
+
+    /// Write the MultiQC curve file.
+    pub multiqc_curve: bool,
+}
+
+impl Default for DupradarConfig {
+    fn default() -> Self {
+        Self {
+            dup_matrix: true,
+            intercept_slope: true,
+            density_scatter_plot: true,
+            boxplot: true,
+            expression_histogram: true,
+            multiqc_intercept: true,
+            multiqc_curve: true,
+        }
+    }
+}
+
+/// Configuration for featureCounts-compatible outputs.
+///
+/// Controls which featureCounts output files are generated and the
+/// biotype counting behaviour.
+///
+/// Example:
+/// ```yaml
+/// featurecounts:
+///   counts_file: true
+///   summary_file: true
+///   biotype_counts: true
+///   biotype_counts_mqc: true
+///   biotype_rrna_mqc: true
+///   biotype_attribute: "gene_biotype"
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct FeatureCountsConfig {
+    /// Write the featureCounts-compatible counts file.
+    pub counts_file: bool,
+
+    /// Write the featureCounts summary file (.summary).
+    pub summary_file: bool,
+
+    /// Write the biotype counts TSV file.
+    pub biotype_counts: bool,
+
+    /// Write the biotype counts MultiQC bargraph file.
+    pub biotype_counts_mqc: bool,
+
+    /// Write the biotype rRNA percentage MultiQC file.
+    pub biotype_rrna_mqc: bool,
+
+    /// GTF attribute name to use for biotype grouping.
+    ///
+    /// Defaults to `"gene_biotype"` (Ensembl convention).
+    /// Use `"gene_type"` for GENCODE GTF files.
+    pub biotype_attribute: String,
+}
+
+impl Default for FeatureCountsConfig {
+    fn default() -> Self {
+        Self {
+            counts_file: true,
+            summary_file: true,
+            biotype_counts: true,
+            biotype_counts_mqc: true,
+            biotype_rrna_mqc: true,
+            biotype_attribute: "gene_biotype".to_string(),
+        }
+    }
 }
 
 impl Config {
@@ -74,6 +191,30 @@ impl Config {
     pub fn has_chromosome_mapping(&self) -> bool {
         !self.chromosome_mapping.is_empty() || self.chromosome_prefix.is_some()
     }
+
+    /// Returns true if any featureCounts output is enabled.
+    pub fn any_featurecounts_output(&self) -> bool {
+        let fc = &self.featurecounts;
+        fc.counts_file || fc.summary_file
+    }
+
+    /// Returns true if any biotype output is enabled.
+    pub fn any_biotype_output(&self) -> bool {
+        let fc = &self.featurecounts;
+        fc.biotype_counts || fc.biotype_counts_mqc || fc.biotype_rrna_mqc
+    }
+
+    /// Returns true if any dupRadar output is enabled.
+    pub fn any_dupradar_output(&self) -> bool {
+        let dr = &self.dupradar;
+        dr.dup_matrix
+            || dr.intercept_slope
+            || dr.density_scatter_plot
+            || dr.boxplot
+            || dr.expression_histogram
+            || dr.multiqc_intercept
+            || dr.multiqc_curve
+    }
 }
 
 #[cfg(test)]
@@ -85,6 +226,10 @@ mod tests {
         let config: Config = serde_yaml::from_str("").unwrap();
         assert!(config.chromosome_mapping.is_empty());
         assert!(!config.has_chromosome_mapping());
+        // Defaults: all outputs enabled
+        assert!(config.dupradar.dup_matrix);
+        assert!(config.featurecounts.counts_file);
+        assert_eq!(config.featurecounts.biotype_attribute, "gene_biotype");
     }
 
     #[test]
@@ -117,5 +262,40 @@ another_section:
 "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.chromosome_mapping.len(), 1);
+    }
+
+    #[test]
+    fn test_nested_tool_config() {
+        let yaml = r#"
+dupradar:
+  dup_matrix: true
+  boxplot: false
+featurecounts:
+  counts_file: true
+  summary_file: false
+  biotype_attribute: "gene_type"
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert!(config.dupradar.dup_matrix);
+        assert!(!config.dupradar.boxplot);
+        assert!(config.featurecounts.counts_file);
+        assert!(!config.featurecounts.summary_file);
+        assert_eq!(config.featurecounts.biotype_attribute, "gene_type");
+    }
+
+    #[test]
+    fn test_disable_all_dupradar() {
+        let yaml = r#"
+dupradar:
+  dup_matrix: false
+  intercept_slope: false
+  density_scatter_plot: false
+  boxplot: false
+  expression_histogram: false
+  multiqc_intercept: false
+  multiqc_curve: false
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert!(!config.any_dupradar_output());
     }
 }

@@ -6,6 +6,7 @@
 
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
@@ -28,7 +29,7 @@ pub struct Exon {
 pub struct Gene {
     /// Gene identifier (from gene_id attribute)
     pub gene_id: String,
-    /// Chromosome/contig name
+    /// Chromosome/contig name (kept for API completeness)
     #[allow(dead_code)]
     pub chrom: String,
     /// Gene start (minimum of all exon starts, 1-based)
@@ -42,6 +43,11 @@ pub struct Gene {
     pub exons: Vec<Exon>,
     /// Effective length: total non-overlapping exon bases
     pub effective_length: u64,
+    /// Additional extracted attributes (e.g. gene_biotype, gene_name).
+    ///
+    /// Keys are attribute names, values are the attribute values from the GTF.
+    /// Only attributes requested via `extra_attributes` in [`parse_gtf`] are stored.
+    pub attributes: HashMap<String, String>,
 }
 
 /// Parse a GTF attribute string to extract a specific attribute value.
@@ -110,10 +116,11 @@ fn compute_non_overlapping_length(exons: &[Exon]) -> u64 {
 ///
 /// # Arguments
 /// * `path` - Path to the GTF annotation file
+/// * `extra_attributes` - Additional GTF attribute names to extract (e.g. `["gene_biotype", "gene_name"]`)
 ///
 /// # Returns
 /// An IndexMap preserving insertion order of gene_id -> Gene
-pub fn parse_gtf(path: &str) -> Result<IndexMap<String, Gene>> {
+pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<String, Gene>> {
     let file = File::open(Path::new(path))
         .with_context(|| format!("Failed to open GTF file: {}", path))?;
     let reader = BufReader::new(file);
@@ -147,8 +154,8 @@ pub fn parse_gtf(path: &str) -> Result<IndexMap<String, Gene>> {
             .with_context(|| format!("Invalid end position: {}", fields[4]))?;
         let strand = fields[6].chars().next().unwrap_or('.');
 
-        let attributes = fields[8];
-        let gene_id = match get_attribute(attributes, "gene_id") {
+        let attr_str = fields[8];
+        let gene_id = match get_attribute(attr_str, "gene_id") {
             Some(id) => id,
             None => continue, // Skip exons without gene_id
         };
@@ -160,6 +167,7 @@ pub fn parse_gtf(path: &str) -> Result<IndexMap<String, Gene>> {
             strand,
         };
 
+        // Extract extra attributes from the first exon encountered for this gene
         genes
             .entry(gene_id.clone())
             .and_modify(|gene| {
@@ -167,14 +175,23 @@ pub fn parse_gtf(path: &str) -> Result<IndexMap<String, Gene>> {
                 gene.end = gene.end.max(end);
                 gene.exons.push(exon.clone());
             })
-            .or_insert_with(|| Gene {
-                gene_id: gene_id.clone(),
-                chrom,
-                start,
-                end,
-                strand,
-                exons: vec![exon],
-                effective_length: 0, // computed later
+            .or_insert_with(|| {
+                let mut attrs = HashMap::new();
+                for attr_name in extra_attributes {
+                    if let Some(val) = get_attribute(attr_str, attr_name) {
+                        attrs.insert(attr_name.clone(), val);
+                    }
+                }
+                Gene {
+                    gene_id: gene_id.clone(),
+                    chrom,
+                    start,
+                    end,
+                    strand,
+                    exons: vec![exon],
+                    effective_length: 0, // computed later
+                    attributes: attrs,
+                }
             });
     }
 
@@ -184,6 +201,40 @@ pub fn parse_gtf(path: &str) -> Result<IndexMap<String, Gene>> {
     }
 
     Ok(genes)
+}
+
+/// Check whether a given attribute name exists in a GTF file.
+///
+/// Scans up to `max_lines` data lines (non-comment, non-empty) and returns
+/// `true` if the attribute is found in at least one exon feature.
+pub fn attribute_exists_in_gtf(path: &str, attribute_name: &str, max_lines: usize) -> bool {
+    let file = match File::open(Path::new(path)) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    let reader = BufReader::new(file);
+    let mut checked = 0;
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => break,
+        };
+        if line.starts_with('#') || line.is_empty() {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() < 9 || fields[2] != "exon" {
+            continue;
+        }
+        if get_attribute(fields[8], attribute_name).is_some() {
+            return true;
+        }
+        checked += 1;
+        if checked >= max_lines {
+            break;
+        }
+    }
+    false
 }
 
 #[cfg(test)]

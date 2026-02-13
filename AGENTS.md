@@ -1,7 +1,8 @@
 # AGENTS.md — RustQC
 
 > Fast quality control tools for sequencing data, written in Rust. Currently includes an RNA-Seq
-> duplicate rate analyser (reimplementation of [dupRadar](https://github.com/ssayols/dupRadar)).
+> duplicate rate analyser (reimplementation of [dupRadar](https://github.com/ssayols/dupRadar)),
+> with featureCounts-compatible output and biotype counting.
 > Binary crate (`rustqc`), Rust edition 2021.
 
 ## Build / Lint / Test Commands
@@ -40,14 +41,15 @@ cargo test --test integration_test test_intercept_slope_match
 
 ```
 src/
-  main.rs        — Entry point, dispatches subcommands
-  cli.rs         — CLI argument parsing (clap derive, subcommand structure)
-  config.rs      — YAML configuration loading (serde)
-  gtf.rs         — GTF annotation file parser
-  counting.rs    — BAM read counting engine (largest module)
-  dupmatrix.rs   — Duplication matrix construction & TSV output
-  fitting.rs     — Logistic regression via IRLS
-  plots.rs       — Plot generation: density scatter, boxplot, histogram
+  main.rs           — Entry point, dispatches subcommands
+  cli.rs            — CLI argument parsing (clap derive, subcommand structure)
+  config.rs         — YAML configuration loading (serde), nested tool configs
+  gtf.rs            — GTF annotation file parser (with configurable attribute extraction)
+  counting.rs       — BAM read counting engine (largest module)
+  featurecounts.rs  — featureCounts-format output & biotype counting
+  dupmatrix.rs      — Duplication matrix construction & TSV output
+  fitting.rs        — Logistic regression via IRLS
+  plots.rs          — Plot generation: density scatter, boxplot, histogram
 tests/
   integration_test.rs  — 8 integration tests vs R dupRadar reference output
   data/                — Test BAM/GTF input files
@@ -175,3 +177,14 @@ All three must pass. Uses `dtolnay/rust-toolchain@stable` and `Swatinem/rust-cac
 - **IMPORTANT:** When benchmarks are re-run, verify that all results referenced in both `benchmark/README.md`
   and the top-level `README.md` are updated to reflect the new numbers (timings, percentages, etc.).
   These documents must always accurately reflect the latest benchmark data.
+- The YAML config nests output toggles under `dupradar:` and `featurecounts:` keys.
+  Each output file can be individually enabled/disabled (all default to `true`).
+- The `featurecounts.rs` module produces featureCounts-compatible output files (counts TSV,
+  summary, biotype counts, and MultiQC files). These are generated in the same pass as
+  the dupRadar analysis — no separate featureCounts run is needed.
+- The GTF parser (`gtf.rs`) accepts extra attribute names to extract (e.g., `gene_biotype`,
+  `gene_type`) and stores them in `Gene.attributes`. The biotype attribute name is
+  configurable via `--biotype-attribute` CLI flag or `featurecounts.biotype_attribute`
+  in the YAML config.
+- GENCODE GTFs use `gene_type` while Ensembl GTFs use `gene_biotype`. The tool
+  auto-detects which is present and falls back gracefully with a warning if neither is found.

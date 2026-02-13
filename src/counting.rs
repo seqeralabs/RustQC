@@ -138,7 +138,10 @@ fn assign_fragment_to_gene(
     false
 }
 
-/// Result of the counting step, including per-gene counts and total mapped reads.
+/// Result of the counting step, including per-gene counts and assignment statistics.
+///
+/// Contains everything needed to produce both dupRadar outputs and
+/// featureCounts-compatible output files.
 #[derive(Debug)]
 pub struct CountResult {
     /// Per-gene counts indexed by gene_id
@@ -153,6 +156,24 @@ pub struct CountResult {
     /// Total mapped reads (unique only, excluding duplicates)
     #[allow(dead_code)]
     pub total_reads_unique_nodup: u64,
+
+    // --- featureCounts summary statistics ---
+    /// Total reads/records seen in the BAM file
+    pub stat_total_reads: u64,
+    /// Fragments successfully assigned to exactly one gene
+    pub stat_assigned: u64,
+    /// Fragments overlapping multiple genes (ambiguous)
+    pub stat_ambiguous: u64,
+    /// Fragments overlapping no annotated gene
+    pub stat_no_features: u64,
+    /// Total fragments (single-end reads or paired-end pairs)
+    pub stat_total_fragments: u64,
+    /// Total duplicate reads
+    #[allow(dead_code)]
+    pub stat_total_dup: u64,
+    /// Total multimapping reads
+    #[allow(dead_code)]
+    pub stat_total_multi: u64,
 }
 
 /// Metadata stored with each interval in the cache-oblivious interval tree.
@@ -1156,6 +1177,13 @@ pub fn count_reads(
         total_reads_multi_nodup: merged.n_multi_nodup,
         total_reads_unique_dup: merged.n_unique_dup,
         total_reads_unique_nodup: merged.n_unique_nodup,
+        stat_total_reads: merged.total_reads,
+        stat_assigned: merged.stat_assigned,
+        stat_ambiguous: merged.stat_ambiguous,
+        stat_no_features: merged.stat_no_features,
+        stat_total_fragments: merged.total_fragments,
+        stat_total_dup: merged.total_dup,
+        stat_total_multi: merged.total_multi,
     })
 }
 
