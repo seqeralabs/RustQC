@@ -279,6 +279,36 @@ pub struct CountResult {
     /// Total multimapping reads
     #[allow(dead_code)]
     pub stat_total_multi: u64,
+
+    // --- BAM stat counters (RSeQC bam_stat.py equivalent) ---
+    /// Unmapped reads (BAM flag 0x4)
+    pub stat_unmapped: u64,
+    /// QC-failed reads (BAM flag 0x200)
+    pub stat_qc_failed: u64,
+    /// Secondary alignments (BAM flag 0x100)
+    pub stat_secondary: u64,
+    /// Supplementary alignments (BAM flag 0x800)
+    pub stat_supplementary: u64,
+    /// Non-primary hits (secondary + supplementary)
+    pub stat_non_primary_hits: u64,
+    /// Reads mapped in proper pairs (BAM flag 0x2)
+    pub stat_proper_pairs: u64,
+    /// Read-1 reads among mapped (BAM flag 0x40)
+    pub stat_read1: u64,
+    /// Read-2 reads among mapped (paired but not read-1)
+    pub stat_read2: u64,
+    /// Mapped reads on the forward (+) strand
+    pub stat_plus_strand: u64,
+    /// Mapped reads on the reverse (-) strand
+    pub stat_minus_strand: u64,
+    /// Singletons: mapped reads whose mate is unmapped
+    pub stat_singletons: u64,
+    /// Reads whose mate maps to a different chromosome
+    pub stat_mate_mapped_diff_chr: u64,
+    /// Spliced reads (CIGAR contains 'N' / RefSkip operation)
+    pub stat_splice_reads: u64,
+    /// Non-spliced mapped reads (no 'N' in CIGAR)
+    pub stat_non_splice_reads: u64,
 }
 
 /// Metadata stored with each interval in the cache-oblivious interval tree.
@@ -478,6 +508,21 @@ struct ChromResult {
     n_multi_nodup: u64,
     n_unique_dup: u64,
     n_unique_nodup: u64,
+
+    // BAM stat counters
+    stat_unmapped: u64,
+    stat_qc_failed: u64,
+    stat_secondary: u64,
+    stat_supplementary: u64,
+    stat_proper_pairs: u64,
+    stat_read1: u64,
+    stat_read2: u64,
+    stat_plus_strand: u64,
+    stat_minus_strand: u64,
+    stat_singletons: u64,
+    stat_mate_mapped_diff_chr: u64,
+    stat_splice_reads: u64,
+    stat_non_splice_reads: u64,
 }
 
 impl ChromResult {
@@ -498,6 +543,19 @@ impl ChromResult {
             n_multi_nodup: 0,
             n_unique_dup: 0,
             n_unique_nodup: 0,
+            stat_unmapped: 0,
+            stat_qc_failed: 0,
+            stat_secondary: 0,
+            stat_supplementary: 0,
+            stat_proper_pairs: 0,
+            stat_read1: 0,
+            stat_read2: 0,
+            stat_plus_strand: 0,
+            stat_minus_strand: 0,
+            stat_singletons: 0,
+            stat_mate_mapped_diff_chr: 0,
+            stat_splice_reads: 0,
+            stat_non_splice_reads: 0,
         }
     }
 
@@ -523,6 +581,19 @@ impl ChromResult {
         self.n_multi_nodup += other.n_multi_nodup;
         self.n_unique_dup += other.n_unique_dup;
         self.n_unique_nodup += other.n_unique_nodup;
+        self.stat_unmapped += other.stat_unmapped;
+        self.stat_qc_failed += other.stat_qc_failed;
+        self.stat_secondary += other.stat_secondary;
+        self.stat_supplementary += other.stat_supplementary;
+        self.stat_proper_pairs += other.stat_proper_pairs;
+        self.stat_read1 += other.stat_read1;
+        self.stat_read2 += other.stat_read2;
+        self.stat_plus_strand += other.stat_plus_strand;
+        self.stat_minus_strand += other.stat_minus_strand;
+        self.stat_singletons += other.stat_singletons;
+        self.stat_mate_mapped_diff_chr += other.stat_mate_mapped_diff_chr;
+        self.stat_splice_reads += other.stat_splice_reads;
+        self.stat_non_splice_reads += other.stat_non_splice_reads;
     }
 }
 
@@ -577,6 +648,20 @@ fn process_chromosome_batch(
 
             let flags = record.flags();
 
+            // Count BAM stat categories before skip filters
+            if flags & BAM_FUNMAP != 0 {
+                result.stat_unmapped += 1;
+            }
+            if flags & BAM_FQCFAIL != 0 {
+                result.stat_qc_failed += 1;
+            }
+            if flags & BAM_FSECONDARY != 0 {
+                result.stat_secondary += 1;
+            }
+            if flags & BAM_FSUPPLEMENTARY != 0 {
+                result.stat_supplementary += 1;
+            }
+
             // Skip unmapped reads
             if flags & BAM_FUNMAP != 0 {
                 continue;
@@ -621,6 +706,42 @@ fn process_chromosome_batch(
 
             let is_reverse = flags & BAM_FREVERSE != 0;
             let is_read1 = flags & BAM_FREAD1 != 0;
+
+            // BAM stat counters for mapped reads
+            if is_reverse {
+                result.stat_minus_strand += 1;
+            } else {
+                result.stat_plus_strand += 1;
+            }
+            if flags & BAM_FPAIRED != 0 {
+                if is_read1 {
+                    result.stat_read1 += 1;
+                } else {
+                    result.stat_read2 += 1;
+                }
+                if flags & BAM_FPROPER_PAIR != 0 {
+                    result.stat_proper_pairs += 1;
+                }
+                if flags & BAM_FMUNMAP != 0 {
+                    result.stat_singletons += 1;
+                } else if record.mtid() != record.tid() {
+                    result.stat_mate_mapped_diff_chr += 1;
+                }
+            }
+
+            // Splice detection: check CIGAR for RefSkip ('N') operations
+            {
+                use rust_htslib::bam::record::Cigar;
+                let has_splice = record
+                    .cigar()
+                    .iter()
+                    .any(|op| matches!(op, Cigar::RefSkip(_)));
+                if has_splice {
+                    result.stat_splice_reads += 1;
+                } else {
+                    result.stat_non_splice_reads += 1;
+                }
+            }
 
             // Get the chromosome name
             let rec_tid = record.tid();
@@ -969,6 +1090,20 @@ pub fn count_reads(
 
             let flags = record.flags();
 
+            // Count BAM stat categories before skip filters
+            if flags & BAM_FUNMAP != 0 {
+                result.stat_unmapped += 1;
+            }
+            if flags & BAM_FQCFAIL != 0 {
+                result.stat_qc_failed += 1;
+            }
+            if flags & BAM_FSECONDARY != 0 {
+                result.stat_secondary += 1;
+            }
+            if flags & BAM_FSUPPLEMENTARY != 0 {
+                result.stat_supplementary += 1;
+            }
+
             if flags & BAM_FUNMAP != 0 {
                 continue;
             }
@@ -1004,6 +1139,40 @@ pub fn count_reads(
 
             let is_reverse = flags & BAM_FREVERSE != 0;
             let is_read1 = flags & BAM_FREAD1 != 0;
+
+            if is_reverse {
+                result.stat_minus_strand += 1;
+            } else {
+                result.stat_plus_strand += 1;
+            }
+            if flags & BAM_FPAIRED != 0 {
+                if is_read1 {
+                    result.stat_read1 += 1;
+                } else {
+                    result.stat_read2 += 1;
+                }
+                if flags & BAM_FPROPER_PAIR != 0 {
+                    result.stat_proper_pairs += 1;
+                }
+                if flags & BAM_FMUNMAP != 0 {
+                    result.stat_singletons += 1;
+                } else if record.mtid() != record.tid() {
+                    result.stat_mate_mapped_diff_chr += 1;
+                }
+            }
+
+            {
+                use rust_htslib::bam::record::Cigar;
+                let has_splice = record
+                    .cigar()
+                    .iter()
+                    .any(|op| matches!(op, Cigar::RefSkip(_)));
+                if has_splice {
+                    result.stat_splice_reads += 1;
+                } else {
+                    result.stat_non_splice_reads += 1;
+                }
+            }
 
             let tid = record.tid();
             if tid < 0 || tid as usize >= tid_to_name.len() {
@@ -1352,6 +1521,20 @@ pub fn count_reads(
         stat_total_fragments: merged.total_fragments,
         stat_total_dup: merged.total_dup,
         stat_total_multi: merged.total_multi,
+        stat_unmapped: merged.stat_unmapped,
+        stat_qc_failed: merged.stat_qc_failed,
+        stat_secondary: merged.stat_secondary,
+        stat_supplementary: merged.stat_supplementary,
+        stat_proper_pairs: merged.stat_proper_pairs,
+        stat_read1: merged.stat_read1,
+        stat_read2: merged.stat_read2,
+        stat_plus_strand: merged.stat_plus_strand,
+        stat_minus_strand: merged.stat_minus_strand,
+        stat_singletons: merged.stat_singletons,
+        stat_mate_mapped_diff_chr: merged.stat_mate_mapped_diff_chr,
+        stat_splice_reads: merged.stat_splice_reads,
+        stat_non_splice_reads: merged.stat_non_splice_reads,
+        stat_non_primary_hits: merged.stat_secondary + merged.stat_supplementary,
     })
 }
 

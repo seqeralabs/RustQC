@@ -50,6 +50,10 @@ pub struct Config {
     /// featureCounts-compatible output configuration.
     #[serde(default)]
     pub featurecounts: FeatureCountsConfig,
+
+    /// BAM statistics output configuration.
+    #[serde(default)]
+    pub bamstat: BamStatConfig,
 }
 
 /// Configuration for dupRadar outputs.
@@ -160,6 +164,36 @@ impl Default for FeatureCountsConfig {
     }
 }
 
+/// Configuration for BAM alignment statistics outputs.
+///
+/// Controls which BAM stat output files are generated.
+/// All outputs are enabled by default.
+///
+/// Example:
+/// ```yaml
+/// bamstat:
+///   bam_stat: true
+///   multiqc_bamstat: true
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct BamStatConfig {
+    /// Write the BAM statistics text file.
+    pub bam_stat: bool,
+
+    /// Write the MultiQC general statistics file.
+    pub multiqc_bamstat: bool,
+}
+
+impl Default for BamStatConfig {
+    fn default() -> Self {
+        Self {
+            bam_stat: true,
+            multiqc_bamstat: true,
+        }
+    }
+}
+
 impl Config {
     /// Load configuration from a YAML file.
     pub fn from_file(path: &Path) -> Result<Self> {
@@ -203,6 +237,12 @@ impl Config {
     pub fn any_biotype_output(&self) -> bool {
         let fc = &self.featurecounts;
         fc.biotype_counts || fc.biotype_counts_mqc || fc.biotype_rrna_mqc
+    }
+
+    /// Returns true if any BAM stat output is enabled.
+    pub fn any_bamstat_output(&self) -> bool {
+        let bs = &self.bamstat;
+        bs.bam_stat || bs.multiqc_bamstat
     }
 
     /// Returns true if any dupRadar output is enabled.

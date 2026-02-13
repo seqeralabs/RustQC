@@ -6,6 +6,7 @@
 //! level in RNA-Seq datasets. It also produces featureCounts-compatible output
 //! files and biotype count summaries in a single pass.
 
+mod bamstat;
 mod cli;
 mod config;
 mod counting;
@@ -500,6 +501,28 @@ fn process_single_bam(
                     mqc_rrna_path.display()
                 );
             }
+        }
+    }
+
+    // === BAM stat outputs ===
+    if config.any_bamstat_output() {
+        if config.bamstat.bam_stat {
+            let bamstat_path = outdir.join(format!("{}.bam_stat.txt", bam_stem));
+            bamstat::write_bam_stat(&bamstat_path, &count_result, bam_path)?;
+            info!(
+                "[{}] BAM stats written to {}",
+                bam_stem,
+                bamstat_path.display()
+            );
+        }
+        if config.bamstat.multiqc_bamstat {
+            let mqc_path = outdir.join(format!("{}.bam_stat_mqc.txt", bam_stem));
+            bamstat::write_bam_stat_mqc(&mqc_path, &count_result, bam_stem)?;
+            info!(
+                "[{}] BAM stat MultiQC file written to {}",
+                bam_stem,
+                mqc_path.display()
+            );
         }
     }
 

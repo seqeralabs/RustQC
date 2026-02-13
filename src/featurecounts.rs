@@ -328,6 +328,20 @@ mod tests {
             stat_total_fragments: 200,
             stat_total_dup: 0,
             stat_total_multi: 0,
+            stat_unmapped: 0,
+            stat_qc_failed: 0,
+            stat_secondary: 0,
+            stat_supplementary: 0,
+            stat_non_primary_hits: 0,
+            stat_proper_pairs: 0,
+            stat_read1: 0,
+            stat_read2: 0,
+            stat_plus_strand: 0,
+            stat_minus_strand: 0,
+            stat_singletons: 0,
+            stat_mate_mapped_diff_chr: 0,
+            stat_splice_reads: 0,
+            stat_non_splice_reads: 0,
         };
 
         let biotypes = aggregate_biotype_counts(&genes, &count_result, "gene_biotype");

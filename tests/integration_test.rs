@@ -280,6 +280,8 @@ fn test_all_output_files_generated() {
         "test_expressionHist.svg",
         "test_dup_intercept_mqc.txt",
         "test_duprateExpDensCurve_mqc.txt",
+        "test.bam_stat.txt",
+        "test.bam_stat_mqc.txt",
     ];
 
     for file in &expected_files {
@@ -479,6 +481,153 @@ fn test_count_values_exact() {
 }
 
 // ===================================================================
+// BAM stat tests
+// ===================================================================
+
+/// Verify the BAM stat output file is generated and contains expected lines.
+#[test]
+fn test_bam_stat_output() {
+    let outdir = "tests/output_integration_bamstat";
+    let _ = fs::remove_dir_all(outdir);
+    fs::create_dir_all(outdir).unwrap();
+
+    let output = run_rustqc(outdir);
+    assert!(
+        output.status.success(),
+        "rustqc failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stat_path = format!("{}/test.bam_stat.txt", outdir);
+    assert!(
+        Path::new(&stat_path).exists(),
+        "Missing bam_stat output file"
+    );
+
+    let content = fs::read_to_string(&stat_path).unwrap();
+
+    // Check that expected header and key lines are present
+    assert!(
+        content.contains("RustQC bam_stat"),
+        "Missing RustQC header in bam_stat output"
+    );
+    assert!(
+        content.contains("Total records:"),
+        "Missing 'Total records' line"
+    );
+    assert!(
+        content.contains("Unmapped reads:"),
+        "Missing 'Unmapped reads' line"
+    );
+    assert!(content.contains("QC failed:"), "Missing 'QC failed' line");
+    assert!(
+        content.contains("Non primary hits:"),
+        "Missing 'Non primary hits' line"
+    );
+    assert!(
+        content.contains("Splice reads:"),
+        "Missing 'Splice reads' line"
+    );
+    assert!(
+        content.contains("Non-splice reads:"),
+        "Missing 'Non-splice reads' line"
+    );
+
+    // Parse Total records and verify it's a positive number
+    let total_line = content
+        .lines()
+        .find(|l| l.starts_with("Total records:"))
+        .expect("No 'Total records' line found");
+    let total: u64 = total_line
+        .split_whitespace()
+        .last()
+        .unwrap()
+        .parse()
+        .expect("Total records should be numeric");
+    assert!(total > 0, "Total records should be > 0, got {}", total);
+
+    // Cleanup
+    let _ = fs::remove_dir_all(outdir);
+}
+
+/// Verify the BAM stat MultiQC output file format.
+#[test]
+fn test_bam_stat_mqc_format() {
+    let outdir = "tests/output_integration_bamstat_mqc";
+    let _ = fs::remove_dir_all(outdir);
+    fs::create_dir_all(outdir).unwrap();
+
+    let output = run_rustqc(outdir);
+    assert!(output.status.success());
+
+    let mqc_path = format!("{}/test.bam_stat_mqc.txt", outdir);
+    let content = fs::read_to_string(&mqc_path).unwrap();
+
+    // Should have YAML comment header
+    assert!(
+        content.starts_with('#'),
+        "MultiQC file should start with YAML header comments"
+    );
+
+    // Skip comment lines, verify data
+    let data_lines: Vec<&str> = content.lines().filter(|l| !l.starts_with('#')).collect();
+    assert!(
+        data_lines.len() >= 2,
+        "MultiQC bamstat file should have header + data"
+    );
+
+    // Header should contain expected column names
+    assert!(
+        data_lines[0].contains("Sample"),
+        "Missing 'Sample' in MQC header"
+    );
+    assert!(
+        data_lines[0].contains("total_reads"),
+        "Missing 'total_reads' in MQC header"
+    );
+
+    // Cleanup
+    let _ = fs::remove_dir_all(outdir);
+}
+
+/// Verify SAM and BAM inputs produce identical bam_stat output.
+#[test]
+fn test_bam_stat_sam_vs_bam() {
+    let outdir_bam = "tests/output_bamstat_sam_bam";
+    let outdir_sam = "tests/output_bamstat_sam_sam";
+    let _ = fs::remove_dir_all(outdir_bam);
+    let _ = fs::remove_dir_all(outdir_sam);
+    fs::create_dir_all(outdir_bam).unwrap();
+    fs::create_dir_all(outdir_sam).unwrap();
+
+    let out_bam = run_rustqc_with_input(outdir_bam, "tests/data/test.bam");
+    assert!(out_bam.status.success());
+
+    let out_sam = run_rustqc_with_input(outdir_sam, "tests/data/test.sam");
+    assert!(out_sam.status.success());
+
+    let bam_stat = fs::read_to_string(format!("{}/test.bam_stat.txt", outdir_bam)).unwrap();
+    let sam_stat = fs::read_to_string(format!("{}/test.bam_stat.txt", outdir_sam)).unwrap();
+
+    // Strip the "# Input file:" line since BAM/SAM paths differ
+    let strip_input_line = |s: &str| -> String {
+        s.lines()
+            .filter(|l| !l.starts_with("# Input file:"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert_eq!(
+        strip_input_line(&bam_stat),
+        strip_input_line(&sam_stat),
+        "BAM and SAM bam_stat output should be identical (ignoring input path)"
+    );
+
+    // Cleanup
+    let _ = fs::remove_dir_all(outdir_bam);
+    let _ = fs::remove_dir_all(outdir_sam);
+}
+
+// ===================================================================
 // Multi-BAM tests
 // ===================================================================
 
@@ -505,6 +654,10 @@ fn test_multiple_bam_files() {
         "test_copy_duprateExpDens.png",
         "test_copy_duprateExpBoxplot.png",
         "test_copy_expressionHist.png",
+        "test.bam_stat.txt",
+        "test.bam_stat_mqc.txt",
+        "test_copy.bam_stat.txt",
+        "test_copy.bam_stat_mqc.txt",
     ];
 
     for filename in &expected_files {
