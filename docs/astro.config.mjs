@@ -50,6 +50,7 @@ export default defineConfig({
           items: [
             { label: "dupRadar", slug: "outputs/dupradar" },
             { label: "featureCounts", slug: "outputs/featurecounts" },
+            { label: "RSeQC", slug: "outputs/rseqc" },
           ],
         },
         {

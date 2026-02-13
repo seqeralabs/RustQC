@@ -10,9 +10,12 @@
 
 ---
 
-**RustQC** is a suite of fast QC tools for sequencing data. Currently it includes the `rna` subcommand — a reimplementation of [dupRadar](https://github.com/ssayols/dupRadar) for assessing PCR duplicate rates in RNA-Seq datasets, with [featureCounts](http://subread.sourceforge.net/)-compatible output and biotype counting.
+**RustQC** is a growing suite of fast QC tools for sequencing data, compiled to a single static binary with no runtime dependencies. It currently includes:
 
-It analyzes duplicate-marked alignment files (SAM/BAM/CRAM) to compute per-gene duplication rates as a function of expression level. In a single pass, it produces the same outputs as the original **dupRadar** R/Bioconductor package, featureCounts-format count files, and biotype-level QC summaries — all significantly faster and compiled to a single static binary with no runtime dependencies.
+- **`rustqc rna`** -- A reimplementation of [dupRadar](https://github.com/ssayols/dupRadar) for assessing PCR duplicate rates in RNA-Seq datasets, with built-in [featureCounts](http://subread.sourceforge.net/)-compatible output and biotype counting.
+- **7 RSeQC reimplementations** -- Fast Rust equivalents of the most widely-used [RSeQC](https://rseqc.sourceforge.net/) Python tools: `bam-stat`, `infer-experiment`, `read-duplication`, `read-distribution`, `junction-annotation`, `junction-saturation`, and `inner-distance`.
+
+All tools accept SAM/BAM/CRAM input and support processing multiple files in a single command.
 
 <p align="center">
 <picture>
@@ -21,9 +24,13 @@ It analyzes duplicate-marked alignment files (SAM/BAM/CRAM) to compute per-gene 
 </picture>
 </p>
 
-<p align="center"><em>Run time for a 10 GB paired-end BAM</em></p>
+<p align="center"><em>Run time for a 10 GB paired-end BAM (dupRadar + featureCounts)</em></p>
 
-## Comparison with dupRadar
+## Available tools
+
+### `rustqc rna` -- Duplicate rate analysis + read counting
+
+Performs dupRadar-equivalent analysis and featureCounts-compatible read counting in a single pass. Given a duplicate-marked BAM and GTF annotation, it computes per-gene duplication rates, fits a logistic regression model, generates diagnostic plots, and produces gene-level count files with biotype summaries.
 
 | Feature | dupRadar (R) | RustQC |
 |---------|-------------|--------|
@@ -34,19 +41,25 @@ It analyzes duplicate-marked alignment files (SAM/BAM/CRAM) to compute per-gene 
 | Memory | High (R overhead) | Low |
 | Output format | Identical | Identical |
 
-Benchmark results:
+All gene counts match **exactly** across all 63,086 genes. Cell-by-cell comparison of the full duplication matrix (820,118 values) shows **zero mismatches**. See the [benchmark documentation](https://ewels.github.io/RustQC/benchmarks/dupradar/) for detailed results.
 
-| Metric | dupRadar (R) | RustQC |
-| --- | --- | --- |
-| **Runtime** | 29m 56s | 0m 54s (~33x faster) |
-| **Intercept** | 0.8245 | 0.8245 |
-| **Slope** | 1.6774 | 1.6774 |
+### RSeQC tools
 
-All gene counts match **exactly** across all 63,086 genes. Cell-by-cell comparison of the full duplication matrix (820,118 values) shows **zero mismatches**.
+Reimplementations of popular [RSeQC](https://rseqc.sourceforge.net/) Python QC tools, producing output compatible with the originals:
 
-See the [benchmark documentation](https://ewels.github.io/RustQC/benchmarks/dupradar/) for detailed results and the [benchmark directory](benchmark/) for replication instructions.
+| Subcommand | RSeQC equivalent | Description |
+|------------|-----------------|-------------|
+| `rustqc bam-stat` | `bam_stat.py` | Basic alignment statistics (total reads, duplicates, mapping quality, splice reads, etc.) |
+| `rustqc infer-experiment` | `infer_experiment.py` | Infer library strandedness from read/gene-model overlap |
+| `rustqc read-duplication` | `read_duplication.py` | Position-based and sequence-based duplication histograms |
+| `rustqc read-distribution` | `read_distribution.py` | Read distribution across genomic features (CDS, UTR, intron, intergenic) |
+| `rustqc junction-annotation` | `junction_annotation.py` | Classify splice junctions as known, partial novel, or complete novel |
+| `rustqc junction-saturation` | `junction_saturation.py` | Saturation analysis of detected splice junctions |
+| `rustqc inner-distance` | `inner_distance.py` | Inner distance distribution for paired-end reads |
 
-### Density scatter plots
+All RSeQC tools require a BED12 gene model file (`-b`/`--bed`). Most accept a MAPQ cutoff (`-q`, default 30) and support multiple input files.
+
+## Density scatter plots
 
 <table>
 <tr><th>dupRadar (R)</th><th>RustQC</th></tr>
@@ -125,18 +138,20 @@ The binary will be at `target/release/rustqc`.
 
 ## Usage
 
+### RNA duplicate rate analysis
+
 ```bash
 rustqc rna <INPUT>... --gtf <GTF> [OPTIONS]
 ```
 
-### Required arguments
+#### Required arguments
 
 | Argument | Description |
 |----------|-------------|
 | `<INPUT>...` | One or more duplicate-marked alignment files (SAM/BAM/CRAM). Duplicates must be flagged (SAM flag 0x400), not removed. BAM/CRAM files should be sorted and indexed for parallel processing. |
 | `--gtf <GTF>` | Path to a GTF gene annotation file (e.g., from Ensembl or UCSC). |
 
-### Options
+#### Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -149,17 +164,7 @@ rustqc rna <INPUT>... --gtf <GTF> [OPTIONS]
 | `--biotype-attribute <NAME>` | none | Override the GTF attribute used for biotype counting (default from config: `gene_biotype`). Use `gene_type` for GENCODE GTFs. |
 | `--skip-dup-check` | `false` | Skip verification that duplicates have been marked in the BAM file (see [Duplicate marking](#duplicate-marking)) |
 
-### Duplicate marking
-
-RustQC requires that the input BAM file has been processed by a duplicate-marking tool such as [Picard MarkDuplicates](https://broadinstitute.github.io/picard/command-line-overview.html#MarkDuplicates), [samblaster](https://github.com/GregoryFaust/samblaster), or [sambamba markdup](https://lomereiter.github.io/sambamba/). These tools set the SAM flag `0x400` on PCR/optical duplicate reads, which RustQC uses to compute duplication rates.
-
-Before processing, RustQC checks the BAM `@PG` header lines for known duplicate-marking programs. If none are found, it exits with an error explaining how to mark duplicates. As a secondary safeguard, if processing completes but zero duplicate-flagged reads are found among mapped reads, RustQC also exits with an error.
-
-If you are confident that your BAM file has duplicates correctly flagged despite the header check failing, you can bypass the verification with `--skip-dup-check`.
-
-When multiple BAM files are provided, they are processed in parallel using the available threads. The GTF is parsed once and shared across all BAM files. Threads are divided evenly among the parallel BAM jobs.
-
-### Example
+#### Examples
 
 ```bash
 # Single BAM, single-end, unstranded
@@ -171,34 +176,74 @@ rustqc rna sample.markdup.bam --gtf genes.gtf --paired --stranded 2 --outdir res
 # CRAM input with reference FASTA
 rustqc rna sample.markdup.cram --gtf genes.gtf --reference genome.fa --outdir results/
 
-# SAM input (single-threaded only, no index)
-rustqc rna sample.markdup.sam --gtf genes.gtf --outdir results/
-
 # Multiple alignment files in parallel
 rustqc rna sample1.bam sample2.bam sample3.bam --gtf genes.gtf --paired --threads 12 --outdir results/
-
-# With chromosome name mapping (e.g. Ensembl alignment + UCSC GTF)
-rustqc rna sample.markdup.bam --gtf genes.gtf --paired --config config.yaml --outdir results/
 
 # GENCODE GTF with gene_type attribute for biotypes
 rustqc rna sample.markdup.bam --gtf gencode.gtf --paired --biotype-attribute gene_type --outdir results/
 ```
 
+### RSeQC tools
+
+All RSeQC tools share a common pattern: one or more input alignment files, a BED12 gene model (`-b`), and an output directory (`-o`).
+
+```bash
+# Basic alignment statistics
+rustqc bam-stat sample.bam -o results/
+
+# Infer library strandedness
+rustqc infer-experiment sample.bam -b genes.bed -o results/
+
+# Read duplication histograms (position-based and sequence-based)
+rustqc read-duplication sample.bam -o results/
+
+# Read distribution across genomic features
+rustqc read-distribution sample.bam -b genes.bed -o results/
+
+# Splice junction annotation (known / partial novel / complete novel)
+rustqc junction-annotation sample.bam -b genes.bed -o results/
+
+# Junction saturation analysis
+rustqc junction-saturation sample.bam -b genes.bed -o results/
+
+# Inner distance distribution for paired-end reads
+rustqc inner-distance sample.bam -b genes.bed -o results/
+```
+
+Common options across RSeQC tools:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-o` / `--outdir` | `.` | Output directory |
+| `-q` / `--mapq` | `30` | Minimum mapping quality |
+| `-r` / `--reference` | none | Reference FASTA (for CRAM) |
+| `-b` / `--bed` | -- | BED12 gene model (required for most tools) |
+
+#### Duplicate marking
+
+RustQC's `rna` subcommand requires that the input BAM file has been processed by a duplicate-marking tool such as [Picard MarkDuplicates](https://broadinstitute.github.io/picard/command-line-overview.html#MarkDuplicates), [samblaster](https://github.com/GregoryFaust/samblaster), or [sambamba markdup](https://lomereiter.github.io/sambamba/). These tools set the SAM flag `0x400` on PCR/optical duplicate reads, which RustQC uses to compute duplication rates.
+
+Before processing, RustQC checks the BAM `@PG` header lines for known duplicate-marking programs. If none are found, it exits with an error explaining how to mark duplicates. As a secondary safeguard, if processing completes but zero duplicate-flagged reads are found among mapped reads, RustQC also exits with an error.
+
+If you are confident that your BAM file has duplicates correctly flagged despite the header check failing, you can bypass the verification with `--skip-dup-check`.
+
+The RSeQC tools do not require duplicate marking.
+
 ## Configuration
 
-An optional YAML configuration file can be provided with `--config` to control runtime behaviour. The file is designed to be extensible — unknown fields are silently ignored, so config files remain forward-compatible.
+An optional YAML configuration file can be provided to `rustqc rna` with `--config` to control runtime behaviour. The file is designed to be extensible -- unknown fields are silently ignored, so config files remain forward-compatible.
 
 ### Chromosome name mapping
 
 When the alignment and GTF files use different chromosome naming conventions (e.g. Ensembl `1, 2, X` vs. UCSC `chr1, chr2, chrX`), RustQC will detect the mismatch and exit with a helpful error. You can resolve this with either a prefix or explicit mapping.
 
-**Prefix** — prepend a string to every alignment chromosome name before matching:
+**Prefix** -- prepend a string to every alignment chromosome name before matching:
 
 ```yaml
 chromosome_prefix: "chr"
 ```
 
-**Explicit mapping** — for fine-grained control, map individual GTF names to alignment file names:
+**Explicit mapping** -- for fine-grained control, map individual GTF names to alignment file names:
 
 ```yaml
 chromosome_mapping:
@@ -261,9 +306,9 @@ featurecounts:
 
 ## Output files
 
-For an input file named `sample.bam` (or `sample.cram`, etc.), the following files are generated. All outputs can be individually enabled or disabled via the [configuration file](#output-control).
+### dupRadar outputs (`rustqc rna`)
 
-### dupRadar outputs
+For an input file named `sample.bam`, the following files are generated. All outputs can be individually enabled or disabled via the [configuration file](#output-control).
 
 | File | Description |
 |------|-------------|
@@ -275,7 +320,7 @@ For an input file named `sample.bam` (or `sample.cram`, etc.), the following fil
 | `sample_dup_intercept_mqc.txt` | MultiQC general stats format with intercept value |
 | `sample_duprateExpDensCurve_mqc.txt` | MultiQC line graph data for the fitted curve |
 
-### featureCounts outputs
+### featureCounts outputs (`rustqc rna`)
 
 | File | Description |
 |------|-------------|
@@ -285,7 +330,17 @@ For an input file named `sample.bam` (or `sample.cram`, etc.), the following fil
 | `sample.biotype_counts_mqc.tsv` | MultiQC bargraph format for biotype counts |
 | `sample.biotype_counts_rrna_mqc.tsv` | MultiQC general stats with rRNA percentage |
 
-The featureCounts output files use the same format as [Subread featureCounts](http://subread.sourceforge.net/), making them compatible with downstream tools that expect that format. The biotype outputs replicate the [nf-core/rnaseq](https://nf-co.re/rnaseq) biotype QC functionality.
+### RSeQC outputs
+
+| Subcommand | Output files | Description |
+|------------|-------------|-------------|
+| `bam-stat` | `sample.bam_stat.txt` | Text report with alignment statistics |
+| `infer-experiment` | `sample.infer_experiment.txt` | Strandedness fractions |
+| `read-duplication` | `sample.pos.DupRate.xls`, `sample.seq.DupRate.xls` | Position-based and sequence-based duplication histograms |
+| `read-distribution` | `sample.read_distribution.txt` | Per-region read distribution table |
+| `junction-annotation` | `sample.junction.xls`, `sample.junction.bed`, `sample.junction_plot.r`, `sample.junction_annotation.txt` | Junction classifications and summary |
+| `junction-saturation` | `sample.junctionSaturation_plot.r`, `sample.junctionSaturation_summary.txt` | Saturation curve data |
+| `inner-distance` | `sample.inner_distance.txt`, `sample.inner_distance_freq.txt`, `sample.inner_distance_plot.r`, `sample.inner_distance_summary.txt` | Per-pair distances, histogram, and summary |
 
 ### Duplication matrix columns
 
@@ -308,7 +363,7 @@ The featureCounts output files use the same format as [Subread featureCounts](ht
 
 ## Performance tuning
 
-RustQC uses multi-threaded alignment processing when `--threads` is set above 1. Within a single file, chromosomes are distributed across threads and processed in parallel, typically achieving near-linear speedup. When multiple alignment files are provided, they are also processed in parallel — the available threads are divided evenly among concurrent jobs. For a single sample, `--threads 4` is a good starting point. For multiple samples, use enough threads to keep all jobs busy (e.g., `--threads 12` for 3 files gives each 4 threads). Multi-threading requires an indexed file (`.bai`/`.csi` for BAM, `.crai` for CRAM). SAM files are always processed single-threaded.
+RustQC uses multi-threaded alignment processing when `--threads` is set above 1 (currently supported by `rustqc rna`). Within a single file, chromosomes are distributed across threads and processed in parallel, typically achieving near-linear speedup. When multiple alignment files are provided, they are also processed in parallel -- the available threads are divided evenly among concurrent jobs. For a single sample, `--threads 4` is a good starting point. For multiple samples, use enough threads to keep all jobs busy (e.g., `--threads 12` for 3 files gives each 4 threads). Multi-threading requires an indexed file (`.bai`/`.csi` for BAM, `.crai` for CRAM). SAM files are always processed single-threaded.
 
 For maximum performance when building from source, you can enable CPU-specific optimizations:
 
@@ -338,6 +393,8 @@ Note: PGO profiles are machine-specific and `target-cpu=native` produces non-por
 
 ## How it works
 
+### `rustqc rna`
+
 1. **GTF parsing**: Reads gene annotations, computes effective gene lengths from non-overlapping exon bases, and extracts additional attributes (e.g., biotype) for downstream grouping.
 2. **Read counting**: Reads the alignment file (SAM/BAM/CRAM) once, assigning each read to a gene based on exon overlap. Four count modes are tracked simultaneously:
    - With/without multimappers x with/without duplicates
@@ -349,6 +406,18 @@ Note: PGO profiles are machine-specific and `target-cpu=native` produces non-por
 7. **Plots**: Generates density scatter, boxplot, and histogram visualizations.
 8. **MultiQC integration**: Outputs files compatible with [MultiQC](https://multiqc.info/) for pipeline reporting (dupRadar intercept, fit curve, biotype bargraph, rRNA percentage).
 
+### RSeQC tools
+
+Each RSeQC tool is a single-pass BAM reader that processes the alignment file and produces output compatible with the original Python tools. They use a BED12 gene model for genomic feature annotation. Key implementation details:
+
+- **bam-stat**: Flag-based read classification in a single pass (duplicates, mapping quality, splice events, proper pairs).
+- **infer-experiment**: Samples reads overlapping gene intervals and determines strand protocol fractions.
+- **read-duplication**: Builds position-based and sequence-based occurrence histograms.
+- **read-distribution**: Classifies read tags by midpoint overlap with CDS, UTR, intron, and intergenic regions.
+- **junction-annotation**: Extracts CIGAR N-operations and classifies against known splice sites from the gene model.
+- **junction-saturation**: Subsamples junctions at increasing fractions to build a saturation curve.
+- **inner-distance**: Computes mRNA-level or genomic inner distance between paired-end reads with transcript-aware classification.
+
 ## Interpreting the results
 
 - **Intercept** (exp(beta0)): Indicates duplication rate at low expression. Low values = good quality. High values = PCR artifact problems.
@@ -359,7 +428,9 @@ Note: PGO profiles are machine-specific and `target-cpu=native` produces non-por
 ## References
 
 - Sayols S, Scherzinger D, Klein H (2016). dupRadar: a Bioconductor package for the assessment of PCR artifacts in RNA-Seq data. *BMC Bioinformatics*, 17, 428. doi:10.1186/s12859-016-1276-2
-- Original R package: https://github.com/ssayols/dupRadar
+- Original dupRadar R package: https://github.com/ssayols/dupRadar
+- Wang L, Wang S, Li W (2012). RSeQC: quality control of RNA-seq experiments. *Bioinformatics*, 28(16), 2184-2185. doi:10.1093/bioinformatics/bts356
+- RSeQC: https://rseqc.sourceforge.net/
 
 ## License
 

@@ -51,8 +51,13 @@ Pre-built binaries are available from the [GitHub Releases page](https://github.
 Run RustQC without any local installation using Docker:
 
 ```bash
+# RNA-seq duplicate analysis
 docker run -v $(pwd):/data ghcr.io/ewels/rustqc:latest \
   rna /data/sample.bam --gtf /data/genes.gtf -p -o /data/output/
+
+# RSeQC tools
+docker run -v $(pwd):/data ghcr.io/ewels/rustqc:latest \
+  bam-stat /data/sample.bam -o /data/output/
 ```
 
 
@@ -150,7 +155,9 @@ Both `target-cpu=native` and PGO produce binaries that are specific to the machi
 
 ## Input requirements
 
-Your BAM files **must** have PCR duplicates **marked** (SAM flag `0x400`) but **not removed**. RustQC needs both duplicate and non-duplicate reads present to calculate duplication rates.
+### For `rustqc rna` (dupRadar + featureCounts)
+
+Your BAM files **must** have PCR duplicates **marked** (SAM flag `0x400`) but **not removed**. RustQC needs both duplicate and non-duplicate reads present to calculate duplication rates. You also need a GTF annotation file.
 
 Compatible duplicate-marking tools:
 
@@ -160,6 +167,10 @@ Compatible duplicate-marking tools:
 - [biobambam bammarkduplicates](https://gitlab.com/german.tischler/biobambam2)
 
 RustQC automatically checks the BAM header for duplicate-marking tool signatures and exits with an error if none are found. Use `--skip-dup-check` to bypass this validation if your duplicate-marking tool is not recognized.
+
+### For RSeQC tools
+
+Most RSeQC tools (`infer-experiment`, `read-distribution`, `junction-annotation`, `junction-saturation`, `inner-distance`) require a **BED12 gene model** file in addition to the BAM. The `bam-stat` and `read-duplication` subcommands need only the BAM file. Duplicate marking is not required for RSeQC tools.
 
 ## Verify installation
 

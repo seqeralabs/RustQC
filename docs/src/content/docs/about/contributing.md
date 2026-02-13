@@ -66,28 +66,43 @@ settings with `-D warnings`.
 
 ## Project structure
 
-RustQC is a **binary crate** with a flat module structure. All modules are
-declared in `main.rs` with no `lib.rs`.
+RustQC is a **binary crate** with a nested module structure. Top-level modules
+are declared in `main.rs` with no `lib.rs`.
 
 ```
 src/
-  main.rs           Entry point, dispatches subcommands
-  cli.rs            CLI argument parsing (clap derive)
-  config.rs         YAML configuration loading (serde)
-  gtf.rs            GTF annotation file parser
-  counting.rs       BAM read counting engine
-  featurecounts.rs  featureCounts-format output and biotype counting
-  dupmatrix.rs      Duplication matrix construction and TSV output
-  fitting.rs        Logistic regression via IRLS
-  plots.rs          Plot generation (density scatter, boxplot, histogram)
+  main.rs                     Entry point, dispatches subcommands
+  cli.rs                      CLI argument parsing (clap derive)
+  config.rs                   YAML configuration loading (serde)
+  gtf.rs                      GTF annotation file parser
+  rna/
+    mod.rs                    Re-exports dupradar, featurecounts, rseqc
+    dupradar/
+      mod.rs                  Re-exports counting, dupmatrix, fitting, plots
+      counting.rs             BAM read counting engine
+      dupmatrix.rs            Duplication matrix construction and TSV output
+      fitting.rs              Logistic regression via IRLS
+      plots.rs                Plot generation (density scatter, boxplot, histogram)
+    featurecounts/
+      mod.rs                  Re-exports output
+      output.rs               featureCounts-format output and biotype counting
+    rseqc/
+      mod.rs                  Re-exports all RSeQC modules
+      bam_stat.rs             BAM alignment statistics (bam_stat.py)
+      infer_experiment.rs     Library strandedness inference (infer_experiment.py)
+      read_duplication.rs     Duplication rate histograms (read_duplication.py)
+      read_distribution.rs    Read distribution across features (read_distribution.py)
+      junction_annotation.rs  Splice junction classification (junction_annotation.py)
+      junction_saturation.rs  Junction saturation analysis (junction_saturation.py)
+      inner_distance.rs       Paired-end inner distance (inner_distance.py)
 tests/
-  integration_test.rs  Integration tests vs R reference output
-  data/                Test BAM/GTF input files
-  expected/            R-generated reference outputs
-  create_test_data.R   R script to regenerate test data
+  integration_test.rs         Integration tests vs R reference output
+  data/                       Test BAM/GTF input files
+  expected/                   R-generated reference outputs
+  create_test_data.R          R script to regenerate test data
 ```
 
-Inter-module access uses `crate::` paths (e.g., `use crate::gtf::Gene;`).
+Inter-module access uses `crate::` paths (e.g., `use crate::rna::dupradar::counting::count_reads;`).
 
 ## Code style
 

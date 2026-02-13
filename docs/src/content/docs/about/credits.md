@@ -36,6 +36,20 @@ sequence reads to genomic features.
 - Website: <http://subread.sourceforge.net/>
 - Publication: <https://doi.org/10.1093/bioinformatics/btt656>
 
+## RSeQC
+
+RustQC reimplements seven quality control tools from the
+[RSeQC](https://rseqc.sourceforge.net/) package, created by Liguo Wang, Shengqin
+Wang, and Wei Li. RSeQC is a widely used toolkit for evaluating RNA-seq data quality,
+covering alignment statistics, strandedness, read distribution, splice junctions,
+and fragment size.
+
+> Wang L, Wang S, Li W. RSeQC: quality control of RNA-seq experiments.
+> *Bioinformatics*. 2012;28(16):2184-2185.
+
+- Website: <https://rseqc.sourceforge.net/>
+- Publication: <https://doi.org/10.1093/bioinformatics/bts356>
+
 ## Key dependencies
 
 RustQC is built with the following open-source Rust libraries:
@@ -47,6 +61,8 @@ RustQC is built with the following open-source Rust libraries:
 | [clap](https://github.com/clap-rs/clap) | Command-line argument parsing |
 | [anyhow](https://github.com/dtolnay/anyhow) | Error handling |
 | [rayon](https://github.com/rayon-rs/rayon) | Data parallelism |
+| [coitrees](https://github.com/dcjones/coitrees) | Cache-oblivious interval trees |
+| [rand](https://github.com/rust-random/rand) / [rand_chacha](https://github.com/rust-random/rand) | Reproducible random number generation |
 | [serde](https://github.com/serde-rs/serde) | YAML configuration deserialization |
 | [indexmap](https://github.com/indexmap-rs/indexmap) | Insertion-order-preserving maps |
 | [env_logger](https://github.com/rust-cli/env_logger) | Logging output |

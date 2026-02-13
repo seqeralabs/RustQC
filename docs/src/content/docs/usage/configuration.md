@@ -3,8 +3,9 @@ title: Configuration File
 description: YAML configuration file reference for RustQC, covering chromosome mapping, output toggles, and biotype settings.
 ---
 
-RustQC supports an optional YAML configuration file for advanced settings that
-go beyond what CLI flags offer. Pass the config file with `--config` / `-c`:
+The `rustqc rna` subcommand supports an optional YAML configuration file for
+advanced settings that go beyond what CLI flags offer. Pass the config file with
+`--config` / `-c`:
 
 ```bash
 rustqc rna sample.bam --gtf genes.gtf -p -c config.yaml -o results/
@@ -12,6 +13,12 @@ rustqc rna sample.bam --gtf genes.gtf -p -c config.yaml -o results/
 
 All sections and fields are optional. Missing fields use their default values.
 Unknown fields are silently ignored, so config files remain forward-compatible.
+
+:::note
+The configuration file currently applies only to the `rna` subcommand (dupRadar
+and featureCounts analysis). The RSeQC subcommands are configured entirely via
+their CLI flags.
+:::
 
 ## Full example
 

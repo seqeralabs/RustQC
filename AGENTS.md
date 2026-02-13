@@ -1,8 +1,13 @@
 # AGENTS.md — RustQC
 
-> Fast quality control tools for sequencing data, written in Rust. Currently includes an RNA-Seq
-> duplicate rate analyser (reimplementation of [dupRadar](https://github.com/ssayols/dupRadar)),
-> with featureCounts-compatible output and biotype counting.
+> Fast quality control tools for sequencing data, written in Rust. Includes:
+> - **`rna`** subcommand: RNA-Seq duplicate rate analysis (reimplementation of
+>   [dupRadar](https://github.com/ssayols/dupRadar)), with featureCounts-compatible
+>   output and biotype counting.
+> - **7 RSeQC subcommands**: Rust reimplementations of [RSeQC](https://rseqc.sourceforge.net/)
+>   Python tools (`bam-stat`, `infer-experiment`, `read-duplication`, `read-distribution`,
+>   `junction-annotation`, `junction-saturation`, `inner-distance`).
+>
 > Binary crate (`rustqc`), Rust edition 2021.
 
 ## Build / Lint / Test Commands
@@ -45,11 +50,26 @@ src/
   cli.rs            — CLI argument parsing (clap derive, subcommand structure)
   config.rs         — YAML configuration loading (serde), nested tool configs
   gtf.rs            — GTF annotation file parser (with configurable attribute extraction)
-  counting.rs       — BAM read counting engine (largest module)
-  featurecounts.rs  — featureCounts-format output & biotype counting
-  dupmatrix.rs      — Duplication matrix construction & TSV output
-  fitting.rs        — Logistic regression via IRLS
-  plots.rs          — Plot generation: density scatter, boxplot, histogram
+  rna/
+    mod.rs          — Re-exports dupradar, featurecounts, rseqc sub-modules
+    dupradar/
+      mod.rs        — Re-exports counting, dupmatrix, fitting, plots
+      counting.rs   — BAM read counting engine (largest module)
+      dupmatrix.rs  — Duplication matrix construction & TSV output
+      fitting.rs    — Logistic regression via IRLS
+      plots.rs      — Plot generation: density scatter, boxplot, histogram
+    featurecounts/
+      mod.rs        — Re-exports output
+      output.rs     — featureCounts-format output & biotype counting
+    rseqc/
+      mod.rs        — Re-exports all 7 RSeQC modules
+      bam_stat.rs           — bam_stat.py reimplementation
+      infer_experiment.rs   — infer_experiment.py reimplementation
+      read_duplication.rs   — read_duplication.py reimplementation
+      read_distribution.rs  — read_distribution.py reimplementation
+      junction_annotation.rs — junction_annotation.py reimplementation
+      junction_saturation.rs — junction_saturation.py reimplementation
+      inner_distance.rs     — inner_distance.py reimplementation
 tests/
   integration_test.rs  — 8 integration tests vs R dupRadar reference output
   data/                — Test BAM/GTF input files
@@ -57,12 +77,22 @@ tests/
   create_test_data.R   — R script to regenerate test data + references
 ```
 
-Flat module structure — all modules declared in `main.rs`, no `lib.rs`.
-Inter-module access uses `crate::` paths (e.g., `use crate::gtf::Gene;`).
+Nested module structure — top-level modules (`cli`, `config`, `gtf`, `rna`) declared
+in `main.rs`, no `lib.rs`. The `rna` module contains sub-modules for each tool group.
+Inter-module access uses `crate::` paths (e.g., `use crate::rna::dupradar::counting::GeneCounts;`).
 
-The CLI uses clap subcommands: `rustqc rna <BAM>... --gtf <GTF> [OPTIONS]`.
-Multiple BAM files can be passed as positional arguments and are processed in
-parallel. Future QC modules will be added as additional subcommands.
+The CLI uses clap subcommands with 8 variants:
+- `rustqc rna <BAM>... --gtf <GTF> [OPTIONS]` — dupRadar + featureCounts analysis
+- `rustqc bam-stat <BAM>... [OPTIONS]` — alignment statistics
+- `rustqc infer-experiment <BAM>... --bed <BED> [OPTIONS]` — strandedness inference
+- `rustqc read-duplication <BAM>... [OPTIONS]` — duplication histograms
+- `rustqc read-distribution <BAM>... --bed <BED> [OPTIONS]` — feature distribution
+- `rustqc junction-annotation <BAM>... --bed <BED> [OPTIONS]` — splice junction classification
+- `rustqc junction-saturation <BAM>... --bed <BED> [OPTIONS]` — junction saturation curves
+- `rustqc inner-distance <BAM>... --bed <BED> [OPTIONS]` — insert size estimation
+
+Multiple BAM files can be passed as positional arguments and are processed sequentially.
+The `rna` subcommand supports parallel processing via `--threads`.
 
 ## Code Style
 
@@ -96,7 +126,7 @@ Localized `use` inside function bodies is acceptable for narrow imports
 | Types / Structs   | `CamelCase`            | `GeneCounts`, `DupMatrix`, `FitResult`          |
 | Functions/Methods | `snake_case`           | `count_reads`, `build_index`, `format_float`    |
 | Constants         | `SCREAMING_SNAKE_CASE` | `BAM_FDUP`, `DENSITY_COLORS`, `SCALE`           |
-| Modules           | `snake_case`           | `dupmatrix`, `counting`, `fitting`              |
+| Modules           | `snake_case`           | `dupmatrix`, `counting`, `bam_stat`, `inner_distance` |
 | Variables/Fields  | `snake_case`           | `gene_counts`, `dup_rate_multi`, `is_dup`       |
 | Type aliases      | `CamelCase`            | `MateBufferKey`                                 |
 
@@ -166,6 +196,9 @@ All three must pass. Uses `dtolnay/rust-toolchain@stable` and `Swatinem/rust-cac
 | `log`          | Logging facade                   |
 | `env_logger`   | Log output backend               |
 | `indexmap`     | Insertion-order-preserving maps  |
+| `coitrees`     | Cache-oblivious interval trees   |
+| `rayon`        | Data parallelism                 |
+| `rand` / `rand_chacha` | Reproducible random sampling |
 
 ## Duplicate Marking Validation
 
