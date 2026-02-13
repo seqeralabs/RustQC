@@ -172,11 +172,7 @@ pub fn write_biotype_counts(path: &Path, biotype_counts: &IndexMap<String, u64>)
 ///
 /// This matches the format used by the nf-core/rnaseq pipeline's
 /// `MULTIQC_CUSTOM_BIOTYPE` process.
-pub fn write_biotype_counts_mqc(
-    path: &Path,
-    biotype_counts: &IndexMap<String, u64>,
-    _sample_name: &str,
-) -> Result<()> {
+pub fn write_biotype_counts_mqc(path: &Path, biotype_counts: &IndexMap<String, u64>) -> Result<()> {
     let file = std::fs::File::create(path)?;
     let mut w = std::io::BufWriter::new(file);
 
@@ -321,16 +317,12 @@ mod tests {
         let count_result = CountResult {
             gene_counts,
             total_reads_multi_dup: 185,
-            total_reads_multi_nodup: 185,
             total_reads_unique_dup: 185,
-            total_reads_unique_nodup: 185,
             stat_total_reads: 200,
             stat_assigned: 185,
             stat_ambiguous: 5,
             stat_no_features: 10,
             stat_total_fragments: 200,
-            stat_total_dup: 0,
-            stat_total_multi: 0,
             fc_assigned: 185,
             fc_ambiguous: 5,
             fc_no_features: 10,

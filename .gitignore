@@ -33,6 +33,18 @@ benchmark/RSeQC/**/junction_annotation.junction.Interact.bed
 # Session files
 session-*.md
 
+# macOS metadata
+.DS_Store
+**/.DS_Store
+
+# Python cache
+.ruff_cache/
+*.pyc
+__pycache__/
+
+# IDE config
+.vscode/
+
 # RustRover
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore

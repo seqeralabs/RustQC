@@ -105,8 +105,7 @@ jobs:
         id: package
         run: |
           BIN="rustqc"
-          TAG="${{ needs.create-release.outputs.tag }}"
-          ARCHIVE="${BIN}-${TAG}-${{ matrix.name }}"
+          ARCHIVE="${BIN}-${{ matrix.name }}"
 
           mkdir -p "staging/${ARCHIVE}"
           cp "target/${{ matrix.target }}/release/${BIN}" "staging/${ARCHIVE}/"

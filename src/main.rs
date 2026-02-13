@@ -483,7 +483,6 @@ fn process_single_bam(
                 rna::featurecounts::output::write_biotype_counts_mqc(
                     &mqc_biotype_path,
                     &biotype_counts,
-                    bam_stem,
                 )?;
                 info!(
                     "[{}] Biotype MultiQC file written to {}",
@@ -733,7 +732,7 @@ fn run_bam_stat(args: cli::BamStatArgs) -> Result<()> {
             rna::rseqc::bam_stat::bam_stat(bam_path, args.mapq_cut, args.reference.as_deref())?;
 
         let output_path = outdir.join(format!("{}.bam_stat.txt", bam_stem));
-        rna::rseqc::bam_stat::write_bam_stat(&result, args.mapq_cut, &output_path)?;
+        rna::rseqc::bam_stat::write_bam_stat(&result, &output_path)?;
 
         info!(
             "[{}] bam_stat completed in {:.2}s",

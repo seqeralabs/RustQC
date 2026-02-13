@@ -84,6 +84,41 @@ pub struct JunctionResults {
     pub filtered_events: u64,
 }
 
+/// Counts of unique junctions by classification.
+#[derive(Debug)]
+pub struct JunctionCounts {
+    /// Number of distinct known (annotated) junctions.
+    pub known: u64,
+    /// Number of distinct partial-novel junctions.
+    pub partial_novel: u64,
+    /// Number of distinct complete-novel junctions.
+    pub novel: u64,
+    /// Total distinct junctions (known + partial_novel + novel).
+    pub total: u64,
+}
+
+impl JunctionResults {
+    /// Count distinct junctions by classification.
+    pub fn junction_counts(&self) -> JunctionCounts {
+        let mut known: u64 = 0;
+        let mut partial_novel: u64 = 0;
+        let mut novel: u64 = 0;
+        for (_, class) in self.junctions.values() {
+            match class {
+                JunctionClass::Annotated => known += 1,
+                JunctionClass::PartialNovel => partial_novel += 1,
+                JunctionClass::CompleteNovel => novel += 1,
+            }
+        }
+        JunctionCounts {
+            known,
+            partial_novel,
+            novel,
+            total: known + partial_novel + novel,
+        }
+    }
+}
+
 // ===================================================================
 // BED12 reference parsing
 // ===================================================================
@@ -523,22 +558,12 @@ pub fn write_junction_plot_r(results: &JunctionResults, prefix: &str, path: &Pat
     };
 
     // Junction-level counts
-    let mut junc_known: u64 = 0;
-    let mut junc_partial: u64 = 0;
-    let mut junc_novel: u64 = 0;
-    for (_, class) in results.junctions.values() {
-        match class {
-            JunctionClass::Annotated => junc_known += 1,
-            JunctionClass::PartialNovel => junc_partial += 1,
-            JunctionClass::CompleteNovel => junc_novel += 1,
-        }
-    }
-    let total_junctions = junc_known + junc_partial + junc_novel;
-    let (j_known_pct, j_partial_pct, j_novel_pct) = if total_junctions > 0 {
+    let jc = results.junction_counts();
+    let (j_known_pct, j_partial_pct, j_novel_pct) = if jc.total > 0 {
         (
-            junc_known as f64 * 100.0 / total_junctions as f64,
-            junc_partial as f64 * 100.0 / total_junctions as f64,
-            junc_novel as f64 * 100.0 / total_junctions as f64,
+            jc.known as f64 * 100.0 / jc.total as f64,
+            jc.partial_novel as f64 * 100.0 / jc.total as f64,
+            jc.novel as f64 * 100.0 / jc.total as f64,
         )
     } else {
         (0.0, 0.0, 0.0)
@@ -587,17 +612,7 @@ pub fn write_summary(results: &JunctionResults, path: &Path) -> Result<()> {
         .with_context(|| format!("Failed to create file: {}", path.display()))?;
 
     // Junction-level counts
-    let mut junc_known: u64 = 0;
-    let mut junc_partial: u64 = 0;
-    let mut junc_novel: u64 = 0;
-    for (_, class) in results.junctions.values() {
-        match class {
-            JunctionClass::Annotated => junc_known += 1,
-            JunctionClass::PartialNovel => junc_partial += 1,
-            JunctionClass::CompleteNovel => junc_novel += 1,
-        }
-    }
-    let total_junctions = junc_known + junc_partial + junc_novel;
+    let jc = results.junction_counts();
 
     writeln!(
         f,
@@ -621,10 +636,10 @@ pub fn write_summary(results: &JunctionResults, path: &Path) -> Result<()> {
 
     // Junctions section
     writeln!(f)?;
-    writeln!(f, "Total splicing  Junctions:\t{}", total_junctions)?;
-    writeln!(f, "Known Splicing Junctions:\t{}", junc_known)?;
-    writeln!(f, "Partial Novel Splicing Junctions:\t{}", junc_partial)?;
-    writeln!(f, "Novel Splicing Junctions:\t{}", junc_novel)?;
+    writeln!(f, "Total splicing  Junctions:\t{}", jc.total)?;
+    writeln!(f, "Known Splicing Junctions:\t{}", jc.known)?;
+    writeln!(f, "Partial Novel Splicing Junctions:\t{}", jc.partial_novel)?;
+    writeln!(f, "Novel Splicing Junctions:\t{}", jc.novel)?;
 
     writeln!(f)?;
     writeln!(
@@ -638,17 +653,7 @@ pub fn write_summary(results: &JunctionResults, path: &Path) -> Result<()> {
 /// Print the summary to stderr (matching RSeQC behavior).
 pub fn print_summary(results: &JunctionResults) {
     // Junction-level counts
-    let mut junc_known: u64 = 0;
-    let mut junc_partial: u64 = 0;
-    let mut junc_novel: u64 = 0;
-    for (_, class) in results.junctions.values() {
-        match class {
-            JunctionClass::Annotated => junc_known += 1,
-            JunctionClass::PartialNovel => junc_partial += 1,
-            JunctionClass::CompleteNovel => junc_novel += 1,
-        }
-    }
-    let total_junctions = junc_known + junc_partial + junc_novel;
+    let jc = results.junction_counts();
 
     eprintln!("===================================================================");
     eprintln!("Total splicing  Events:\t{}", results.total_events);
@@ -660,10 +665,10 @@ pub fn print_summary(results: &JunctionResults) {
     eprintln!("Novel Splicing Events:\t{}", results.complete_novel_events);
     eprintln!("Filtered Splicing Events:\t{}", results.filtered_events);
     eprintln!();
-    eprintln!("Total splicing  Junctions:\t{}", total_junctions);
-    eprintln!("Known Splicing Junctions:\t{}", junc_known);
-    eprintln!("Partial Novel Splicing Junctions:\t{}", junc_partial);
-    eprintln!("Novel Splicing Junctions:\t{}", junc_novel);
+    eprintln!("Total splicing  Junctions:\t{}", jc.total);
+    eprintln!("Known Splicing Junctions:\t{}", jc.known);
+    eprintln!("Partial Novel Splicing Junctions:\t{}", jc.partial_novel);
+    eprintln!("Novel Splicing Junctions:\t{}", jc.novel);
     eprintln!();
     eprintln!("===================================================================");
 }

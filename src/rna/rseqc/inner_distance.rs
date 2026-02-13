@@ -233,32 +233,6 @@ fn parse_bed12(bed_path: &str) -> Result<(ExonBitset, TranscriptTree)> {
 // CIGAR Helpers
 // ============================================================================
 
-/// Extract intron blocks from CIGAR (N operations).
-/// Matches RSeQC's `bam_cigar.fetch_intron()`: S operations do NOT advance position.
-#[allow(dead_code)]
-fn fetch_intron_blocks(record: &bam::Record) -> Vec<(u64, u64)> {
-    let mut introns = Vec::new();
-    let mut chrom_st = record.pos() as u64;
-
-    for op in record.cigar().iter() {
-        use rust_htslib::bam::record::Cigar::*;
-        match op {
-            Match(len) => chrom_st += *len as u64,
-            Ins(_) => {}
-            Del(len) => chrom_st += *len as u64,
-            RefSkip(len) => {
-                let intron_start = chrom_st;
-                chrom_st += *len as u64;
-                introns.push((intron_start, chrom_st));
-            }
-            SoftClip(_) => {} // Does NOT advance in fetch_intron
-            _ => {}
-        }
-    }
-
-    introns
-}
-
 /// Extract exon blocks from CIGAR (M operations).
 /// Matches RSeQC's `bam_cigar.fetch_exon()`: S operations DO advance position.
 fn fetch_exon_blocks(record: &bam::Record) -> Vec<(u64, u64)> {
@@ -327,8 +301,6 @@ pub fn inner_distance(
         bam::Reader::from_path(bam_path)
             .with_context(|| format!("Failed to open BAM file: {}", bam_path))?
     };
-    let header = bam::Header::from_template(bam.header());
-
     // Build tid -> chromosome name mapping (uppercased)
     let tid_to_chrom: HashMap<i32, String> = {
         let header_view = bam.header();
@@ -343,9 +315,6 @@ pub fn inner_distance(
     let mut pairs: Vec<PairRecord> = Vec::new();
     let mut distances: Vec<i64> = Vec::new(); // for histogram
     let mut pair_num: u64 = 0;
-
-    // Suppress the header unused warning
-    let _ = header;
 
     for result in bam.records() {
         let record = result.context("Failed to read BAM record")?;

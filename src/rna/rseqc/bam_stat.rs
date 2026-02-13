@@ -206,9 +206,8 @@ pub fn bam_stat(bam_path: &str, mapq_cut: u8, reference: Option<&str>) -> Result
 ///
 /// # Arguments
 /// * `result` - The computed statistics
-/// * `mapq_cut` - The MAPQ cutoff that was used
 /// * `output_path` - Path to write the output file
-pub fn write_bam_stat(result: &BamStatResult, _mapq_cut: u8, output_path: &Path) -> Result<()> {
+pub fn write_bam_stat(result: &BamStatResult, output_path: &Path) -> Result<()> {
     let mut out = std::fs::File::create(output_path)
         .with_context(|| format!("Failed to create output file: {}", output_path.display()))?;
 

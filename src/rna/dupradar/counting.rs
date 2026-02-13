@@ -178,21 +178,12 @@ const BAM_FDUP: u16 = 0x400;
 const BAM_FUNMAP: u16 = 0x4;
 /// Flag indicating the read failed quality checks (0x200).
 const BAM_FQCFAIL: u16 = 0x200;
-/// Flag indicating a secondary alignment (0x100).
-#[allow(dead_code)]
-const BAM_FSECONDARY: u16 = 0x100;
 /// Flag indicating a supplementary alignment (0x800).
 const BAM_FSUPPLEMENTARY: u16 = 0x800;
 /// Flag indicating the read is paired (0x1).
 const BAM_FPAIRED: u16 = 0x1;
 /// Flag indicating it is the first read in a pair (0x40).
 const BAM_FREAD1: u16 = 0x40;
-/// Flag indicating the read is mapped in a proper pair (0x2).
-#[allow(dead_code)]
-const BAM_FPROPER_PAIR: u16 = 0x2;
-/// Flag indicating the mate is unmapped (0x8).
-#[allow(dead_code)]
-const BAM_FMUNMAP: u16 = 0x8;
 /// Flag indicating the read is reverse-complemented (0x10).
 const BAM_FREVERSE: u16 = 0x10;
 
@@ -262,14 +253,8 @@ pub struct CountResult {
     pub gene_counts: IndexMap<String, GeneCounts>,
     /// Total mapped reads (including multimappers, including duplicates)
     pub total_reads_multi_dup: u64,
-    /// Total mapped reads (including multimappers, excluding duplicates)
-    #[allow(dead_code)]
-    pub total_reads_multi_nodup: u64,
     /// Total mapped reads (unique only, including duplicates)
     pub total_reads_unique_dup: u64,
-    /// Total mapped reads (unique only, excluding duplicates)
-    #[allow(dead_code)]
-    pub total_reads_unique_nodup: u64,
 
     // --- dupRadar fragment-level assignment statistics ---
     /// Total reads/records seen in the BAM file
@@ -282,12 +267,6 @@ pub struct CountResult {
     pub stat_no_features: u64,
     /// Total fragments (single-end reads or paired-end pairs)
     pub stat_total_fragments: u64,
-    /// Total duplicate reads
-    #[allow(dead_code)]
-    pub stat_total_dup: u64,
-    /// Total multimapping reads
-    #[allow(dead_code)]
-    pub stat_total_multi: u64,
 
     // --- featureCounts per-read statistics ---
     // featureCounts with `-p` (no `--countReadPairs`) counts each read
@@ -1461,16 +1440,12 @@ pub fn count_reads(
     Ok(CountResult {
         gene_counts: gene_counts_map,
         total_reads_multi_dup: merged.n_multi_dup,
-        total_reads_multi_nodup: merged.n_multi_nodup,
         total_reads_unique_dup: merged.n_unique_dup,
-        total_reads_unique_nodup: merged.n_unique_nodup,
         stat_total_reads: merged.total_reads,
         stat_assigned: merged.stat_assigned,
         stat_ambiguous: merged.stat_ambiguous,
         stat_no_features: merged.stat_no_features,
         stat_total_fragments: merged.total_fragments,
-        stat_total_dup: merged.total_dup,
-        stat_total_multi: merged.total_multi,
         fc_assigned: merged.fc_assigned,
         fc_ambiguous: merged.fc_ambiguous,
         fc_no_features: merged.fc_no_features,

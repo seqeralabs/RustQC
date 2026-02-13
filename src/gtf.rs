@@ -29,14 +29,14 @@ pub struct Exon {
 pub struct Gene {
     /// Gene identifier (from gene_id attribute)
     pub gene_id: String,
-    /// Chromosome/contig name (kept for API completeness)
+    /// Chromosome/contig name (populated from GTF, used by downstream tools)
     #[allow(dead_code)]
     pub chrom: String,
     /// Gene start (minimum of all exon starts, 1-based)
     pub start: u64,
     /// Gene end (maximum of all exon ends, 1-based)
     pub end: u64,
-    /// Strand: '+', '-', or '.'
+    /// Strand: '+', '-', or '.' (populated from GTF, used by downstream tools)
     #[allow(dead_code)]
     pub strand: char,
     /// All exons belonging to this gene

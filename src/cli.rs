@@ -322,7 +322,7 @@ pub struct InnerDistanceArgs {
     #[arg(short = 'o', long = "outdir", default_value = ".")]
     pub outdir: String,
 
-    /// Reference genome FASTA file (unused, kept for CLI compatibility)
+    /// Reference genome FASTA file (only required for CRAM input)
     #[arg(short = 'r', long = "reference")]
     pub reference: Option<String>,
 }
