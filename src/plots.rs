@@ -282,6 +282,7 @@ fn render_density_scatter<DB: DrawingBackend>(
     dm: &DupMatrix,
     fit: &FitResult,
     rpkm_threshold: Option<f64>,
+    title: &str,
     pxs: f64, // pixel scale (SCALE for PNG, 1 for SVG)
 ) -> Result<()>
 where
@@ -290,6 +291,22 @@ where
     let ps = |v: f64| (v * pxs) as u32;
 
     root.fill(&WHITE)?;
+
+    // ── title ──────────────────────────────────────────────────────────
+    let title_height = ps(35.0);
+    let (top_area, plot_area) = root.split_vertically(title_height);
+    top_area.draw(&Text::new(
+        title.to_string(),
+        ((top_area.dim_in_pixel().0 as i32) / 2, (pxs * 8.0) as i32),
+        ("sans-serif", ps(18.0))
+            .into_font()
+            .style(FontStyle::Bold)
+            .color(&BLACK)
+            .pos(plotters::style::text_anchor::Pos::new(
+                plotters::style::text_anchor::HPos::Center,
+                plotters::style::text_anchor::VPos::Top,
+            )),
+    ))?;
 
     // ── data ───────────────────────────────────────────────────────────
     let mut xd: Vec<f64> = Vec::new();
@@ -317,8 +334,8 @@ where
     let x_max = (raw_max + pad).min(tick_max as f64 + 1.0); // a little past last tick
 
     // ── chart frame ────────────────────────────────────────────────────
-    let mut chart = ChartBuilder::on(&root)
-        .margin_top(ps(15.0))
+    let mut chart = ChartBuilder::on(&plot_area)
+        .margin_top(ps(5.0))
         .margin_right(ps(15.0))
         .margin_bottom(ps(10.0))
         .margin_left(ps(10.0))
@@ -423,7 +440,16 @@ where
     // "1 read/bp" → RPK = 1000 → log₁₀ = 3. R: col='red', lty=2 (dashed)
     let rpk_1k = 3.0f64;
     if rpk_1k >= x_min && rpk_1k <= x_max {
-        draw_dotted_vline(&root, x_to_px(rpk_1k), pa_y.0, pa_y.1, &RED, sw, dash, gap);
+        draw_dotted_vline(
+            &plot_area,
+            x_to_px(rpk_1k),
+            pa_y.0,
+            pa_y.1,
+            &RED,
+            sw,
+            dash,
+            gap,
+        );
     }
 
     // RPKM threshold. R: col='green', lty=2 (dashed)
@@ -431,7 +457,16 @@ where
         if rpk_pos > 0.0 {
             let lr = rpk_pos.log10();
             if lr.is_finite() && lr >= x_min && lr <= x_max {
-                draw_dotted_vline(&root, x_to_px(lr), pa_y.0, pa_y.1, &GREEN, sw, dash, gap);
+                draw_dotted_vline(
+                    &plot_area,
+                    x_to_px(lr),
+                    pa_y.0,
+                    pa_y.1,
+                    &GREEN,
+                    sw,
+                    dash,
+                    gap,
+                );
             }
         }
     }
@@ -447,7 +482,7 @@ where
         let lh = (pxs * 32.0) as i32;
         let lx = pa_x.0 + (pxs * 8.0) as i32;
         let ly = pa_y.0 + (pxs * 8.0) as i32;
-        root.draw(&Rectangle::new(
+        plot_area.draw(&Rectangle::new(
             [(lx, ly), (lx + lw, ly + lh)],
             ShapeStyle {
                 color: WHITE.to_rgba(),
@@ -455,19 +490,19 @@ where
                 stroke_width: 0,
             },
         ))?;
-        root.draw(&Rectangle::new(
+        plot_area.draw(&Rectangle::new(
             [(lx, ly), (lx + lw, ly + lh)],
             BLACK.stroke_width(legend_sw),
         ))?;
         let tx = lx + (pxs * 6.0) as i32;
         let mut cy = ly + (pxs * 5.0) as i32;
-        root.draw(&Text::new(
+        plot_area.draw(&Text::new(
             format!("Int: {:.2}", fit.intercept),
             (tx, cy),
             ("sans-serif", fsz).into_font().color(&BLACK),
         ))?;
         cy += line_h;
-        root.draw(&Text::new(
+        plot_area.draw(&Text::new(
             format!("Sl: {:.2}", fit.slope),
             (tx, cy),
             ("sans-serif", fsz).into_font().color(&BLACK),
@@ -482,7 +517,7 @@ where
         let ly = pa_y.1 - lh - (pxs * 8.0) as i32;
         let txt_x = lx + (pxs * 22.0) as i32;
         let samp_x = lx + (pxs * 4.0) as i32;
-        root.draw(&Rectangle::new(
+        plot_area.draw(&Rectangle::new(
             [(lx, ly), (lx + lw, ly + lh)],
             ShapeStyle {
                 color: WHITE.to_rgba(),
@@ -490,14 +525,14 @@ where
                 stroke_width: 0,
             },
         ))?;
-        root.draw(&Rectangle::new(
+        plot_area.draw(&Rectangle::new(
             [(lx, ly), (lx + lw, ly + lh)],
             BLACK.stroke_width(legend_sw),
         ))?;
         let mut cy = ly + (pxs * 5.0) as i32;
         // "1 read/bp" with red dashed sample line
         draw_dotted_vline(
-            &root,
+            &plot_area,
             samp_x + (pxs * 7.0) as i32,
             cy,
             cy + line_h - 2,
@@ -506,7 +541,7 @@ where
             (pxs * 3.0) as i32,
             (pxs * 2.0) as i32,
         );
-        root.draw(&Text::new(
+        plot_area.draw(&Text::new(
             "1 read/bp",
             (txt_x, cy),
             ("sans-serif", fsz).into_font().color(&BLACK),
@@ -514,7 +549,7 @@ where
         cy += line_h;
         // "0.5 RPKM" with green dashed sample line
         draw_dotted_vline(
-            &root,
+            &plot_area,
             samp_x + (pxs * 7.0) as i32,
             cy,
             cy + line_h - 2,
@@ -523,35 +558,37 @@ where
             (pxs * 3.0) as i32,
             (pxs * 2.0) as i32,
         );
-        root.draw(&Text::new(
+        plot_area.draw(&Text::new(
             "0.5 RPKM",
             (txt_x, cy),
             ("sans-serif", fsz).into_font().color(&BLACK),
         ))?;
     }
 
-    root.present()?;
+    plot_area.present()?;
     Ok(())
 }
 
 /// Generate the density scatter plot of duplication rate vs expression.
 ///
 /// Produces both `<output_path>.png` (high-res) and `<output_path>.svg`.
+/// The `title` is drawn centered at the top of the plot.
 pub fn density_scatter_plot(
     dm: &DupMatrix,
     fit: &FitResult,
     rpkm_threshold: Option<f64>,
+    title: &str,
     output_path: &std::path::Path,
 ) -> Result<()> {
     // PNG (high-res)
     let png_path = output_path.with_extension("png");
-    let root = BitMapBackend::new(&png_path, (s(480), s(480))).into_drawing_area();
-    render_density_scatter(root, dm, fit, rpkm_threshold, SCALE as f64)?;
+    let root = BitMapBackend::new(&png_path, (s(480), s(520))).into_drawing_area();
+    render_density_scatter(root, dm, fit, rpkm_threshold, title, SCALE as f64)?;
 
     // SVG
     let svg_path = output_path.with_extension("svg");
-    let root = SVGBackend::new(&svg_path, (480, 480)).into_drawing_area();
-    render_density_scatter(root, dm, fit, rpkm_threshold, 1.0)?;
+    let root = SVGBackend::new(&svg_path, (480, 520)).into_drawing_area();
+    render_density_scatter(root, dm, fit, rpkm_threshold, title, 1.0)?;
 
     Ok(())
 }
@@ -564,6 +601,7 @@ pub fn density_scatter_plot(
 fn render_boxplot<DB: DrawingBackend>(
     root: DrawingArea<DB, plotters::coord::Shift>,
     dm: &DupMatrix,
+    title: &str,
     pxs: f64,
 ) -> Result<()>
 where
@@ -572,6 +610,22 @@ where
     let ps = |v: f64| (v * pxs) as u32;
 
     root.fill(&WHITE)?;
+
+    // ── title ──────────────────────────────────────────────────────────
+    let title_height = ps(35.0);
+    let (top_area, plot_area) = root.split_vertically(title_height);
+    top_area.draw(&Text::new(
+        title.to_string(),
+        ((top_area.dim_in_pixel().0 as i32) / 2, (pxs * 8.0) as i32),
+        ("sans-serif", ps(18.0))
+            .into_font()
+            .style(FontStyle::Bold)
+            .color(&BLACK)
+            .pos(plotters::style::text_anchor::Pos::new(
+                plotters::style::text_anchor::HPos::Center,
+                plotters::style::text_anchor::VPos::Top,
+            )),
+    ))?;
 
     let step = 0.05;
     let n_bins = (1.0 / step) as usize;
@@ -639,12 +693,12 @@ where
         bins.push(vals);
     }
 
-    let mut chart = ChartBuilder::on(&root)
-        .margin_top(ps(15.0))
+    let mut chart = ChartBuilder::on(&plot_area)
+        .margin_top(ps(5.0))
         .margin_right(ps(15.0))
-        .margin_bottom(ps(10.0))
+        .margin_bottom(ps(5.0))
         .margin_left(ps(10.0))
-        .x_label_area_size(ps(150.0))
+        .x_label_area_size(ps(70.0))
         .y_label_area_size(ps(50.0))
         .build_cartesian_2d(0.0f64..n_bins as f64, 0.0f64..1.0)?;
 
@@ -663,18 +717,18 @@ where
 
     // Draw rotated x-axis labels manually
     {
-        let plot_area = chart.plotting_area();
+        let chart_plot_area = chart.plotting_area();
         let font_size = ps(5.0) as f64;
         for (i, label) in labels.iter().enumerate() {
             // Map x position to pixel coordinate (center of bin)
             let x_coord = i as f64 + 0.5;
-            let (px, py) = plot_area.map_coordinate(&(x_coord, 0.0f64));
+            let (px, py) = chart_plot_area.map_coordinate(&(x_coord, 0.0f64));
             // Draw text below the plot area, rotated 90 degrees
             let text_style = ("sans-serif", font_size)
                 .into_font()
                 .color(&BLACK)
                 .transform(FontTransform::Rotate270);
-            root.draw_text(label, &text_style, (px - 3, py + 5))?;
+            plot_area.draw_text(label, &text_style, (px - 3, py + 5))?;
         }
     }
 
@@ -750,21 +804,22 @@ where
         }
     }
 
-    root.present()?;
+    plot_area.present()?;
     Ok(())
 }
 
 /// Generate the duplication rate boxplot by expression quantile bin.
 ///
 /// Produces both `<output_path>.png` (high-res) and `<output_path>.svg`.
-pub fn duprate_boxplot(dm: &DupMatrix, output_path: &std::path::Path) -> Result<()> {
+/// The `title` is drawn centered at the top of the plot.
+pub fn duprate_boxplot(dm: &DupMatrix, title: &str, output_path: &std::path::Path) -> Result<()> {
     // PNG
-    let root = BitMapBackend::new(output_path, (s(480), s(480))).into_drawing_area();
-    render_boxplot(root, dm, SCALE as f64)?;
+    let root = BitMapBackend::new(output_path, (s(480), s(560))).into_drawing_area();
+    render_boxplot(root, dm, title, SCALE as f64)?;
     // SVG
     let svg = output_path.with_extension("svg");
-    let root = SVGBackend::new(&svg, (480, 480)).into_drawing_area();
-    render_boxplot(root, dm, 1.0)?;
+    let root = SVGBackend::new(&svg, (480, 560)).into_drawing_area();
+    render_boxplot(root, dm, title, 1.0)?;
     Ok(())
 }
 
@@ -776,6 +831,7 @@ pub fn duprate_boxplot(dm: &DupMatrix, output_path: &std::path::Path) -> Result<
 fn render_histogram<DB: DrawingBackend>(
     root: DrawingArea<DB, plotters::coord::Shift>,
     dm: &DupMatrix,
+    title: &str,
     pxs: f64,
 ) -> Result<()>
 where
@@ -784,6 +840,22 @@ where
     let ps = |v: f64| (v * pxs) as u32;
 
     root.fill(&WHITE)?;
+
+    // ── title ──────────────────────────────────────────────────────────
+    let title_height = ps(35.0);
+    let (top_area, plot_area) = root.split_vertically(title_height);
+    top_area.draw(&Text::new(
+        title.to_string(),
+        ((top_area.dim_in_pixel().0 as i32) / 2, (pxs * 8.0) as i32),
+        ("sans-serif", ps(18.0))
+            .into_font()
+            .style(FontStyle::Bold)
+            .color(&BLACK)
+            .pos(plotters::style::text_anchor::Pos::new(
+                plotters::style::text_anchor::HPos::Center,
+                plotters::style::text_anchor::VPos::Top,
+            )),
+    ))?;
 
     let log_rpk: Vec<f64> = dm
         .rows
@@ -813,8 +885,8 @@ where
     }
     let y_max = *hist.iter().max().unwrap_or(&1) as f64;
 
-    let mut chart = ChartBuilder::on(&root)
-        .margin_top(ps(15.0))
+    let mut chart = ChartBuilder::on(&plot_area)
+        .margin_top(ps(5.0))
         .margin_right(ps(15.0))
         .margin_bottom(ps(10.0))
         .margin_left(ps(10.0))
@@ -877,21 +949,26 @@ where
         ))?;
     }
 
-    root.present()?;
+    plot_area.present()?;
     Ok(())
 }
 
 /// Generate expression (RPK) histogram.
 ///
 /// Produces both `<output_path>.png` (high-res) and `<output_path>.svg`.
-pub fn expression_histogram(dm: &DupMatrix, output_path: &std::path::Path) -> Result<()> {
+/// The `title` is drawn centered at the top of the plot.
+pub fn expression_histogram(
+    dm: &DupMatrix,
+    title: &str,
+    output_path: &std::path::Path,
+) -> Result<()> {
     // PNG
-    let root = BitMapBackend::new(output_path, (s(480), s(480))).into_drawing_area();
-    render_histogram(root, dm, SCALE as f64)?;
+    let root = BitMapBackend::new(output_path, (s(480), s(520))).into_drawing_area();
+    render_histogram(root, dm, title, SCALE as f64)?;
     // SVG
     let svg = output_path.with_extension("svg");
-    let root = SVGBackend::new(&svg, (480, 480)).into_drawing_area();
-    render_histogram(root, dm, 1.0)?;
+    let root = SVGBackend::new(&svg, (480, 520)).into_drawing_area();
+    render_histogram(root, dm, title, 1.0)?;
     Ok(())
 }
 

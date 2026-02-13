@@ -137,6 +137,15 @@ rustqc rna <INPUT> <GTF> [OPTIONS]
 | `--outdir <DIR>` | `.` | Output directory |
 | `--reference <FASTA>` / `-r` | none | Reference FASTA file (required for CRAM input) |
 | `--config <FILE>` | none | Path to a YAML configuration file (see [Configuration](#configuration)) |
+| `--skip-dup-check` | `false` | Skip verification that duplicates have been marked in the BAM file (see [Duplicate marking](#duplicate-marking)) |
+
+### Duplicate marking
+
+RustQC requires that the input BAM file has been processed by a duplicate-marking tool such as [Picard MarkDuplicates](https://broadinstitute.github.io/picard/command-line-overview.html#MarkDuplicates), [samblaster](https://github.com/GregoryFaust/samblaster), or [sambamba markdup](https://lomereiter.github.io/sambamba/). These tools set the SAM flag `0x400` on PCR/optical duplicate reads, which RustQC uses to compute duplication rates.
+
+Before processing, RustQC checks the BAM `@PG` header lines for known duplicate-marking programs. If none are found, it exits with an error explaining how to mark duplicates. As a secondary safeguard, if processing completes but zero duplicate-flagged reads are found among mapped reads, RustQC also exits with an error.
+
+If you are confident that your BAM file has duplicates correctly flagged despite the header check failing, you can bypass the verification with `--skip-dup-check`.
 
 ### Example
 

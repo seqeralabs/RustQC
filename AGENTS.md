@@ -164,6 +164,22 @@ All three must pass. Uses `dtolnay/rust-toolchain@stable` and `Swatinem/rust-cac
 | `env_logger`   | Log output backend               |
 | `indexmap`     | Insertion-order-preserving maps  |
 
+## Duplicate Marking Validation
+
+RustQC verifies that BAM files have been processed by a duplicate-marking tool before
+running the RNA duplication analysis. This is implemented in two layers:
+
+1. **Pre-flight `@PG` header check** (`counting::verify_duplicates_marked`): Parses the
+   BAM header text for `@PG` lines and checks the `ID:` and `PN:` fields against
+   `KNOWN_DUP_MARKERS` (Picard MarkDuplicates, samblaster, sambamba, biobambam, etc.).
+   Exits with `anyhow::bail!()` if no known tool is found.
+2. **Post-hoc zero-duplicates check**: After counting, if `total_dup == 0` with
+   `total_mapped > 0`, bails with an error — catches cases where the header is present
+   but duplicates weren't actually flagged.
+
+Both checks are skipped when `--skip-dup-check` is passed (stored as `RnaArgs.skip_dup_check`,
+forwarded to `count_reads()` as the `skip_dup_check: bool` parameter).
+
 ## Notes for Agents
 
 - The codebase is a pure binary crate with no library target.

@@ -38,7 +38,14 @@ fn run_rustqc(outdir: &str) -> std::process::Output {
 fn run_rustqc_with_input(outdir: &str, input: &str) -> std::process::Output {
     let binary = rustqc_binary();
     Command::new(&binary)
-        .args(["rna", input, "tests/data/test.gtf", "--outdir", outdir])
+        .args([
+            "rna",
+            input,
+            "tests/data/test.gtf",
+            "--outdir",
+            outdir,
+            "--skip-dup-check",
+        ])
         .output()
         .expect("Failed to execute rustqc")
 }
