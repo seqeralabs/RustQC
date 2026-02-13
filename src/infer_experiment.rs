@@ -223,10 +223,12 @@ pub fn infer_experiment<P: AsRef<Path>>(
         // Get read mapping strand
         let map_strand = if record.is_reverse() { '-' } else { '+' };
 
-        // Get read span: pos to pos + query_alignment_length
-        // RSeQC uses aligned_read.qlen which in pysam is query_alignment_length
-        // (excludes soft-clipped bases). Compute from CIGAR: sum M/I/=X consume
-        // query bases, excluding S (soft clip).
+        // Get read span on the reference.
+        // Note: RSeQC uses `pos + qlen` where pysam's qlen is the query alignment
+        // length (M+I+=+X, excluding soft clips). This slightly overestimates the
+        // reference span for reads with insertions (I consumes query, not reference)
+        // and underestimates for reads with deletions (D consumes reference, not
+        // query). We replicate this behavior to match RSeQC output.
         let read_start = record.pos() as u64;
         let qalen: u64 = record
             .cigar()

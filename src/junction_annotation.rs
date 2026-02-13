@@ -263,6 +263,7 @@ fn classify_junction(
 /// * `bed_path` - Path to BED12 reference gene model.
 /// * `min_intron` - Minimum intron size to include (default 50).
 /// * `mapq_cut` - Minimum mapping quality (default 30).
+/// * `reference` - Optional path to reference FASTA (required for CRAM).
 ///
 /// # Returns
 /// `JunctionResults` containing all junction classifications and summary counts.
@@ -271,13 +272,22 @@ pub fn junction_annotation(
     bed_path: &str,
     min_intron: u64,
     mapq_cut: u8,
+    reference: Option<&str>,
 ) -> Result<JunctionResults> {
     info!("Parsing reference gene model: {}", bed_path);
-    let reference = parse_reference_bed(bed_path)?;
+    let ref_junctions = parse_reference_bed(bed_path)?;
 
     info!("Processing BAM file: {}", bam_path);
-    let mut bam = bam::Reader::from_path(bam_path)
-        .with_context(|| format!("Failed to open BAM file: {}", bam_path))?;
+    let mut bam = if let Some(ref_path) = reference {
+        let mut r = bam::Reader::from_path(bam_path)
+            .with_context(|| format!("Failed to open BAM file: {}", bam_path))?;
+        r.set_reference(ref_path)
+            .with_context(|| format!("Failed to set reference: {}", ref_path))?;
+        r
+    } else {
+        bam::Reader::from_path(bam_path)
+            .with_context(|| format!("Failed to open BAM file: {}", bam_path))?
+    };
     // Build tid -> uppercase chrom name mapping
     let tid_to_chrom: HashMap<i32, String> = {
         let header_view = bam.header();
@@ -358,7 +368,7 @@ pub fn junction_annotation(
                 continue;
             }
 
-            let class = classify_junction(chrom, intron_start, intron_end, &reference);
+            let class = classify_junction(chrom, intron_start, intron_end, &ref_junctions);
 
             match class {
                 JunctionClass::Annotated => known_events += 1,
@@ -387,7 +397,7 @@ pub fn junction_annotation(
             &junction.chrom,
             junction.intron_start,
             junction.intron_end,
-            &reference,
+            &ref_junctions,
         );
         junctions.insert(junction.clone(), (*count, class));
     }
@@ -470,7 +480,7 @@ pub fn write_junction_bed(results: &JunctionResults, path: &Path) -> Result<()> 
     for (junction, (count, class)) in &sorted_junctions {
         let chrom = format_chrom(&junction.chrom);
         // BED coordinates: 1bp block before intron and 1bp block after
-        let bed_start = junction.intron_start - 1; // 1bp before intron
+        let bed_start = junction.intron_start.saturating_sub(1); // 1bp before intron
         let bed_end = junction.intron_end + 1; // 1bp after intron
         let span = bed_end - bed_start;
 

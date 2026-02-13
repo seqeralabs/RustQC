@@ -310,15 +310,23 @@ pub fn inner_distance(
     lower_bound: i64,
     upper_bound: i64,
     step: i64,
+    reference: Option<&str>,
 ) -> Result<InnerDistanceResult> {
     info!("Processing inner distance for: {}", bam_path);
 
     // Parse reference gene model
     let (exon_bitset, transcript_tree) = parse_bed12(bed_path)?;
 
-    // Open BAM file
-    let mut bam = bam::Reader::from_path(bam_path)
-        .with_context(|| format!("Failed to open BAM file: {}", bam_path))?;
+    // Open BAM/CRAM file
+    let mut bam = if let Some(ref_path) = reference {
+        let mut reader = bam::Reader::from_path(bam_path)
+            .with_context(|| format!("Failed to open BAM file: {}", bam_path))?;
+        reader.set_reference(ref_path)?;
+        reader
+    } else {
+        bam::Reader::from_path(bam_path)
+            .with_context(|| format!("Failed to open BAM file: {}", bam_path))?
+    };
     let header = bam::Header::from_template(bam.header());
 
     // Build tid -> chromosome name mapping (uppercased)

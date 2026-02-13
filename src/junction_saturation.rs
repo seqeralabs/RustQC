@@ -151,6 +151,7 @@ pub fn junction_saturation(
     sample_start: u32,
     sample_end: u32,
     sample_step: u32,
+    reference: Option<&str>,
 ) -> Result<SaturationResult> {
     // Parse reference junctions from BED12
     let known_junctions = parse_reference_junctions(bed_path)?;
@@ -161,9 +162,15 @@ pub fn junction_saturation(
         .map(|k| k.split(':').next().unwrap().to_string())
         .collect();
 
-    // Open BAM file
-    let mut bam =
-        bam::Reader::from_path(bam_path).with_context(|| format!("opening BAM: {bam_path}"))?;
+    // Open BAM/CRAM file
+    let mut bam = if let Some(ref_path) = reference {
+        let mut reader =
+            bam::Reader::from_path(bam_path).with_context(|| format!("opening BAM: {bam_path}"))?;
+        reader.set_reference(ref_path)?;
+        reader
+    } else {
+        bam::Reader::from_path(bam_path).with_context(|| format!("opening BAM: {bam_path}"))?
+    };
     let header = bam.header().clone();
 
     // Map tid -> uppercase chromosome name
@@ -252,7 +259,7 @@ pub fn junction_saturation(
 
     // Phase 3: Incremental sampling
     let sr_num = all_observations.len();
-    let mut percentages: Vec<u32> = (sample_start..sample_end)
+    let mut percentages: Vec<u32> = (sample_start..=sample_end)
         .step_by(sample_step as usize)
         .collect();
     if !percentages.contains(&100) {

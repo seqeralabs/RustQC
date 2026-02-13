@@ -797,16 +797,16 @@ fn run_infer_experiment(args: cli::InferExperimentArgs) -> Result<()> {
 
 /// Run read duplication analysis for one or more BAM files.
 fn run_read_duplication(args: cli::ReadDuplicationArgs) -> Result<()> {
-    let start = std::time::Instant::now();
-    let outdir = std::path::Path::new(&args.outdir);
+    let start = Instant::now();
+    let outdir = Path::new(&args.outdir);
     std::fs::create_dir_all(outdir).context("Failed to create output directory")?;
 
     for bam_path in &args.input {
-        let bam_start = std::time::Instant::now();
-        let bam_stem = std::path::Path::new(bam_path)
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
+        let bam_start = Instant::now();
+        let bam_stem = Path::new(bam_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("output")
             .to_string();
 
         info!("[{}] Running read duplication analysis...", bam_stem);
@@ -853,7 +853,8 @@ fn run_read_distribution(args: cli::ReadDistributionArgs) -> Result<()> {
 
         info!("[{}] Running read_distribution analysis...", bam_stem);
 
-        let result = read_distribution::read_distribution(bam_path, &args.bed)?;
+        let result =
+            read_distribution::read_distribution(bam_path, &args.bed, args.reference.as_deref())?;
 
         let output_path = outdir.join(format!("{}.read_distribution.txt", bam_stem));
         read_distribution::write_read_distribution(&result, &output_path)?;
@@ -907,6 +908,7 @@ fn run_junction_annotation(args: cli::JunctionAnnotationArgs) -> Result<()> {
             &args.bed,
             args.min_intron,
             args.mapq_cut,
+            args.reference.as_deref(),
         )?;
 
         // Write output files
@@ -972,6 +974,7 @@ fn run_junction_saturation(args: cli::JunctionSaturationArgs) -> Result<()> {
             args.percentile_floor as u32,
             args.percentile_ceiling as u32,
             args.percentile_step as u32,
+            args.reference.as_deref(),
         )?;
 
         // Write R script and summary
@@ -1023,10 +1026,14 @@ fn run_inner_distance(args: cli::InnerDistanceArgs) -> Result<()> {
             args.lower_bound,
             args.upper_bound,
             args.step,
+            args.reference.as_deref(),
         )?;
 
         // Write output files
-        let prefix = format!("{outdir}/{bam_stem}");
+        let prefix = Path::new(outdir)
+            .join(bam_stem)
+            .to_string_lossy()
+            .to_string();
         let detail_path = format!("{prefix}.inner_distance.txt");
         inner_distance::write_detail_file(&results, &detail_path)?;
 

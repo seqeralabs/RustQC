@@ -485,7 +485,16 @@ pub struct ReadDistributionResult {
 }
 
 /// Run read distribution analysis on a BAM file.
-pub fn read_distribution(bam_path: &str, bed_path: &str) -> Result<ReadDistributionResult> {
+///
+/// # Arguments
+/// * `bam_path` - Path to the BAM/CRAM file
+/// * `bed_path` - Path to the BED12 reference gene model
+/// * `reference` - Optional path to reference FASTA (required for CRAM)
+pub fn read_distribution(
+    bam_path: &str,
+    bed_path: &str,
+    reference: Option<&str>,
+) -> Result<ReadDistributionResult> {
     info!("Building gene model from BED file: {}", bed_path);
     let regions = build_regions(bed_path)?;
 
@@ -507,8 +516,16 @@ pub fn read_distribution(bam_path: &str, bed_path: &str) -> Result<ReadDistribut
     );
 
     // Iterate BAM and classify tags
-    let mut bam = bam::Reader::from_path(bam_path)
-        .with_context(|| format!("Failed to open BAM file: {}", bam_path))?;
+    let mut bam = if let Some(ref_path) = reference {
+        let mut r = bam::Reader::from_path(bam_path)
+            .with_context(|| format!("Failed to open BAM file: {}", bam_path))?;
+        r.set_reference(ref_path)
+            .with_context(|| format!("Failed to set reference: {}", ref_path))?;
+        r
+    } else {
+        bam::Reader::from_path(bam_path)
+            .with_context(|| format!("Failed to open BAM file: {}", bam_path))?
+    };
 
     // Build tid -> uppercase chrom name mapping
     let header = bam.header().clone();
