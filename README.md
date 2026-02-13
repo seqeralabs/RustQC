@@ -11,17 +11,17 @@
 | Language | R | Rust |
 | Dependencies | R, Bioconductor, Rsubread | None (static binary) |
 | BAM counting | 4 separate featureCounts calls | Single-pass BAM reading |
-| Speed | Minutes per sample | Seconds per sample (~7x faster) |
+| Speed | ~24 min for 10 GB BAM | ~1 min for 10 GB BAM (with `--threads 8`) |
 | Memory | High (R overhead) | Low |
 | Output format | Identical | Identical |
 
 ### Benchmarked on GM12878 REP1 (~10 GB paired-end BAM)
 
-| Metric | dupRadar (R) | dupRust |
-| --- | --- | --- |
-| **Runtime** | 1,428 s | 198 s |
-| **Intercept** | 0.8245 | 0.8245 |
-| **Slope** | 1.6774 | 1.6774 |
+| Metric | dupRadar (R) | dupRust (1 thread) | dupRust (8 threads) | dupRust (10 threads) |
+| --- | --- | --- | --- | --- |
+| **Runtime** | 23m 48s | 3m 20s (~7x) | 1m 04s (~22x) | 0m 53s (~27x) |
+| **Intercept** | 0.8245 | 0.8245 | 0.8245 | 0.8245 |
+| **Slope** | 1.6774 | 1.6774 | 1.6774 | 1.6774 |
 
 All gene counts — unique and multi-mapper — match **exactly** across all 63,086 genes (100%).
 

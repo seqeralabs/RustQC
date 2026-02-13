@@ -48,15 +48,15 @@ Paired-end, unstranded, aligned to GRCh38 (Ensembl chromosome names).
 
 ### Results
 
-| Metric | dupRadar (R) | dupRust |
-| --- | --- | --- |
-| **Runtime** | 1,428 s (23.8 min) | 198 s (3.3 min) |
-| **Speedup** | — | **~7x** |
-| **Intercept** | 0.8245 | 0.8245 |
-| **Slope** | 1.6774 | 1.6774 |
-| **Genes total** | 63,086 | 63,086 |
-| **Genes with reads (unique)** | 23,597 | 23,597 |
-| **Genes with reads (multi)** | 24,719 | 24,719 |
+| Metric | dupRadar (R) | dupRust (1 thread) | dupRust (8 threads) | dupRust (10 threads) |
+| --- | --- | --- | --- | --- |
+| **Runtime** | 23m 48s | 3m 20s (~7x) | 1m 04s (~22x) | 0m 53s (~27x) |
+| **Speedup** | — | **~7x** | **~22x** | **~27x** |
+| **Intercept** | 0.8245 | 0.8245 | 0.8245 | 0.8245 |
+| **Slope** | 1.6774 | 1.6774 | 1.6774 | 1.6774 |
+| **Genes total** | 63,086 | 63,086 | 63,086 | 63,086 |
+| **Genes with reads (unique)** | 23,597 | 23,597 | 23,597 | 23,597 |
+| **Genes with reads (multi)** | 24,719 | 24,719 | 24,719 | 24,719 |
 
 ### Count comparison
 
@@ -111,10 +111,21 @@ chromosome_prefix: "chr"
 
 ```bash
 cargo build --release
+
+# Single-threaded
 ./target/release/duprust \
   benchmark/large/GM12878_REP1.markdup.sorted.bam \
   benchmark/large/genes.gtf \
   -p \
+  -o benchmark/large/dupRust \
+  -c benchmark/large/config.yaml
+
+# Multi-threaded (8 threads)
+./target/release/duprust \
+  benchmark/large/GM12878_REP1.markdup.sorted.bam \
+  benchmark/large/genes.gtf \
+  -p \
+  -t 8 \
   -o benchmark/large/dupRust \
   -c benchmark/large/config.yaml
 ```
@@ -123,4 +134,4 @@ cargo build --release
 
 Both benchmarks achieve **100% exact match** across all four count columns (unique and multi-mapper) and all genes. Model fit parameters match to at least 10 significant digits.
 
-Runtime may vary depending on hardware — the times above were measured on a single machine for relative comparison.
+Runtime may vary depending on hardware — the times above were measured on a single machine (10-core Apple Silicon) for relative comparison. Multi-threaded scaling depends on the number of chromosomes with mapped reads and the evenness of their read distribution.
