@@ -1,6 +1,6 @@
 Status	test.bam
-Assigned	22812
-Unassigned_Unmapped	26405
+Assigned	44572
+Unassigned_Unmapped	0
 Unassigned_Read_Type	0
 Unassigned_Singleton	0
 Unassigned_MappingQuality	0
@@ -10,6 +10,6 @@ Unassigned_Duplicate	0
 Unassigned_MultiMapping	0
 Unassigned_Secondary	0
 Unassigned_NonSplit	0
-Unassigned_NoFeatures	1227
+Unassigned_NoFeatures	2613
 Unassigned_Overlapping_Length	0
-Unassigned_Ambiguity	2395
+Unassigned_Ambiguity	5654

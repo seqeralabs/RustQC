@@ -590,7 +590,7 @@ fn process_single_bam(
                         let thresh = rpkm_threshold_rpk;
                         let path = &density_path;
                         s.spawn(move || {
-                            plots::density_scatter_plot(dm_ref, fit, thresh, bam_stem, path)
+                            plots::density_scatter_plot(dm_ref, fit, thresh, 0.5, bam_stem, path)
                         })
                     })
                 } else {

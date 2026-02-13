@@ -13,14 +13,15 @@ use crate::fitting::FitResult;
 use anyhow::Result;
 use plotters::prelude::*;
 use plotters_svg::SVGBackend;
+use std::collections::HashMap;
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-/// Resolution scale factor for PNG output. Base dimensions (640×480) are
+/// Resolution scale factor for PNG output. Base dimensions (520×520) are
 /// multiplied by this value to produce high-resolution images.
-const SCALE: u32 = 2;
+const SCALE: u32 = 4;
 
 /// Convenience: scale a base pixel value by [`SCALE`].
 const fn s(v: u32) -> u32 {
@@ -57,6 +58,7 @@ fn density_color(t: f64) -> RGBColor {
     let b = DENSITY_COLORS[i].2 as f64 * (1.0 - frac) + DENSITY_COLORS[i + 1].2 as f64 * frac;
     RGBColor(r as u8, g as u8, b as u8)
 }
+
 /// 2-D kernel-density estimation on a grid, matching R's `densCols(nbin=500)`.
 ///
 /// Matches R's `grDevices::densCols()` which internally uses
@@ -246,30 +248,168 @@ fn quantile(sorted: &[f64], p: f64) -> f64 {
     }
 }
 
-/// Draw a dotted vertical line on a pixel-coordinate drawing area.
-///
-/// plotters has no native dashed-line support, so we draw small segments
-/// separated by gaps.
+// ---------------------------------------------------------------------------
+// Drawing helpers — smooth dashed lines via filled circles
+// ---------------------------------------------------------------------------
+
+/// Draw a dashed horizontal line in pixel coordinates (for legend samples).
 #[allow(clippy::too_many_arguments)]
-fn draw_dotted_vline<DB: DrawingBackend>(
-    root: &DrawingArea<DB, plotters::coord::Shift>,
-    x: i32,
-    y_top: i32,
-    y_bot: i32,
+fn draw_dashed_hline<DB: DrawingBackend>(
+    area: &DrawingArea<DB, plotters::coord::Shift>,
+    x_start: i32,
+    x_end: i32,
+    y: i32,
     color: &RGBColor,
     sw: u32,
     dash: i32,
     gap: i32,
 ) {
-    let mut y = y_top;
-    while y < y_bot {
-        let ye = (y + dash).min(y_bot);
-        root.draw(&PathElement::new(
-            vec![(x, y), (x, ye)],
+    let mut x = x_start;
+    while x < x_end {
+        let xe = (x + dash).min(x_end);
+        area.draw(&PathElement::new(
+            vec![(x, y), (xe, y)],
             color.stroke_width(sw),
         ))
         .ok();
-        y = ye + gap;
+        x = xe + gap;
+    }
+}
+
+/// Draw a smooth dashed curve using the chart's coordinate system.
+///
+/// Rather than using plotters' `LineSeries` (which produces blocky thick lines
+/// with no anti-aliasing), we draw the curve as a series of small filled circles
+/// placed along the path. The dash/gap pattern is computed using arc-length
+/// parameterization in pixel space to ensure even spacing regardless of curve
+/// steepness. Drawing through `chart.draw_series()` provides automatic clipping
+/// to the plot area.
+#[allow(clippy::too_many_arguments)]
+fn draw_dashed_curve_via_chart<DB: DrawingBackend>(
+    chart: &mut ChartContext<
+        DB,
+        Cartesian2d<plotters::coord::types::RangedCoordf64, plotters::coord::types::RangedCoordf64>,
+    >,
+    data_points: &[(f64, f64)],
+    color: &RGBColor,
+    radius: u32,
+    dash_px: f64,
+    gap_px: f64,
+) where
+    DB::ErrorType: 'static,
+{
+    if data_points.len() < 2 {
+        return;
+    }
+
+    // Step 1: Convert data points to pixel coords for arc-length computation
+    let pa = chart.plotting_area();
+    let pixel_pts: Vec<(f64, f64)> = data_points
+        .iter()
+        .map(|&(dx, dy)| {
+            let coord = pa.map_coordinate(&(dx, dy));
+            (coord.0 as f64, coord.1 as f64)
+        })
+        .collect();
+
+    // Step 2: Walk along pixel polyline by arc length, collecting points to draw
+    let mut circles_to_draw: Vec<(f64, f64)> = Vec::new();
+    let mut on = true;
+    let mut remaining = dash_px;
+    let mut seg = 0;
+    let mut cx = pixel_pts[0].0;
+    let mut cy = pixel_pts[0].1;
+
+    if on {
+        circles_to_draw.push(data_points[0]);
+    }
+
+    while seg < pixel_pts.len() - 1 {
+        let (nx, ny) = pixel_pts[seg + 1];
+        let dx = nx - cx;
+        let dy = ny - cy;
+        let seg_len = (dx * dx + dy * dy).sqrt();
+
+        if seg_len < 0.001 {
+            seg += 1;
+            if seg < pixel_pts.len() {
+                cx = pixel_pts[seg].0;
+                cy = pixel_pts[seg].1;
+            }
+            continue;
+        }
+
+        if seg_len <= remaining {
+            // Consume this entire segment
+            remaining -= seg_len;
+            cx = nx;
+            cy = ny;
+            seg += 1;
+            if on && seg < data_points.len() {
+                circles_to_draw.push(data_points[seg]);
+            }
+            if remaining < 0.5 {
+                on = !on;
+                remaining = if on { dash_px } else { gap_px };
+            }
+        } else {
+            // Step `remaining` distance into this segment
+            let frac = remaining / seg_len;
+            cx += dx * frac;
+            cy += dy * frac;
+            // Interpolate the data point at this fractional position
+            if on {
+                let data_frac_x =
+                    data_points[seg].0 + frac * (data_points[seg + 1].0 - data_points[seg].0);
+                let data_frac_y =
+                    data_points[seg].1 + frac * (data_points[seg + 1].1 - data_points[seg].1);
+                circles_to_draw.push((data_frac_x, data_frac_y));
+            }
+            on = !on;
+            remaining = if on { dash_px } else { gap_px };
+        }
+    }
+
+    // Step 3: Draw all circles through the chart API (auto-clips to plot area)
+    chart
+        .draw_series(
+            circles_to_draw
+                .into_iter()
+                .map(|pt| Circle::new(pt, radius, color.filled())),
+        )
+        .ok();
+}
+
+/// Draw a dashed vertical line through the chart's coordinate system.
+///
+/// Uses data-coordinate y-units for dash/gap sizing. Drawing through
+/// `chart.draw_series()` provides automatic clipping to the plot area.
+#[allow(clippy::too_many_arguments)]
+fn draw_dashed_vline_via_chart<DB: DrawingBackend>(
+    chart: &mut ChartContext<
+        DB,
+        Cartesian2d<plotters::coord::types::RangedCoordf64, plotters::coord::types::RangedCoordf64>,
+    >,
+    x_data: f64,
+    y_min: f64,
+    y_max: f64,
+    color: &RGBColor,
+    sw: u32,
+    dash_data_len: f64,
+    gap_data_len: f64,
+) where
+    DB::ErrorType: 'static,
+{
+    let mut y = y_min;
+    while y < y_max {
+        let ye = (y + dash_data_len).min(y_max);
+        chart
+            .draw_series(std::iter::once(PathElement::new(
+                vec![(x_data, y), (x_data, ye)],
+                color.stroke_width(sw),
+            )))
+            .ok();
+        y = ye + gap_data_len;
     }
 }
 
@@ -278,11 +418,13 @@ fn draw_dotted_vline<DB: DrawingBackend>(
 // ============================================================================
 
 /// Internal: render the density scatter plot onto an arbitrary backend.
+#[allow(clippy::too_many_arguments)]
 fn render_density_scatter<DB: DrawingBackend>(
     root: DrawingArea<DB, plotters::coord::Shift>,
     dm: &DupMatrix,
     fit: &FitResult,
     rpkm_threshold: Option<f64>,
+    rpkm_value: f64,
     title: &str,
     pxs: f64, // pixel scale (SCALE for PNG, 1 for SVG)
 ) -> Result<()>
@@ -328,16 +470,17 @@ where
     let raw_min = xd.iter().cloned().fold(f64::INFINITY, f64::min);
     let raw_max = xd.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
     // R's plot() auto-pads the data range by ~4%.  Use rounded ticks but data-based range.
-    let tick_min = raw_min.round() as i32; // for tick positions
-    let tick_max = raw_max.round() as i32;
+    let tick_min = raw_min.floor() as i32; // for tick positions
+    let tick_max = raw_max.ceil() as i32;
     let pad = (raw_max - raw_min) * 0.04;
-    let x_min = (raw_min - pad).max(tick_min as f64); // don't go below first tick
-    let x_max = (raw_max + pad).min(tick_max as f64 + 1.0); // a little past last tick
+    let x_min = (raw_min - pad).min(tick_min as f64); // at or below first tick
+                                                      // Add 0.3 units past the last tick so the rightmost tick label isn't clipped
+    let x_max = (raw_max + pad).max(tick_max as f64 + 0.3);
 
     // ── chart frame ────────────────────────────────────────────────────
     let mut chart = ChartBuilder::on(&plot_area)
         .margin_top(ps(5.0))
-        .margin_right(ps(15.0))
+        .margin_right(ps(25.0))
         .margin_bottom(ps(10.0))
         .margin_left(ps(10.0))
         .x_label_area_size(ps(40.0))
@@ -346,7 +489,8 @@ where
 
     chart
         .configure_mesh()
-        .disable_mesh()
+        .bold_line_style(RGBColor(200, 200, 200).stroke_width(ps(1.0).max(1)))
+        .light_line_style(TRANSPARENT)
         .x_desc("expression (reads/kbp)")
         .y_desc("% duplicate reads")
         .x_label_formatter(&|v| {
@@ -370,19 +514,47 @@ where
         .label_style(("sans-serif", ps(12.0)))
         .draw()?;
 
-    // ── points (data order, matching R's plot() behavior) ─────────────
-    // R draws points in data order with pch=20 cex=0.25 → tiny filled dots.
-    // R's pch=20 with cex=0.25 draws tiny filled circles.
-    // Circle radius 1 at our scale gives the closest match.
-    for i in 0..xd.len() {
-        let c = density_color(densities[i]);
-        chart.draw_series(std::iter::once(Circle::new((xd[i], yd[i]), 1, c.filled())))?;
+    // ── scatter points with pixel deduplication ────────────────────────
+    // Points that map to the same pixel coordinate produce identical circles —
+    // only the topmost (highest density, drawn last) is visible. Deduplicating
+    // dramatically reduces SVG file size and bitmap render time.
+    let point_radius = (pxs * 1.2).round().max(1.0) as u32;
+
+    let mut pixel_map: HashMap<(i32, i32), (f64, f64, f64)> = HashMap::new();
+    for (i, (&x, &y)) in xd.iter().zip(yd.iter()).enumerate() {
+        let px = chart.backend_coord(&(x, y));
+        let d = densities[i];
+        let key = (px.0, px.1);
+        pixel_map
+            .entry(key)
+            .and_modify(|existing| {
+                if d > existing.2 {
+                    *existing = (x, y, d);
+                }
+            })
+            .or_insert((x, y, d));
     }
 
-    // ── fit curve: R uses col='black', lwd=2, lty=3 (dotted) ──────────
-    // Draw as a series of very short dashes to approximate R's dotted style.
-    // R lty=3 draws round dots. We approximate with 2-point-on, 2-point-off.
-    let n_curve = (1200.0 * pxs) as usize; // more points at higher resolution
+    // Sort by density ascending so high-density points draw on top
+    let mut deduped: Vec<(f64, f64, f64)> = pixel_map.into_values().collect();
+    deduped.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap());
+
+    let max_dens = deduped.iter().map(|d| d.2).fold(0.0f64, f64::max);
+
+    for (x, y, d) in deduped {
+        let t = if max_dens > 0.0 { d / max_dens } else { 0.0 };
+        let c = density_color(t);
+        chart.draw_series(std::iter::once(Circle::new(
+            (x, y),
+            point_radius,
+            c.filled(),
+        )))?;
+    }
+
+    // ── fit curve: smooth dashed line via filled circles ───────────────
+    // Uses arc-length parameterization for even dash spacing regardless of
+    // curve steepness. Drawing via chart API auto-clips to the plot area.
+    let n_curve = (2000.0 * pxs) as usize;
     let curve_pts: Vec<(f64, f64)> = (0..=n_curve)
         .map(|i| {
             let x = x_min + (x_max - x_min) * i as f64 / n_curve as f64;
@@ -390,66 +562,31 @@ where
             (x, y)
         })
         .collect();
-    // Draw dotted: short on/off segments
-    // R lty=3 (dotted): ~2pt on, ~4pt off. Each curve point spans ~0.3px,
-    // so 2pt ≈ 6 points on, 4pt ≈ 12 points off at 2x scale.
-    let seg_on_len = (2.0 * pxs).round().max(2.0) as usize;
-    let seg_off_len = (4.0 * pxs).round().max(2.0) as usize;
-    let mut seg_idx = 0;
-    let mut seg_on = true;
-    let mut seg_pts: Vec<(f64, f64)> = Vec::new();
-    let curve_sw = (pxs * 2.0).round().max(1.0) as u32; // match R lwd=2
-    for pt in &curve_pts {
-        if seg_on {
-            seg_pts.push(*pt);
-        }
-        seg_idx += 1;
-        let limit = if seg_on { seg_on_len } else { seg_off_len };
-        if seg_idx >= limit {
-            if seg_on && seg_pts.len() >= 2 {
-                chart.draw_series(LineSeries::new(
-                    std::mem::take(&mut seg_pts),
-                    BLACK.stroke_width(curve_sw),
-                ))?;
-            }
-            seg_pts.clear();
-            seg_idx = 0;
-            seg_on = !seg_on;
-        }
-    }
-    if seg_on && seg_pts.len() >= 2 {
-        chart.draw_series(LineSeries::new(seg_pts, BLACK.stroke_width(curve_sw)))?;
-    }
 
-    // ── threshold lines (pixel-space dashed lines) ─────────────────────
-    let pa = chart.plotting_area();
-    let pa_dim = pa.dim_in_pixel();
-    let pa_pos = pa.get_base_pixel();
-    let pa_x = (pa_pos.0, pa_pos.0 + pa_dim.0 as i32);
-    let pa_y = (pa_pos.1, pa_pos.1 + pa_dim.1 as i32);
+    let curve_radius = (pxs * 0.8).round().max(1.0) as u32;
+    let dash_px = 5.0 * pxs;
+    let gap_px = 10.0 * pxs;
 
-    let x_to_px = |dx: f64| -> i32 {
-        let frac = (dx - x_min) / (x_max - x_min);
-        pa_x.0 + (frac * (pa_x.1 - pa_x.0) as f64) as i32
-    };
+    draw_dashed_curve_via_chart(
+        &mut chart,
+        &curve_pts,
+        &BLACK,
+        curve_radius,
+        dash_px,
+        gap_px,
+    );
 
-    // R uses lty=2 (dashed): short dash, standard line width
-    let dash = (pxs * 4.0) as i32;
-    let gap = (pxs * 4.0) as i32;
-    let sw = (pxs.round() as u32).max(1); // ~1pt matching R's lty=2 default lwd=1
+    // ── threshold lines via chart API (auto-clipped) ──────────────────
+    let sw = (pxs.round() as u32).max(1);
+    // Dashes in data-coordinate y-units (~1% of y range per dash/gap)
+    let vline_dash = 1.0;
+    let vline_gap = 1.0;
 
     // "1 read/bp" → RPK = 1000 → log₁₀ = 3. R: col='red', lty=2 (dashed)
     let rpk_1k = 3.0f64;
     if rpk_1k >= x_min && rpk_1k <= x_max {
-        draw_dotted_vline(
-            &plot_area,
-            x_to_px(rpk_1k),
-            pa_y.0,
-            pa_y.1,
-            &RED,
-            sw,
-            dash,
-            gap,
+        draw_dashed_vline_via_chart(
+            &mut chart, rpk_1k, 0.0, 100.0, &RED, sw, vline_dash, vline_gap,
         );
     }
 
@@ -458,33 +595,37 @@ where
         if rpk_pos > 0.0 {
             let lr = rpk_pos.log10();
             if lr.is_finite() && lr >= x_min && lr <= x_max {
-                draw_dotted_vline(
-                    &plot_area,
-                    x_to_px(lr),
-                    pa_y.0,
-                    pa_y.1,
-                    &GREEN,
-                    sw,
-                    dash,
-                    gap,
+                draw_dashed_vline_via_chart(
+                    &mut chart, lr, 0.0, 100.0, &GREEN, sw, vline_dash, vline_gap,
                 );
             }
         }
     }
 
-    // ── legend: R has Int/Sl at top-left, thresholds at bottom-right ───
-    let fsz = ps(11.0);
-    let line_h = (pxs * 13.0) as i32;
-    let legend_sw = sw; // same thin stroke as threshold lines
+    // ── legend ─────────────────────────────────────────────────────────
+    let pa = chart.plotting_area();
+    let pa_dim = pa.dim_in_pixel();
+    let pa_pos = pa.get_base_pixel();
+    let pa_x = (pa_pos.0, pa_pos.0 + pa_dim.0 as i32);
+    let pa_y = (pa_pos.1, pa_pos.1 + pa_dim.1 as i32);
 
-    // Top-left legend box: Int/Sl
+    let fsz = ps(11.0);
+    let line_h = (pxs * 14.0) as i32;
+    let legend_sw = (pxs * 1.5).round().max(1.0) as u32;
+    let sample_len = (pxs * 24.0) as i32;
+    let text_gap = (pxs * 4.0) as i32;
+    let lpad = (pxs * 6.0) as i32;
+    let samp_dash = (pxs * 3.0) as i32;
+    let samp_gap = (pxs * 3.0) as i32;
+
+    // Top-left: Int/Sl box
     {
-        let lw = (pxs * 70.0) as i32;
-        let lh = (pxs * 32.0) as i32;
-        let lx = pa_x.0 + (pxs * 8.0) as i32;
-        let ly = pa_y.0 + (pxs * 8.0) as i32;
+        let bw = (pxs * 70.0) as i32;
+        let bh = (pxs * 32.0) as i32;
+        let bx = pa_x.0 + (pxs * 8.0) as i32;
+        let by = pa_y.0 + (pxs * 8.0) as i32;
         plot_area.draw(&Rectangle::new(
-            [(lx, ly), (lx + lw, ly + lh)],
+            [(bx, by), (bx + bw, by + bh)],
             ShapeStyle {
                 color: WHITE.to_rgba(),
                 filled: true,
@@ -492,11 +633,11 @@ where
             },
         ))?;
         plot_area.draw(&Rectangle::new(
-            [(lx, ly), (lx + lw, ly + lh)],
-            BLACK.stroke_width(legend_sw),
+            [(bx, by), (bx + bw, by + bh)],
+            BLACK.stroke_width(sw),
         ))?;
-        let tx = lx + (pxs * 6.0) as i32;
-        let mut cy = ly + (pxs * 5.0) as i32;
+        let tx = bx + (pxs * 6.0) as i32;
+        let mut cy = by + (pxs * 5.0) as i32;
         plot_area.draw(&Text::new(
             format!("Int: {:.2}", fit.intercept),
             (tx, cy),
@@ -510,14 +651,18 @@ where
         ))?;
     }
 
-    // Bottom-right legend box: threshold lines
+    // Bottom-right legend box: matches R's legend with threshold lines.
+    // Shows "1 read/bp" (red dashed) always, plus "0.5 RPKM" (green dashed)
+    // when the RPKM threshold is present.
     {
-        let lw = (pxs * 90.0) as i32;
-        let lh = (pxs * 32.0) as i32;
+        let has_rpkm = rpkm_threshold.is_some_and(|v| v > 0.0);
+        let n_rows = if has_rpkm { 2 } else { 1 };
+        let lw = (pxs * 110.0) as i32;
+        let lh = (pxs * (8.0 + n_rows as f64 * 14.0 + 4.0)) as i32;
         let lx = pa_x.1 - lw - (pxs * 8.0) as i32;
         let ly = pa_y.1 - lh - (pxs * 8.0) as i32;
-        let txt_x = lx + (pxs * 22.0) as i32;
-        let samp_x = lx + (pxs * 4.0) as i32;
+
+        // Background fill
         plot_area.draw(&Rectangle::new(
             [(lx, ly), (lx + lw, ly + lh)],
             ShapeStyle {
@@ -526,44 +671,57 @@ where
                 stroke_width: 0,
             },
         ))?;
+        // Border
         plot_area.draw(&Rectangle::new(
             [(lx, ly), (lx + lw, ly + lh)],
-            BLACK.stroke_width(legend_sw),
+            BLACK.stroke_width(sw),
         ))?;
-        let mut cy = ly + (pxs * 5.0) as i32;
-        // "1 read/bp" with red dashed sample line
-        draw_dotted_vline(
+
+        // Row 1: RPK=1000 threshold (dashed red horizontal line sample)
+        let row_y = ly + (pxs * 6.0) as i32;
+        let line_y = row_y + (pxs * 5.0) as i32;
+        draw_dashed_hline(
             &plot_area,
-            samp_x + (pxs * 7.0) as i32,
-            cy,
-            cy + line_h - 2,
+            lx + lpad,
+            lx + lpad + sample_len,
+            line_y,
             &RED,
-            sw,
-            (pxs * 3.0) as i32,
-            (pxs * 2.0) as i32,
+            legend_sw,
+            samp_dash,
+            samp_gap,
         );
         plot_area.draw(&Text::new(
             "1 read/bp",
-            (txt_x, cy),
+            (lx + lpad + sample_len + text_gap, row_y),
             ("sans-serif", fsz).into_font().color(&BLACK),
         ))?;
-        cy += line_h;
-        // "0.5 RPKM" with green dashed sample line
-        draw_dotted_vline(
-            &plot_area,
-            samp_x + (pxs * 7.0) as i32,
-            cy,
-            cy + line_h - 2,
-            &GREEN,
-            sw,
-            (pxs * 3.0) as i32,
-            (pxs * 2.0) as i32,
-        );
-        plot_area.draw(&Text::new(
-            "0.5 RPKM",
-            (txt_x, cy),
-            ("sans-serif", fsz).into_font().color(&BLACK),
-        ))?;
+
+        // Row 2 (optional): RPKM threshold (dashed green horizontal line sample)
+        if has_rpkm {
+            let row_y2 = row_y + line_h;
+            let line_y2 = row_y2 + (pxs * 5.0) as i32;
+            draw_dashed_hline(
+                &plot_area,
+                lx + lpad,
+                lx + lpad + sample_len,
+                line_y2,
+                &GREEN,
+                legend_sw,
+                samp_dash,
+                samp_gap,
+            );
+            // Format the RPKM threshold value for the label
+            let rpkm_label = if rpkm_value == rpkm_value.round() {
+                format!("{} RPKM", rpkm_value as i64)
+            } else {
+                format!("{} RPKM", rpkm_value)
+            };
+            plot_area.draw(&Text::new(
+                rpkm_label,
+                (lx + lpad + sample_len + text_gap, row_y2),
+                ("sans-serif", fsz).into_font().color(&BLACK),
+            ))?;
+        }
     }
 
     plot_area.present()?;
@@ -578,18 +736,27 @@ pub fn density_scatter_plot(
     dm: &DupMatrix,
     fit: &FitResult,
     rpkm_threshold: Option<f64>,
+    rpkm_value: f64,
     title: &str,
     output_path: &std::path::Path,
 ) -> Result<()> {
     // PNG (high-res)
     let png_path = output_path.with_extension("png");
     let root = BitMapBackend::new(&png_path, (s(480), s(520))).into_drawing_area();
-    render_density_scatter(root, dm, fit, rpkm_threshold, title, SCALE as f64)?;
+    render_density_scatter(
+        root,
+        dm,
+        fit,
+        rpkm_threshold,
+        rpkm_value,
+        title,
+        SCALE as f64,
+    )?;
 
     // SVG
     let svg_path = output_path.with_extension("svg");
     let root = SVGBackend::new(&svg_path, (480, 520)).into_drawing_area();
-    render_density_scatter(root, dm, fit, rpkm_threshold, title, 1.0)?;
+    render_density_scatter(root, dm, fit, rpkm_threshold, rpkm_value, title, 1.0)?;
 
     Ok(())
 }
@@ -705,7 +872,8 @@ where
 
     chart
         .configure_mesh()
-        .disable_mesh()
+        .bold_line_style(RGBColor(200, 200, 200).stroke_width(ps(1.0).max(1)))
+        .light_line_style(TRANSPARENT)
         .y_desc("duplication (%)")
         .x_desc("mean expression (reads/kbp)")
         .x_label_formatter(&|_v| String::new()) // Disable auto x labels - we draw manually
@@ -876,8 +1044,10 @@ where
     let bw = ((raw_max - raw_min) / target_bins as f64 * 20.0).round() / 20.0; // round to nearest 0.05
     let bw = bw.max(0.05); // minimum bin width
     let x_min = (raw_min / bw).floor() * bw;
-    let x_max = (raw_max / bw).ceil() * bw;
-    let n_bins = ((x_max - x_min) / bw).round().max(1.0) as usize;
+    let bin_max = (raw_max / bw).ceil() * bw;
+    let n_bins = ((bin_max - x_min) / bw).round().max(1.0) as usize;
+    // Extend past last tick so its label isn't clipped
+    let x_max = bin_max + 0.3;
 
     let mut hist = vec![0u32; n_bins];
     for &v in &log_rpk {
@@ -888,7 +1058,7 @@ where
 
     let mut chart = ChartBuilder::on(&plot_area)
         .margin_top(ps(5.0))
-        .margin_right(ps(15.0))
+        .margin_right(ps(25.0))
         .margin_bottom(ps(10.0))
         .margin_left(ps(10.0))
         .x_label_area_size(ps(40.0))
@@ -897,7 +1067,8 @@ where
 
     chart
         .configure_mesh()
-        .disable_mesh()
+        .bold_line_style(RGBColor(200, 200, 200).stroke_width(ps(1.0).max(1)))
+        .light_line_style(TRANSPARENT)
         .x_desc("reads per kilobase (RPK)")
         .y_desc("Frequency")
         .x_label_formatter(&|v| {
