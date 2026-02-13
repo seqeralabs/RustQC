@@ -537,7 +537,7 @@ where
 
     // Sort by density ascending so high-density points draw on top
     let mut deduped: Vec<(f64, f64, f64)> = pixel_map.into_values().collect();
-    deduped.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap());
+    deduped.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
 
     let max_dens = deduped.iter().map(|d| d.2).fold(0.0f64, f64::max);
 
