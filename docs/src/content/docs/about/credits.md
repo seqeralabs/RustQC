@@ -1,0 +1,58 @@
+---
+title: Credits & Citation
+description: Credits, citations, and acknowledgments for the tools and libraries that RustQC builds upon.
+---
+
+RustQC stands on the shoulders of giants. It is a reimplementation of established
+bioinformatics tools, and would not exist without their foundational work.
+
+**If you use RustQC, please cite the original tools.**
+
+## dupRadar
+
+RustQC reimplements the [dupRadar](https://bioconductor.org/packages/dupRadar/)
+Bioconductor package, created by Sergi Sayols, Dominik Scherzinger, and Holger Klein.
+dupRadar provides the statistical framework for assessing PCR artifacts in RNA-seq
+data by modeling duplication rates as a function of gene expression level.
+
+> Sayols S, Scherzinger D, Klein H. dupRadar: a Bioconductor package for the
+> assessment of PCR artifacts in RNA-Seq data. *BMC Bioinformatics*.
+> 2016;17(1):428.
+
+- Bioconductor: <https://bioconductor.org/packages/dupRadar/>
+- Publication: <https://doi.org/10.1186/s12859-016-1276-2>
+
+## Subread / featureCounts
+
+RustQC produces featureCounts-compatible output using the same counting approach as
+[Subread featureCounts](http://subread.sourceforge.net/), created by Yang Liao,
+Gordon K. Smyth, and Wei Shi. featureCounts is the standard tool for assigning
+sequence reads to genomic features.
+
+> Liao Y, Smyth GK, Shi W. featureCounts: an efficient general purpose program
+> for assigning sequence reads to genomic features. *Bioinformatics*.
+> 2014;30(7):923-930.
+
+- Website: <http://subread.sourceforge.net/>
+- Publication: <https://doi.org/10.1093/bioinformatics/btt656>
+
+## Key dependencies
+
+RustQC is built with the following open-source Rust libraries:
+
+| Library | Purpose |
+|---------|---------|
+| [rust-htslib](https://github.com/rust-bio/rust-htslib) | SAM/BAM/CRAM file I/O via htslib bindings |
+| [plotters](https://github.com/plotters-rs/plotters) | Plot generation (PNG and SVG) |
+| [clap](https://github.com/clap-rs/clap) | Command-line argument parsing |
+| [anyhow](https://github.com/dtolnay/anyhow) | Error handling |
+| [rayon](https://github.com/rayon-rs/rayon) | Data parallelism |
+| [serde](https://github.com/serde-rs/serde) | YAML configuration deserialization |
+| [indexmap](https://github.com/indexmap-rs/indexmap) | Insertion-order-preserving maps |
+| [env_logger](https://github.com/rust-cli/env_logger) | Logging output |
+
+## RustQC
+
+RustQC is created by [Phil Ewels](https://github.com/ewels).
+
+- Repository: <https://github.com/ewels/RustQC>

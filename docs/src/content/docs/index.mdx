@@ -1,0 +1,48 @@
+---
+title: RustQC
+description: Fast quality control tools for sequencing data, written in Rust.
+template: splash
+hero:
+  tagline: A blazingly fast reimplementation of dupRadar and featureCounts in Rust, delivering identical results up to 30x faster.
+  image:
+    file: ../../assets/RustQC-icon.svg
+  actions:
+    - text: Get Started
+      link: /guides/getting-started/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/ewels/RustQC
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## Why RustQC?
+
+<CardGrid stagger>
+  <Card title="Identical Results" icon="approve-check">
+    Produces bit-for-bit identical output to R's dupRadar and featureCounts.
+    Over 800,000 values compared with zero mismatches.
+  </Card>
+  <Card title="9x Faster" icon="rocket">
+    Processes a 10 GB BAM file in 3 minutes (single thread) vs 30 minutes for
+    the R equivalent. Multi-threaded mode brings this down to under 1 minute.
+  </Card>
+  <Card title="All-in-One" icon="puzzle">
+    Combines dupRadar analysis, featureCounts-compatible output, and biotype
+    counting in a single pass — no need to run featureCounts separately.
+  </Card>
+  <Card title="SAM / BAM / CRAM" icon="document">
+    Accepts SAM, BAM, and CRAM alignment files. Process multiple files in
+    parallel with automatic thread distribution.
+  </Card>
+</CardGrid>
+
+## Credits
+
+RustQC is a reimplementation of the excellent [dupRadar](https://bioconductor.org/packages/dupRadar/)
+Bioconductor package by Sergi Sayols, and uses the same counting approach as
+[Subread featureCounts](https://subread.sourceforge.net/) by Yang Liao and Wei Shi.
+
+**If you use RustQC, please cite the original tools** — see the [Credits & Citation](/about/credits/) page.
