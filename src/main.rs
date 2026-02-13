@@ -14,6 +14,7 @@ mod featurecounts;
 mod fitting;
 mod gtf;
 mod plots;
+mod strandedness;
 
 use anyhow::{ensure, Context, Result};
 use indexmap::IndexMap;
@@ -500,6 +501,40 @@ fn process_single_bam(
                     mqc_rrna_path.display()
                 );
             }
+        }
+    }
+
+    // === Strandedness inference outputs ===
+    if config.any_strandedness_output() {
+        let (protocol, sense_frac, antisense_frac, undetermined_frac) =
+            strandedness::infer_strandedness(
+                count_result.strandedness_sense,
+                count_result.strandedness_antisense,
+                count_result.strandedness_undetermined,
+            );
+        info!(
+            "[{}] Inferred strandedness: {:?} (sense={:.4}, antisense={:.4}, undetermined={:.4})",
+            bam_stem, protocol, sense_frac, antisense_frac, undetermined_frac,
+        );
+
+        if config.strandedness.infer_experiment {
+            let strandedness_path = outdir.join(format!("{}.infer_experiment.txt", bam_stem));
+            strandedness::write_infer_experiment(&strandedness_path, &count_result, paired)?;
+            info!(
+                "[{}] Strandedness inference written to {}",
+                bam_stem,
+                strandedness_path.display()
+            );
+        }
+
+        if config.strandedness.multiqc_strandedness {
+            let mqc_path = outdir.join(format!("{}.infer_experiment_mqc.txt", bam_stem));
+            strandedness::write_strandedness_mqc(&mqc_path, &count_result, bam_stem, paired)?;
+            info!(
+                "[{}] Strandedness MultiQC file written to {}",
+                bam_stem,
+                mqc_path.display()
+            );
         }
     }
 

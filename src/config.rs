@@ -50,6 +50,10 @@ pub struct Config {
     /// featureCounts-compatible output configuration.
     #[serde(default)]
     pub featurecounts: FeatureCountsConfig,
+
+    /// Strandedness inference output configuration.
+    #[serde(default)]
+    pub strandedness: StrandednessConfig,
 }
 
 /// Configuration for dupRadar outputs.
@@ -160,6 +164,36 @@ impl Default for FeatureCountsConfig {
     }
 }
 
+/// Configuration for strandedness inference outputs.
+///
+/// Controls whether strandedness inference results (RSeQC infer_experiment.py
+/// compatible) are generated.
+///
+/// Example:
+/// ```yaml
+/// strandedness:
+///   infer_experiment: true
+///   multiqc_strandedness: true
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct StrandednessConfig {
+    /// Write the RSeQC-compatible infer_experiment.txt file.
+    pub infer_experiment: bool,
+
+    /// Write the MultiQC strandedness general stats file.
+    pub multiqc_strandedness: bool,
+}
+
+impl Default for StrandednessConfig {
+    fn default() -> Self {
+        Self {
+            infer_experiment: true,
+            multiqc_strandedness: true,
+        }
+    }
+}
+
 impl Config {
     /// Load configuration from a YAML file.
     pub fn from_file(path: &Path) -> Result<Self> {
@@ -203,6 +237,12 @@ impl Config {
     pub fn any_biotype_output(&self) -> bool {
         let fc = &self.featurecounts;
         fc.biotype_counts || fc.biotype_counts_mqc || fc.biotype_rrna_mqc
+    }
+
+    /// Returns true if any strandedness inference output is enabled.
+    pub fn any_strandedness_output(&self) -> bool {
+        let s = &self.strandedness;
+        s.infer_experiment || s.multiqc_strandedness
     }
 
     /// Returns true if any dupRadar output is enabled.

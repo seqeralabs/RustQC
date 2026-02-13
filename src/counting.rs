@@ -279,6 +279,14 @@ pub struct CountResult {
     /// Total multimapping reads
     #[allow(dead_code)]
     pub stat_total_multi: u64,
+
+    // --- Strandedness inference statistics ---
+    /// Reads where strand is consistent with forward-stranded library (1++,1--,2+-,2-+)
+    pub strandedness_sense: u64,
+    /// Reads where strand is consistent with reverse-stranded library (1+-,1-+,2++,2--)
+    pub strandedness_antisense: u64,
+    /// Reads where strandedness could not be determined (no gene overlap or ambiguous strand)
+    pub strandedness_undetermined: u64,
 }
 
 /// Metadata stored with each interval in the cache-oblivious interval tree.
@@ -478,6 +486,10 @@ struct ChromResult {
     n_multi_nodup: u64,
     n_unique_dup: u64,
     n_unique_nodup: u64,
+    // Strandedness inference accumulators
+    strandedness_sense: u64,
+    strandedness_antisense: u64,
+    strandedness_undetermined: u64,
 }
 
 impl ChromResult {
@@ -498,6 +510,9 @@ impl ChromResult {
             n_multi_nodup: 0,
             n_unique_dup: 0,
             n_unique_nodup: 0,
+            strandedness_sense: 0,
+            strandedness_antisense: 0,
+            strandedness_undetermined: 0,
         }
     }
 
@@ -658,6 +673,44 @@ fn process_chromosome_batch(
                 }
                 gene_hits.sort_unstable();
                 gene_hits.dedup();
+            }
+
+            // Strandedness inference: for reads hitting exactly one gene,
+            // check if read strand matches gene strand (independent of --stranded setting)
+            if gene_hits.len() == 1 {
+                if let Some(chrom_idx) = index.get(chrom) {
+                    let gene_idx = gene_hits[0];
+                    let mut gene_strand_char = '.';
+                    // Find the strand of this gene from the interval metadata
+                    let pos = record.pos() as i32;
+                    chrom_idx.query(pos, pos, |node| {
+                        if node.metadata.gene_idx == gene_idx {
+                            gene_strand_char = node.metadata.strand;
+                        }
+                    });
+                    if gene_strand_char != '.' {
+                        let gene_is_forward = gene_strand_char == '+';
+                        // PE: read1 same strand as gene = sense (fr-secondstrand / 1++,1--,2+-,2-+)
+                        // SE: read same strand as gene = sense (secondstrand)
+                        // Sense = read strand matches gene strand
+                        let read_matches_gene = is_reverse != gene_is_forward;
+                        let is_sense = if paired {
+                            // PE: read1 matches → sense; read2 opposite → sense
+                            is_read1 == read_matches_gene
+                        } else {
+                            read_matches_gene
+                        };
+                        if is_sense {
+                            result.strandedness_sense += 1;
+                        } else {
+                            result.strandedness_antisense += 1;
+                        }
+                    } else {
+                        result.strandedness_undetermined += 1;
+                    }
+                }
+            } else if gene_hits.len() > 1 {
+                result.strandedness_undetermined += 1;
             }
 
             // --- Single-end counting ---
@@ -1039,6 +1092,39 @@ pub fn count_reads(
                 gene_hits.dedup();
             }
 
+            // Strandedness inference (same logic as parallel path)
+            if gene_hits.len() == 1 {
+                if let Some(chrom_idx) = index.get(chrom) {
+                    let gene_idx = gene_hits[0];
+                    let mut gene_strand_char = '.';
+                    let pos = record.pos() as i32;
+                    chrom_idx.query(pos, pos, |node| {
+                        if node.metadata.gene_idx == gene_idx {
+                            gene_strand_char = node.metadata.strand;
+                        }
+                    });
+                    if gene_strand_char != '.' {
+                        let gene_is_forward = gene_strand_char == '+';
+                        let read_matches_gene = is_reverse != gene_is_forward;
+                        let is_sense = if paired {
+                            is_read1 == read_matches_gene
+                        } else {
+                            read_matches_gene
+                        };
+                        if is_sense {
+                            result.strandedness_sense += 1;
+                        } else {
+                            result.strandedness_antisense += 1;
+                        }
+                    } else {
+                        result.strandedness_undetermined += 1;
+                    }
+                }
+            } else if gene_hits.len() > 1 {
+                result.strandedness_undetermined += 1;
+            }
+
+            // --- Single-end counting ---
             if !paired {
                 result.n_multi_dup += 1;
                 result.n_unique_dup += 1;
@@ -1352,6 +1438,9 @@ pub fn count_reads(
         stat_total_fragments: merged.total_fragments,
         stat_total_dup: merged.total_dup,
         stat_total_multi: merged.total_multi,
+        strandedness_sense: merged.strandedness_sense,
+        strandedness_antisense: merged.strandedness_antisense,
+        strandedness_undetermined: merged.strandedness_undetermined,
     })
 }
 
