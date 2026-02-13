@@ -157,21 +157,21 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
             let dm_ref = &dup_matrix;
             let thresh = rpkm_threshold_rpk;
             let path = &density_path;
-            s.spawn(move || plots::density_scatter_plot(dm_ref, fit, thresh, path))
+            s.spawn(move || plots::density_scatter_plot(dm_ref, fit, thresh, bam_stem, path))
         });
 
         // Boxplot
         let boxplot_handle = {
             let dm_ref = &dup_matrix;
             let path = &boxplot_path;
-            s.spawn(move || plots::duprate_boxplot(dm_ref, path))
+            s.spawn(move || plots::duprate_boxplot(dm_ref, bam_stem, path))
         };
 
         // Histogram
         let histogram_handle = {
             let dm_ref = &dup_matrix;
             let path = &histogram_path;
-            s.spawn(move || plots::expression_histogram(dm_ref, path))
+            s.spawn(move || plots::expression_histogram(dm_ref, bam_stem, path))
         };
 
         // Collect results
