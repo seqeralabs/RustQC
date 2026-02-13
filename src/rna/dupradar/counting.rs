@@ -207,6 +207,15 @@ pub struct GeneCounts {
     pub all_unique: u64,
     /// Count without multimappers, without duplicates (dups excluded)
     pub nodup_unique: u64,
+
+    // --- featureCounts per-read counting ---
+    // featureCounts with `-p` (no `--countReadPairs`) processes each read
+    // independently in single-end mode. These counters track per-read
+    // assignments for featureCounts-compatible output.
+    /// Per-read count: uniquely-mapped reads assigned to this gene (all reads
+    /// including duplicates). Matches featureCounts' `-p` behaviour where each
+    /// read is independently assigned.
+    pub fc_reads: u64,
 }
 
 impl GeneCounts {
@@ -262,7 +271,7 @@ pub struct CountResult {
     #[allow(dead_code)]
     pub total_reads_unique_nodup: u64,
 
-    // --- featureCounts summary statistics ---
+    // --- dupRadar fragment-level assignment statistics ---
     /// Total reads/records seen in the BAM file
     pub stat_total_reads: u64,
     /// Fragments successfully assigned to exactly one gene
@@ -279,6 +288,20 @@ pub struct CountResult {
     /// Total multimapping reads
     #[allow(dead_code)]
     pub stat_total_multi: u64,
+
+    // --- featureCounts per-read statistics ---
+    // featureCounts with `-p` (no `--countReadPairs`) counts each read
+    // independently. These stats match that behaviour for compatible output.
+    /// Per-read: reads assigned to exactly one gene (non-multimapped)
+    pub fc_assigned: u64,
+    /// Per-read: reads overlapping multiple genes (non-multimapped)
+    pub fc_ambiguous: u64,
+    /// Per-read: reads overlapping no gene (non-multimapped)
+    pub fc_no_features: u64,
+    /// Per-read: multimapping reads (NH > 1)
+    pub fc_multimapping: u64,
+    /// Per-read: unmapped reads
+    pub fc_unmapped: u64,
 }
 
 /// Metadata stored with each interval in the cache-oblivious interval tree.
@@ -478,6 +501,15 @@ struct ChromResult {
     n_multi_nodup: u64,
     n_unique_dup: u64,
     n_unique_nodup: u64,
+
+    // --- featureCounts per-read statistics ---
+    // Each read is independently assessed (no mate-pair merging),
+    // matching featureCounts' behaviour with `-p` (no `--countReadPairs`).
+    fc_assigned: u64,
+    fc_ambiguous: u64,
+    fc_no_features: u64,
+    fc_multimapping: u64,
+    fc_unmapped: u64,
 }
 
 impl ChromResult {
@@ -498,6 +530,11 @@ impl ChromResult {
             n_multi_nodup: 0,
             n_unique_dup: 0,
             n_unique_nodup: 0,
+            fc_assigned: 0,
+            fc_ambiguous: 0,
+            fc_no_features: 0,
+            fc_multimapping: 0,
+            fc_unmapped: 0,
         }
     }
 
@@ -508,6 +545,7 @@ impl ChromResult {
             self.gene_counts[i].nodup_multi += counts.nodup_multi;
             self.gene_counts[i].all_unique += counts.all_unique;
             self.gene_counts[i].nodup_unique += counts.nodup_unique;
+            self.gene_counts[i].fc_reads += counts.fc_reads;
         }
         // Merge unmatched mates — these will be reconciled in a separate step
         self.unmatched_mates.extend(other.unmatched_mates);
@@ -523,6 +561,54 @@ impl ChromResult {
         self.n_multi_nodup += other.n_multi_nodup;
         self.n_unique_dup += other.n_unique_dup;
         self.n_unique_nodup += other.n_unique_nodup;
+        self.fc_assigned += other.fc_assigned;
+        self.fc_ambiguous += other.fc_ambiguous;
+        self.fc_no_features += other.fc_no_features;
+        self.fc_multimapping += other.fc_multimapping;
+        self.fc_unmapped += other.fc_unmapped;
+    }
+}
+
+/// Per-read featureCounts classification.
+///
+/// featureCounts with `-p` (no `--countReadPairs`) processes each read
+/// independently. Multi-mapped reads (NH > 1) are categorised as
+/// Unassigned_MultiMapping and excluded from gene assignment.
+/// When multiple genes are hit, resolve at biotype level: if all hits
+/// share the same biotype, the read is Assigned (matching featureCounts
+/// `-g gene_biotype` behaviour where biotype is the meta-feature).
+fn classify_read_fc(
+    is_multi: bool,
+    gene_hits: &[GeneIdx],
+    gene_biotype_ids: &[u16],
+    result: &mut ChromResult,
+) {
+    if is_multi {
+        result.fc_multimapping += 1;
+    } else if gene_hits.is_empty() {
+        result.fc_no_features += 1;
+    } else if gene_hits.len() == 1 {
+        result.fc_assigned += 1;
+        let idx = gene_hits[0] as usize;
+        if idx < result.gene_counts.len() {
+            result.gene_counts[idx].fc_reads += 1;
+        }
+    } else {
+        // Multiple gene hits — resolve at biotype level
+        let first_bt = gene_biotype_ids[gene_hits[0] as usize];
+        let same_biotype = gene_hits[1..]
+            .iter()
+            .all(|&g| gene_biotype_ids[g as usize] == first_bt);
+        if same_biotype {
+            // All hits share the same biotype → Assigned
+            result.fc_assigned += 1;
+            let idx = gene_hits[0] as usize;
+            if idx < result.gene_counts.len() {
+                result.gene_counts[idx].fc_reads += 1;
+            }
+        } else {
+            result.fc_ambiguous += 1;
+        }
     }
 }
 
@@ -543,6 +629,7 @@ fn process_chromosome_batch(
     chrom_prefix: Option<&str>,
     global_read_counter: &AtomicU64,
     reference: Option<&str>,
+    gene_biotype_ids: &[u16],
 ) -> Result<ChromResult> {
     let mut result = ChromResult::new(num_genes);
 
@@ -577,8 +664,9 @@ fn process_chromosome_batch(
 
             let flags = record.flags();
 
-            // Skip unmapped reads
+            // Skip unmapped reads (count for featureCounts summary)
             if flags & BAM_FUNMAP != 0 {
+                result.fc_unmapped += 1;
                 continue;
             }
 
@@ -659,6 +747,9 @@ fn process_chromosome_batch(
                 gene_hits.sort_unstable();
                 gene_hits.dedup();
             }
+
+            // --- Per-read featureCounts counting (independent of mate pairing) ---
+            classify_read_fc(is_multi, &gene_hits, gene_biotype_ids, &mut result);
 
             // --- Single-end counting ---
             if !paired {
@@ -827,6 +918,7 @@ pub fn count_reads(
     chrom_prefix: Option<&str>,
     reference: Option<&str>,
     skip_dup_check: bool,
+    biotype_attribute: &str,
 ) -> Result<CountResult> {
     // Build gene ID interner for allocation-free lookups in the hot loop
     let interner = GeneIdInterner::from_genes(genes);
@@ -879,6 +971,28 @@ pub fn count_reads(
         );
     }
 
+    // Build gene_idx → biotype_id lookup for per-read featureCounts counting.
+    // When featureCounts runs with `-g gene_biotype`, exons are grouped by their
+    // biotype value (the "meta-feature"). A read overlapping multiple genes of the
+    // *same* biotype is Assigned (not Ambiguous), because they all belong to the
+    // same meta-feature. We pre-compute a compact mapping so the hot loop avoids
+    // string operations.
+    let gene_biotype_ids: Vec<u16> = {
+        let mut biotype_interner: IndexMap<String, u16> = IndexMap::new();
+        let mut ids = Vec::with_capacity(interner.len());
+        for (_gene_id, gene) in genes.iter() {
+            let biotype = gene
+                .attributes
+                .get(biotype_attribute)
+                .cloned()
+                .unwrap_or_else(|| "unknown".to_string());
+            let next_id = biotype_interner.len() as u16;
+            let bt_id = *biotype_interner.entry(biotype).or_insert(next_id);
+            ids.push(bt_id);
+        }
+        ids
+    };
+
     let mut merged = if use_parallel {
         // --- Parallel chromosome processing ---
         //
@@ -926,6 +1040,7 @@ pub fn count_reads(
                         chrom_prefix,
                         &global_read_counter,
                         reference,
+                        &gene_biotype_ids,
                     )
                 })
                 .collect()
@@ -970,6 +1085,7 @@ pub fn count_reads(
             let flags = record.flags();
 
             if flags & BAM_FUNMAP != 0 {
+                result.fc_unmapped += 1;
                 continue;
             }
             if flags & BAM_FSUPPLEMENTARY != 0 {
@@ -1038,6 +1154,9 @@ pub fn count_reads(
                 gene_hits.sort_unstable();
                 gene_hits.dedup();
             }
+
+            // --- Per-read featureCounts counting (independent of mate pairing) ---
+            classify_read_fc(is_multi, &gene_hits, &gene_biotype_ids, &mut result);
 
             if !paired {
                 result.n_multi_dup += 1;
@@ -1352,6 +1471,11 @@ pub fn count_reads(
         stat_total_fragments: merged.total_fragments,
         stat_total_dup: merged.total_dup,
         stat_total_multi: merged.total_multi,
+        fc_assigned: merged.fc_assigned,
+        fc_ambiguous: merged.fc_ambiguous,
+        fc_no_features: merged.fc_no_features,
+        fc_multimapping: merged.fc_multimapping,
+        fc_unmapped: merged.fc_unmapped,
     })
 }
 
@@ -1503,16 +1627,185 @@ mod tests {
     }
 
     #[test]
-    fn test_dup_check_gatk_markduplicates() {
-        let header = "@PG\tID:GATK MarkDuplicates\tPN:GATK MarkDuplicates\tVN:4.4.0";
-        assert!(header_has_dup_marker(header));
+    fn test_dup_check_dup_marker_only_in_cl_no_match() {
+        let header_text = "@PG\tID:STAR\tPN:STAR\tVN:2.7.10a\tCL:STAR --readFilesIn sample.fastq --outSAMtype BAM SortedByCoordinate\n";
+        assert!(!header_has_dup_marker(header_text));
+    }
+
+    // --- Per-read featureCounts classification tests ---
+
+    /// Helper to create a ChromResult for testing classify_read_fc
+    fn make_test_chrom_result(num_genes: usize) -> ChromResult {
+        ChromResult::new(num_genes)
     }
 
     #[test]
-    fn test_dup_check_dup_marker_only_in_cl_no_match() {
-        // A tool that mentions MarkDuplicates only in the CL field should not match
-        // (e.g., a wrapper script that calls MarkDuplicates but has its own ID/PN)
-        let header = "@PG\tID:my_pipeline\tPN:my_pipeline\tCL:java -jar picard.jar MarkDuplicates";
-        assert!(!header_has_dup_marker(header));
+    fn test_fc_classify_multimapped_read() {
+        let mut result = make_test_chrom_result(3);
+        let gene_biotype_ids = vec![0u16, 1, 2];
+        let gene_hits: Vec<GeneIdx> = vec![0]; // has a hit, but is_multi=true
+
+        classify_read_fc(true, &gene_hits, &gene_biotype_ids, &mut result);
+
+        assert_eq!(
+            result.fc_multimapping, 1,
+            "Multi-mapped read should be counted as fc_multimapping"
+        );
+        assert_eq!(result.fc_assigned, 0);
+        assert_eq!(result.fc_ambiguous, 0);
+        assert_eq!(result.fc_no_features, 0);
+        assert_eq!(
+            result.gene_counts[0].fc_reads, 0,
+            "Multi-mapped read should not credit any gene"
+        );
+    }
+
+    #[test]
+    fn test_fc_classify_no_gene_hits() {
+        let mut result = make_test_chrom_result(3);
+        let gene_biotype_ids = vec![0u16, 1, 2];
+        let gene_hits: Vec<GeneIdx> = vec![];
+
+        classify_read_fc(false, &gene_hits, &gene_biotype_ids, &mut result);
+
+        assert_eq!(
+            result.fc_no_features, 1,
+            "Read with no hits should be fc_no_features"
+        );
+        assert_eq!(result.fc_assigned, 0);
+        assert_eq!(result.fc_ambiguous, 0);
+        assert_eq!(result.fc_multimapping, 0);
+    }
+
+    #[test]
+    fn test_fc_classify_single_gene_hit() {
+        let mut result = make_test_chrom_result(3);
+        let gene_biotype_ids = vec![0u16, 1, 2];
+        let gene_hits: Vec<GeneIdx> = vec![1];
+
+        classify_read_fc(false, &gene_hits, &gene_biotype_ids, &mut result);
+
+        assert_eq!(
+            result.fc_assigned, 1,
+            "Single gene hit should be fc_assigned"
+        );
+        assert_eq!(
+            result.gene_counts[1].fc_reads, 1,
+            "Single gene hit should credit that gene"
+        );
+        assert_eq!(result.gene_counts[0].fc_reads, 0);
+        assert_eq!(result.gene_counts[2].fc_reads, 0);
+        assert_eq!(result.fc_ambiguous, 0);
+        assert_eq!(result.fc_no_features, 0);
+    }
+
+    #[test]
+    fn test_fc_classify_multi_gene_same_biotype() {
+        // Two genes with same biotype → Assigned (biotype-level resolution)
+        let mut result = make_test_chrom_result(4);
+        // Genes 0,1 have biotype 0; genes 2,3 have biotype 1
+        let gene_biotype_ids = vec![0u16, 0, 1, 1];
+        let gene_hits: Vec<GeneIdx> = vec![0, 1]; // two genes, same biotype
+
+        classify_read_fc(false, &gene_hits, &gene_biotype_ids, &mut result);
+
+        assert_eq!(
+            result.fc_assigned, 1,
+            "Multi-gene same biotype should be fc_assigned"
+        );
+        assert_eq!(
+            result.fc_ambiguous, 0,
+            "Multi-gene same biotype should NOT be ambiguous"
+        );
+        assert_eq!(
+            result.gene_counts[0].fc_reads, 1,
+            "First gene in sorted hits gets the credit"
+        );
+        assert_eq!(result.gene_counts[1].fc_reads, 0);
+    }
+
+    #[test]
+    fn test_fc_classify_multi_gene_different_biotypes() {
+        // Two genes with different biotypes → Ambiguous
+        let mut result = make_test_chrom_result(3);
+        let gene_biotype_ids = vec![0u16, 1, 2];
+        let gene_hits: Vec<GeneIdx> = vec![0, 1]; // two genes, different biotypes
+
+        classify_read_fc(false, &gene_hits, &gene_biotype_ids, &mut result);
+
+        assert_eq!(
+            result.fc_ambiguous, 1,
+            "Multi-gene different biotypes should be fc_ambiguous"
+        );
+        assert_eq!(result.fc_assigned, 0);
+        assert_eq!(
+            result.gene_counts[0].fc_reads, 0,
+            "Ambiguous read should not credit any gene"
+        );
+        assert_eq!(result.gene_counts[1].fc_reads, 0);
+    }
+
+    #[test]
+    fn test_fc_classify_three_genes_same_biotype() {
+        // Three genes all with the same biotype → Assigned
+        let mut result = make_test_chrom_result(5);
+        let gene_biotype_ids = vec![0u16, 0, 0, 1, 1];
+        let gene_hits: Vec<GeneIdx> = vec![0, 1, 2];
+
+        classify_read_fc(false, &gene_hits, &gene_biotype_ids, &mut result);
+
+        assert_eq!(
+            result.fc_assigned, 1,
+            "Three genes same biotype should be fc_assigned"
+        );
+        assert_eq!(result.fc_ambiguous, 0);
+        assert_eq!(
+            result.gene_counts[0].fc_reads, 1,
+            "First gene gets the credit"
+        );
+    }
+
+    #[test]
+    fn test_fc_classify_three_genes_mixed_biotypes() {
+        // Three genes: two same biotype, one different → Ambiguous
+        let mut result = make_test_chrom_result(5);
+        let gene_biotype_ids = vec![0u16, 0, 1, 1, 2];
+        let gene_hits: Vec<GeneIdx> = vec![0, 1, 2]; // biotypes 0, 0, 1
+
+        classify_read_fc(false, &gene_hits, &gene_biotype_ids, &mut result);
+
+        assert_eq!(
+            result.fc_ambiguous, 1,
+            "Mixed biotypes should be fc_ambiguous"
+        );
+        assert_eq!(result.fc_assigned, 0);
+        assert_eq!(result.gene_counts[0].fc_reads, 0);
+        assert_eq!(result.gene_counts[1].fc_reads, 0);
+        assert_eq!(result.gene_counts[2].fc_reads, 0);
+    }
+
+    #[test]
+    fn test_fc_classify_cumulative_counts() {
+        // Verify that calling classify_read_fc multiple times accumulates counts
+        let mut result = make_test_chrom_result(3);
+        let gene_biotype_ids = vec![0u16, 1, 2];
+
+        // First call: single hit to gene 0
+        classify_read_fc(false, &[0], &gene_biotype_ids, &mut result);
+        // Second call: single hit to gene 0 again
+        classify_read_fc(false, &[0], &gene_biotype_ids, &mut result);
+        // Third call: multi-mapped
+        classify_read_fc(true, &[0], &gene_biotype_ids, &mut result);
+        // Fourth call: no features
+        classify_read_fc(false, &[], &gene_biotype_ids, &mut result);
+        // Fifth call: ambiguous (different biotypes)
+        classify_read_fc(false, &[0, 1], &gene_biotype_ids, &mut result);
+
+        assert_eq!(result.fc_assigned, 2);
+        assert_eq!(result.fc_multimapping, 1);
+        assert_eq!(result.fc_no_features, 1);
+        assert_eq!(result.fc_ambiguous, 1);
+        assert_eq!(result.gene_counts[0].fc_reads, 2);
+        assert_eq!(result.gene_counts[1].fc_reads, 0);
     }
 }

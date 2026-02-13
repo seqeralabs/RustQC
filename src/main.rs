@@ -402,6 +402,7 @@ fn process_single_bam(
         chrom_prefix,
         reference,
         skip_dup_check,
+        biotype_attribute,
     )?;
     info!(
         "[{}] Counting complete in {:.2}s",
@@ -497,7 +498,7 @@ fn process_single_bam(
                 rna::featurecounts::output::write_biotype_rrna_mqc(
                     &mqc_rrna_path,
                     &biotype_counts,
-                    count_result.stat_assigned,
+                    count_result.fc_assigned,
                     bam_stem,
                 )?;
                 info!(

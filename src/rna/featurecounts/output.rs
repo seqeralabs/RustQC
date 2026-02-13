@@ -60,10 +60,12 @@ pub fn write_counts_file(
         let ends: Vec<String> = gene.exons.iter().map(|e| e.end.to_string()).collect();
         let strands: Vec<String> = gene.exons.iter().map(|e| e.strand.to_string()).collect();
 
+        // Use per-read counts for featureCounts output (matches featureCounts -p behavior
+        // where each read is counted independently, not as fragments)
         let count = counts
             .gene_counts
             .get(gene_id)
-            .map(|gc| gc.all_unique)
+            .map(|gc| gc.fc_reads)
             .unwrap_or(0);
 
         writeln!(
@@ -96,27 +98,23 @@ pub fn write_summary_file(path: &Path, counts: &CountResult, bam_path: &str) -> 
         .unwrap_or_else(|| bam_path.to_string());
 
     writeln!(w, "Status\t{}", bam_name)?;
-    writeln!(w, "Assigned\t{}", counts.stat_assigned)?;
-    // We don't currently track all the separate unassigned sub-categories that
-    // featureCounts reports, so we populate the ones we can and use 0 for the rest.
-    // The three we track: NoFeatures, Ambiguity (from counting), and Unmapped
-    // (total reads minus total mapped fragments for paired, or minus mapped for single).
-    let stat_unmapped = counts
-        .stat_total_reads
-        .saturating_sub(counts.stat_total_fragments);
-    writeln!(w, "Unassigned_Unmapped\t{}", stat_unmapped)?;
+    // Use per-read featureCounts stats (matching featureCounts -p behavior where
+    // each read is counted independently, not as fragments). The fc_* fields track
+    // per-read assignment with multi-mapping reads separated out.
+    writeln!(w, "Assigned\t{}", counts.fc_assigned)?;
+    writeln!(w, "Unassigned_Unmapped\t{}", counts.fc_unmapped)?;
     writeln!(w, "Unassigned_Read_Type\t0")?;
     writeln!(w, "Unassigned_Singleton\t0")?;
     writeln!(w, "Unassigned_MappingQuality\t0")?;
     writeln!(w, "Unassigned_Chimera\t0")?;
     writeln!(w, "Unassigned_FragmentLength\t0")?;
     writeln!(w, "Unassigned_Duplicate\t0")?;
-    writeln!(w, "Unassigned_MultiMapping\t0")?;
+    writeln!(w, "Unassigned_MultiMapping\t{}", counts.fc_multimapping)?;
     writeln!(w, "Unassigned_Secondary\t0")?;
     writeln!(w, "Unassigned_NonSplit\t0")?;
-    writeln!(w, "Unassigned_NoFeatures\t{}", counts.stat_no_features)?;
+    writeln!(w, "Unassigned_NoFeatures\t{}", counts.fc_no_features)?;
     writeln!(w, "Unassigned_Overlapping_Length\t0")?;
-    writeln!(w, "Unassigned_Ambiguity\t{}", counts.stat_ambiguous)?;
+    writeln!(w, "Unassigned_Ambiguity\t{}", counts.fc_ambiguous)?;
 
     Ok(())
 }
@@ -139,10 +137,11 @@ pub fn aggregate_biotype_counts(
             .cloned()
             .unwrap_or_else(|| "unknown".to_string());
 
+        // Use per-read counts for featureCounts biotype output
         let count = counts
             .gene_counts
             .get(gene_id)
-            .map(|gc| gc.all_unique)
+            .map(|gc| gc.fc_reads)
             .unwrap_or(0);
 
         *biotype_counts.entry(biotype).or_insert(0) += count;
@@ -290,6 +289,7 @@ mod tests {
             "gene1".to_string(),
             GeneCounts {
                 all_unique: 100,
+                fc_reads: 100,
                 ..Default::default()
             },
         );
@@ -297,6 +297,7 @@ mod tests {
             "gene2".to_string(),
             GeneCounts {
                 all_unique: 50,
+                fc_reads: 50,
                 ..Default::default()
             },
         );
@@ -304,6 +305,7 @@ mod tests {
             "gene3".to_string(),
             GeneCounts {
                 all_unique: 25,
+                fc_reads: 25,
                 ..Default::default()
             },
         );
@@ -311,6 +313,7 @@ mod tests {
             "gene4".to_string(),
             GeneCounts {
                 all_unique: 10,
+                fc_reads: 10,
                 ..Default::default()
             },
         );
@@ -328,6 +331,11 @@ mod tests {
             stat_total_fragments: 200,
             stat_total_dup: 0,
             stat_total_multi: 0,
+            fc_assigned: 185,
+            fc_ambiguous: 5,
+            fc_no_features: 10,
+            fc_multimapping: 0,
+            fc_unmapped: 0,
         };
 
         let biotypes = aggregate_biotype_counts(&genes, &count_result, "gene_biotype");
