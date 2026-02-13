@@ -1,0 +1,176 @@
+---
+title: Installation
+description: How to install RustQC from pre-compiled binaries, Docker, or by building from source with platform-specific instructions.
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+## Pre-compiled binaries
+
+Pre-built binaries are available from the [GitHub Releases page](https://github.com/ewels/RustQC/releases) for Linux and macOS. This is the fastest way to get started.
+
+<Tabs>
+  <TabItem label="macOS Apple Silicon" icon="apple">
+    ```bash
+    curl -fsSL https://github.com/ewels/RustQC/releases/latest/download/rustqc-macos-aarch64.tar.gz | tar xz
+    chmod +x ./rustqc
+    sudo mv ./rustqc /usr/local/bin/
+    rustqc --version
+    ```
+  </TabItem>
+  <TabItem label="macOS Intel" icon="apple">
+    ```bash
+    curl -fsSL https://github.com/ewels/RustQC/releases/latest/download/rustqc-macos-x86_64.tar.gz | tar xz
+    chmod +x ./rustqc
+    sudo mv ./rustqc /usr/local/bin/
+    rustqc --version
+    ```
+  </TabItem>
+  <TabItem label="Linux x86_64" icon="linux">
+    ```bash
+    curl -fsSL https://github.com/ewels/RustQC/releases/latest/download/rustqc-linux-x86_64.tar.gz | tar xz
+    chmod +x ./rustqc
+    sudo mv ./rustqc /usr/local/bin/
+    rustqc --version
+    ```
+  </TabItem>
+  <TabItem label="Linux aarch64" icon="linux">
+    ```bash
+    curl -fsSL https://github.com/ewels/RustQC/releases/latest/download/rustqc-linux-aarch64.tar.gz | tar xz
+    chmod +x ./rustqc
+    sudo mv ./rustqc /usr/local/bin/
+    rustqc --version
+    ```
+  </TabItem>
+</Tabs>
+
+
+
+## Docker
+
+Run RustQC without any local installation using Docker:
+
+```bash
+docker run -v $(pwd):/data ghcr.io/ewels/rustqc:latest \
+  rna /data/sample.bam --gtf /data/genes.gtf -p -o /data/output/
+```
+
+
+
+## Build from source
+
+Building from source requires the Rust toolchain and a few system libraries needed by [rust-htslib](https://github.com/rust-bio/rust-htslib) for SAM/BAM/CRAM I/O.
+
+Select your operating system for the complete build instructions:
+
+<Tabs>
+  <TabItem label="macOS" icon="apple">
+    ```bash
+    # Install system dependencies
+    brew install cmake zlib bzip2 xz curl openssl
+
+    # Install Rust (if not already installed)
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+    # Build RustQC
+    git clone https://github.com/ewels/RustQC.git
+    cd RustQC
+    cargo build --release
+
+    # Binary is at target/release/rustqc
+    ./target/release/rustqc --version
+    ```
+  </TabItem>
+  <TabItem label="Ubuntu / Debian" icon="linux">
+    ```bash
+    # Install system dependencies
+    sudo apt install cmake zlib1g-dev libbz2-dev liblzma-dev \
+      libcurl4-openssl-dev libssl-dev clang
+
+    # Install Rust (if not already installed)
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+    # Build RustQC
+    git clone https://github.com/ewels/RustQC.git
+    cd RustQC
+    cargo build --release
+    ./target/release/rustqc --version
+    ```
+  </TabItem>
+  <TabItem label="Fedora / RHEL" icon="linux">
+    ```bash
+    # Install system dependencies
+    sudo dnf install cmake zlib-devel bzip2-devel xz-devel \
+      libcurl-devel openssl-devel clang
+
+    # Install Rust (if not already installed)
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+    # Build RustQC
+    git clone https://github.com/ewels/RustQC.git
+    cd RustQC
+    cargo build --release
+    ./target/release/rustqc --version
+    ```
+  </TabItem>
+</Tabs>
+
+The compiled binary is at `target/release/rustqc`. You can copy it to a directory on your `PATH` for convenient access. Release builds use link-time optimization (LTO) and symbol stripping for maximum performance and a small binary size.
+
+In summary, the system dependencies you need are: **cmake**, **zlib**, **bz2**, **lzma**, **curl**, **ssl**, and **clang**.
+
+### Extra performance
+
+When building from source you can squeeze out additional performance by targeting your specific CPU architecture. This enables use of SIMD instructions (AVX2, etc.) that the pre-built binaries cannot use because they target a generic baseline:
+
+```bash
+RUSTFLAGS="-C target-cpu=native" cargo build --release
+```
+
+For a further 5–20% speedup on a machine you run RustQC on regularly, you can use Profile-Guided Optimization (PGO). This lets the compiler optimize hot code paths based on a real workload:
+
+```bash
+# 1. Build an instrumented binary
+RUSTFLAGS="-Cprofile-generate=/tmp/pgo-data" cargo build --release
+
+# 2. Run it on a representative BAM file
+./target/release/rustqc rna your_sample.bam --gtf genes.gtf -p -o /tmp/pgo-out
+
+# 3. Merge the profile data
+llvm-profdata merge -o /tmp/pgo-data/merged.profdata /tmp/pgo-data
+
+# 4. Rebuild using the profile
+RUSTFLAGS="-Cprofile-use=/tmp/pgo-data/merged.profdata -C target-cpu=native" \
+  cargo build --release
+```
+
+:::caution
+Both `target-cpu=native` and PGO produce binaries that are specific to the machine they were built / profiled on. They should not be copied to machines with a different CPU architecture.
+:::
+
+## Input requirements
+
+Your BAM files **must** have PCR duplicates **marked** (SAM flag `0x400`) but **not removed**. RustQC needs both duplicate and non-duplicate reads present to calculate duplication rates.
+
+Compatible duplicate-marking tools:
+
+- [Picard MarkDuplicates](https://broadinstitute.github.io/picard/command-line-overview.html#MarkDuplicates)
+- [samblaster](https://github.com/GregoryFaust/samblaster)
+- [sambamba markdup](https://lomereiter.github.io/sambamba/)
+- [biobambam bammarkduplicates](https://gitlab.com/german.tischler/biobambam2)
+
+RustQC automatically checks the BAM header for duplicate-marking tool signatures and exits with an error if none are found. Use `--skip-dup-check` to bypass this validation if your duplicate-marking tool is not recognized.
+
+## Verify installation
+
+```bash
+rustqc --version
+rustqc --help
+```
+
+If the binary is not on your `PATH`, use the full path to the compiled binary:
+
+```bash
+./target/release/rustqc --version
+./target/release/rustqc --help
+```

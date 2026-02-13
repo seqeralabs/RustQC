@@ -1,0 +1,134 @@
+---
+title: featureCounts Outputs
+description: How RustQC produces featureCounts-compatible read count files, assignment summaries, and biotype count outputs in a single pass alongside dupRadar analysis.
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+
+## How it works
+
+RustQC performs gene-level read counting in the **same pass** as the dupRadar duplication rate analysis. During BAM processing, RustQC simultaneously:
+
+1. Counts reads assigned to each gene (using the same algorithm as featureCounts)
+2. Tracks duplication rates for the dupRadar analysis
+3. Aggregates counts by gene biotype
+
+This single-pass approach eliminates the need for a separate featureCounts run, which is required in the traditional R dupRadar workflow. The featureCounts output is produced at zero additional runtime cost.
+
+RustQC follows the same algorithm as [Subread featureCounts](http://subread.sourceforge.net/) with these defaults:
+
+- Feature type: `exon`
+- Attribute: `gene_id`
+- Overlap detection: at least 1 base overlap
+- Multi-mapping reads: counted (for multi columns), excluded (for unique columns)
+- Strand-aware counting based on the `-s` / `--strandedness` flag
+
+The key difference is that RustQC performs counting and duplicate analysis in a single pass, while the traditional workflow requires running featureCounts separately before dupRadar.
+
+## Output files
+
+All featureCounts output files use the BAM file stem as a prefix. Each output can be individually enabled or disabled via the [configuration file](/RustQC/usage/configuration/).
+
+<FileTree>
+- sample.featureCounts.tsv Per-gene read counts
+- sample.featureCounts.tsv.summary Assignment summary statistics
+- sample.biotype_counts.tsv Per-biotype read counts
+- sample.biotype_counts_mqc.tsv MultiQC biotype bargraph
+- sample.biotype_counts_rrna_mqc.tsv MultiQC rRNA percentage
+</FileTree>
+
+### Counts file
+
+**File:** `<sample>.featureCounts.tsv`
+
+A tab-separated counts file compatible with the Subread featureCounts output format. Contains per-gene read counts with annotation columns:
+
+| Column | Description |
+|--------|-------------|
+| `Geneid` | Gene identifier |
+| `Chr` | Chromosome(s) |
+| `Start` | Start position(s) |
+| `End` | End position(s) |
+| `Strand` | Strand(s) |
+| `Length` | Gene length |
+| `<sample>` | Read count for this sample |
+
+The file includes a header comment line with the command used to generate it:
+
+```
+# Program:RustQC v0.1.0; Command: rustqc rna sample.bam --gtf genes.gtf -p
+Geneid  Chr     Start   End     Strand  Length  sample.bam
+ENSG00000000003 chrX    100627108;100629986;...  100636806;100637104;... -;-;... 3768    521
+ENSG00000000005 chrX    100584936;100585053;...  100585091;100599885;... +;+;... 1339    0
+```
+
+This file is directly compatible with downstream tools that accept featureCounts output, such as [DESeq2](https://bioconductor.org/packages/DESeq2/) and [MultiQC](https://multiqc.info/).
+
+### Summary file
+
+**File:** `<sample>.featureCounts.tsv.summary`
+
+Assignment summary statistics in featureCounts format, reporting the number of reads in each category:
+
+```
+Status  sample.bam
+Assigned        22812
+Unassigned_Unmapped     0
+Unassigned_NoFeatures   1227
+Unassigned_Ambiguous    2395
+```
+
+- **Assigned** -- reads successfully assigned to a gene
+- **Unassigned_Unmapped** -- unmapped reads
+- **Unassigned_NoFeatures** -- reads not overlapping any gene
+- **Unassigned_Ambiguous** -- reads overlapping multiple genes
+
+### Biotype counts
+
+**File:** `<sample>.biotype_counts.tsv`
+
+A tab-separated file with per-biotype read counts, sorted alphabetically by biotype name:
+
+```
+protein_coding	12345
+lncRNA	678
+rRNA	90
+```
+
+The biotype is extracted from the GTF attribute specified by `biotype_attribute` (default: `gene_biotype` for Ensembl, `gene_type` for GENCODE).
+
+### Biotype MultiQC files
+
+- `<sample>.biotype_counts_mqc.tsv` -- Biotype counts formatted as a MultiQC bargraph data file, suitable for visualizing the distribution of reads across biotypes.
+- `<sample>.biotype_counts_rrna_mqc.tsv` -- rRNA percentage formatted as a MultiQC general statistics value, reporting the fraction of assigned reads mapping to rRNA genes.
+
+## Biotype attribute detection
+
+RustQC automatically detects the biotype attribute in your GTF file:
+
+- **Ensembl GTFs** use `gene_biotype`
+- **GENCODE GTFs** use `gene_type`
+
+If neither attribute is found, biotype outputs are skipped with a warning. You can override the auto-detection with the `--biotype-attribute` CLI flag or the `featurecounts.biotype_attribute` config option.
+
+## Configuring outputs
+
+Use a [YAML configuration file](/RustQC/usage/configuration/) to control which featureCounts outputs are generated. All outputs are enabled by default. Set any to `false` to skip generation:
+
+```yaml
+featurecounts:
+  counts_file: true           # .featureCounts.tsv
+  summary_file: true          # .featureCounts.tsv.summary
+  biotype_counts: true        # .biotype_counts.tsv
+  biotype_counts_mqc: true    # .biotype_counts_mqc.tsv
+  biotype_rrna_mqc: true      # .biotype_rrna_mqc.tsv
+  biotype_attribute: "gene_biotype"  # GTF attribute for biotype grouping
+```
+
+## Differences from Subread featureCounts
+
+RustQC's read counting follows the same algorithm as featureCounts with the same default settings (exon features, gene_id attribute, 1bp overlap, strand-aware counting). The outputs are format-compatible and can be used interchangeably in downstream pipelines.
+
+The primary difference is architectural: RustQC performs counting and dupRadar analysis in a single pass over the BAM file, while the traditional workflow requires running featureCounts as a separate step before dupRadar can process the counts. This means the featureCounts output comes at no additional runtime cost when running RustQC.
+
+RustQC also produces biotype count summaries and MultiQC-compatible files that would require additional scripting in the traditional workflow.

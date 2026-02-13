@@ -1,0 +1,217 @@
+---
+title: dupRadar Outputs
+description: Comprehensive guide to RustQC's dupRadar output files, including the duplication matrix, fitted model parameters, diagnostic plots, and how to interpret them.
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+
+## What is dupRadar?
+
+In DNA sequencing, PCR duplicates are straightforward to identify and remove: reads with identical alignment coordinates are likely amplification artifacts. In **RNA-seq**, the situation is more nuanced.
+
+Highly expressed genes produce many RNA fragments. When sequencing depth is sufficient, some of these independent fragments will share the same start and end positions purely by chance. These are **natural duplicates** -- biologically real, not PCR artifacts. Removing them would distort expression estimates.
+
+**dupRadar** addresses this by analyzing duplication rates in the context of expression level. Rather than applying a blanket duplicate removal, it models the expected relationship between how highly a gene is expressed and what fraction of its reads are marked as duplicates.
+
+The key insight: at low expression levels, duplicates are almost certainly PCR artifacts. At high expression levels, a baseline level of duplication is expected and biologically meaningful.
+
+### Why it matters
+
+Duplicate rate analysis helps answer critical quality questions about an RNA-seq library:
+
+- **Was the library over-amplified?** If low-expression genes show high duplication rates, too many PCR cycles were used.
+- **Is the library complex enough?** Low-complexity libraries produce high duplication across all expression levels.
+- **Can I trust the expression estimates?** If duplication follows the expected expression-dependent pattern, the data is likely reliable.
+
+This information is essential for experiment QC, troubleshooting library preparation protocols, and deciding whether to include a sample in downstream analysis.
+
+### The logistic regression model
+
+dupRadar fits a logistic regression to the relationship between expression level and duplication rate. RustQC implements this same model using iteratively reweighted least squares (IRLS).
+
+The model:
+
+```
+duplication_rate = 1 / (1 + exp(-(intercept + slope * x)))
+```
+
+where `x` is `log10(reads per kilobase)`.
+
+**Intercept:** Controls the baseline duplication rate at zero expression.
+
+- Values close to **0** (or negative) indicate good library quality -- genes with few reads have few duplicates.
+- Values above **0.5** indicate significant PCR over-amplification -- even lowly expressed genes have high duplication rates.
+
+**Slope:** Controls how steeply duplication rises with expression.
+
+- Positive values mean duplication increases with expression, which is the **expected biological pattern**.
+- Very high slope values with a low intercept indicate a well-prepared library where duplication is driven by expression level rather than PCR artifacts.
+- A low slope combined with a high intercept suggests uniform over-amplification.
+
+| Intercept | Slope | Interpretation |
+|-----------|-------|----------------|
+| Low (~0) | Moderate-high | Good library. Duplicates are expression-dependent. |
+| High (>0.5) | Low | Over-amplified. Duplicates everywhere. |
+| High (>0.5) | High | Over-amplified, but expression signal still visible. |
+| Low (~0) | Very low | Good complexity, very little duplication at any level. |
+
+## Output files
+
+All dupRadar output files use the BAM file stem as a prefix (e.g., `sample.bam` produces `sample_dupMatrix.txt`). Each output can be individually enabled or disabled via the [configuration file](/RustQC/usage/configuration/).
+
+<FileTree>
+- sample_dupMatrix.txt Duplication matrix (core data table)
+- sample_intercept_slope.txt Fitted model intercept and slope
+- sample_duprateExpDens.png Density scatter plot
+- sample_duprateExpDens.svg
+- sample_duprateExpBoxplot.png Duplication rate boxplot
+- sample_duprateExpBoxplot.svg
+- sample_expressionHist.png Expression histogram
+- sample_expressionHist.svg
+- sample_intercept_slope_mqc.tsv MultiQC general statistics
+- sample_duprateExpDensCurve_mqc.txt MultiQC fitted curve data
+</FileTree>
+
+### Duplication matrix
+
+**File:** `<sample>_dupMatrix.txt`
+
+A tab-separated file with one row per gene and 14 columns. This is the core data table from which all other dupRadar outputs are derived.
+
+| Column | Description |
+|--------|-------------|
+| `ID` | Gene identifier from the GTF |
+| `geneLength` | Gene length in base pairs (non-overlapping exon bases) |
+| `allCountsMulti` | Total read count including multi-mappers |
+| `filteredCountsMulti` | Read count excluding duplicates, including multi-mappers |
+| `dupRateMulti` | Duplication rate with multi-mappers: `(all - filtered) / all` |
+| `dupsPerIdMulti` | Number of duplicate reads (multi-mapper inclusive) |
+| `RPKMulti` | Reads per kilobase (multi-mapper inclusive) |
+| `RPKMMulti` | Reads per kilobase per million mapped reads (multi-mapper inclusive) |
+| `allCounts` | Total read count (unique mappers only) |
+| `filteredCounts` | Read count excluding duplicates (unique mappers only) |
+| `dupRate` | Duplication rate (unique mappers only) |
+| `dupsPerIdUnique` | Number of duplicate reads (unique mappers only) |
+| `RPK` | Reads per kilobase (unique mappers only) |
+| `RPKM` | Reads per kilobase per million mapped reads (unique mappers only) |
+
+Genes with zero reads have a duplication rate of `0` and RPK/RPKM values of `0`. The format is identical to R dupRadar's `_dupMatrix.txt` output.
+
+### Intercept and slope
+
+**File:** `<sample>_intercept_slope.txt`
+
+A two-line text file containing the intercept and slope of the fitted logistic regression model:
+
+```
+intercept	0.03186
+slope	1.60189
+```
+
+These parameters define the fitted curve: `y = 1 / (1 + exp(-(intercept + slope * x)))`, where `x` is log10(reads/kbp) and `y` is the duplication rate.
+
+### Plot files
+
+RustQC generates three diagnostic plots in both PNG and SVG formats:
+
+- `<sample>_duprateExpDens.png` / `.svg` -- Density scatter plot
+- `<sample>_duprateExpBoxplot.png` / `.svg` -- Duplication rate boxplot
+- `<sample>_expressionHist.png` / `.svg` -- Expression histogram
+
+See the [Interpreting plots](#interpreting-plots) section below for how to read each plot.
+
+### MultiQC files
+
+- `<sample>_intercept_slope_mqc.tsv` -- Intercept and slope values in MultiQC general statistics format.
+- `<sample>_duprateExpDensCurve_mqc.txt` -- Fitted duplication rate curve data points for MultiQC line plot visualization.
+
+These files are designed for integration with [MultiQC](https://multiqc.info/), enabling dupRadar results to be included in multi-sample QC reports.
+
+## Interpreting plots
+
+RustQC generates the same three visualizations as the original [dupRadar R package](https://bioconductor.org/packages/dupRadar/) and follows the same conventions. All plots are produced in both PNG and SVG formats.
+
+### Density scatter plot
+
+**File:** `<sample>_duprateExpDens.png` / `.svg`
+
+This is the primary diagnostic plot, showing the relationship between gene expression level and duplication rate.
+
+- **X-axis:** Expression level as log10(reads per kilobase). Each point is one gene.
+- **Y-axis:** Duplication rate, ranging from 0 (no duplicates) to 1 (all reads are duplicates).
+- **Color:** Point density -- brighter colors indicate more genes at that position. This helps reveal where the majority of genes fall, even when thousands of points overlap.
+- **Red curve:** The fitted logistic regression model.
+
+**Expected patterns** in a well-prepared library:
+
+- Genes with low expression cluster at the **bottom-left** with duplication rates near zero. At low sequencing depth, it is unlikely for independent fragments to share identical start/end positions.
+- Genes with high expression have **moderately higher** duplication rates. This is expected -- highly expressed genes produce many fragments, and some will share positions by chance alone.
+- The fitted curve rises gradually from left to right, staying below 0.5 for most of the expression range.
+
+### Duplication rate boxplot
+
+**File:** `<sample>_duprateExpBoxplot.png` / `.svg`
+
+Shows the distribution of duplication rates across expression-level bins, providing a complementary view to the density scatter plot.
+
+- **X-axis:** Expression bins (log10 reads per kilobase).
+- **Y-axis:** Duplication rate.
+- **Boxes:** The interquartile range (25th to 75th percentile) of duplication rates for genes within each bin.
+- **Horizontal line in each box:** Median duplication rate for that bin.
+- **Whiskers:** Extend to the most extreme points within 1.5 times the IQR.
+
+Boxes should be near zero at low expression and gradually rise at higher expression levels. Very wide boxes at low expression suggest inconsistent library preparation. The median line within each box should track the general trend seen in the density scatter plot. This plot helps determine whether high duplication rates are expression-dependent (expected) or uniform across all expression levels (problematic).
+
+### Expression histogram
+
+**File:** `<sample>_expressionHist.png` / `.svg`
+
+A histogram of gene expression levels across all genes in the annotation.
+
+- **X-axis:** Expression level as log10(reads per kilobase).
+- **Y-axis:** Number of genes.
+
+A **bimodal distribution** is common: one peak near zero (unexpressed or very lowly expressed genes) and another peak at moderate expression levels. The position and height of the peaks indicate the dynamic range of the experiment. A narrow distribution shifted to the left suggests low overall sequencing depth or poor library complexity.
+
+## How to spot problems
+
+### Very high duplication at low expression
+
+If genes with few reads already show high duplication rates, this indicates **technical PCR duplication** rather than biological signal. The density scatter plot will show points clustered in the upper-left region, and the fitted curve will have a high intercept.
+
+### Flat duplication curve
+
+If the duplication rate is uniformly high across all expression levels (a flat, high curve), this suggests a severe **PCR amplification issue** -- the library has very low complexity and most reads are duplicates regardless of gene expression.
+
+### Very low duplication everywhere
+
+Duplication rates near zero across all expression levels, including highly expressed genes, may indicate that **duplicates were not properly marked** in the BAM file. Verify that a duplicate-marking tool was run before RustQC.
+
+### Normal vs. problematic libraries
+
+| Indicator | Good library | Problematic library |
+|-----------|-------------|-------------------|
+| Intercept | Close to 0 | Above 0.5 |
+| Low-expression genes | Near-zero dup rate | Elevated dup rate |
+| Curve shape | Gradual rise | Flat and high, or steep early rise |
+| Boxplot spread | Tight boxes at low expression | Wide boxes everywhere |
+
+## Configuring outputs
+
+Use a [YAML configuration file](/RustQC/usage/configuration/) to control which dupRadar outputs are generated. All outputs are enabled by default. Set any to `false` to skip generation:
+
+```yaml
+dupradar:
+  dup_matrix: true
+  intercept_slope: true
+  density_scatter_plot: true
+  boxplot: true
+  expression_histogram: true
+  multiqc_intercept: true
+  multiqc_curve: true
+```
+
+## References
+
+- **dupRadar:** Sayols S, Scherzinger D, Klein H. dupRadar: a Bioconductor package for the assessment of PCR artifacts in RNA-Seq data. *BMC Bioinformatics*. 2016;17(1):428. [Bioconductor page](https://bioconductor.org/packages/dupRadar/)
+- **featureCounts:** Liao Y, Smyth GK, Shi W. featureCounts: an efficient general purpose program for assigning sequence reads to genomic features. *Bioinformatics*. 2014;30(7):923-930. [Subread/featureCounts](http://subread.sourceforge.net/)

@@ -1,22 +1,137 @@
 ---
-title: RustQC
+title: Welcome to RustQC
 description: Fast quality control tools for sequencing data, written in Rust.
-template: splash
-hero:
-  tagline: A blazingly fast reimplementation of dupRadar and featureCounts in Rust, delivering identical results up to 30x faster.
-  image:
-    file: ../../assets/RustQC-icon.svg
-  actions:
-    - text: Get Started
-      link: /getting-started/introduction/
-      icon: right-arrow
-    - text: View on GitHub
-      link: https://github.com/ewels/RustQC
-      icon: external
-      variant: minimal
+template: doc
+tableOfContents: false
+head:
+  - tag: style
+    content: |
+      /* Hide the auto-generated h1 container (including its border) */
+      .content-panel:first-child { display: none !important; }
+      .main-pane { --sl-content-width: 67.5rem; }
 ---
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<div class="hero" role="banner">
+  <img src="/RustQC/RustQC-icon.svg" alt="" width="400" height="400" />
+  <div class="sl-flex stack">
+    <div class="sl-flex copy">
+      <h1 id="_top">Welcome to RustQC</h1>
+      <div class="tagline">
+        A blazingly fast reimplementation of{' '}
+        <a href="https://bioconductor.org/packages/dupRadar/">dupRadar</a> and{' '}
+        <a href="https://subread.sourceforge.net/">featureCounts</a> in Rust,
+        delivering identical results up to 33x faster.
+      </div>
+    </div>
+    <div class="benchmark-chart">
+      <img class="only-dark" src="/RustQC/benchmarks/benchmark_dark.svg" alt="Benchmark: RustQC 54s vs featureCounts 16m vs dupRadar 30m" />
+      <img class="only-light" src="/RustQC/benchmarks/benchmark_light.svg" alt="Benchmark: RustQC 54s vs featureCounts 16m vs dupRadar 30m" />
+      <p><em>Run time for a 10 GB paired-end BAM</em></p>
+    </div>
+    <div class="sl-flex actions not-content">
+      <a class="sl-link-button primary" href="getting-started/introduction/">Get Started <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m14.707 5.636 5.657 5.657a1 1 0 0 1 0 1.414l-5.657 5.657a1 1 0 0 1-1.414-1.414L17.243 13H4a1 1 0 1 1 0-2h13.243l-3.95-3.95a1 1 0 1 1 1.414-1.414Z"></path></svg></a>
+      <a class="sl-link-button minimal" href="https://github.com/ewels/RustQC">View on GitHub <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v10a1 1 0 1 1-2 0V9.414l-8.293 8.293a1 1 0 0 1-1.414-1.414L14.586 8H7a1 1 0 0 1-1-1Z"></path></svg></a>
+    </div>
+  </div>
+</div>
+
+<style>{`
+  .hero {
+    display: grid;
+    align-items: center;
+    gap: 1rem;
+    padding-bottom: 1rem;
+  }
+  .hero > img {
+    object-fit: contain;
+    width: min(70%, 20rem);
+    height: auto;
+    margin-inline: auto;
+  }
+  .hero .stack {
+    flex-direction: column;
+    gap: clamp(1.5rem, calc(1.5rem + 1vw), 2rem);
+    text-align: center;
+  }
+  .hero .copy {
+    flex-direction: column;
+    gap: 1rem;
+    align-items: center;
+  }
+  .hero .copy > * {
+    max-width: 50ch;
+  }
+  .hero h1 {
+    font-size: clamp(var(--sl-text-3xl), calc(0.25rem + 5vw), var(--sl-text-6xl));
+    line-height: var(--sl-line-height-headings);
+    font-weight: 600;
+    color: var(--sl-color-white);
+  }
+  .hero .tagline {
+    font-size: clamp(var(--sl-text-base), calc(0.0625rem + 2vw), var(--sl-text-xl));
+    color: var(--sl-color-gray-2);
+  }
+  .hero .tagline a {
+    color: var(--sl-color-white);
+  }
+  .hero .actions {
+    gap: 1rem 2rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .hero .actions a {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5em;
+    border-radius: 999rem;
+    padding: 0.75rem 1.5rem;
+    line-height: 1.1875;
+    text-decoration: none;
+    font-size: var(--sl-text-base);
+    font-weight: 500;
+  }
+  .hero .actions a.primary {
+    background: var(--sl-color-text-accent);
+    border: 1px solid var(--sl-color-text-accent);
+    color: var(--sl-color-black);
+  }
+  .hero .actions a.primary:hover {
+    color: var(--sl-color-black);
+  }
+  .hero .actions a.minimal {
+    border: 1px solid;
+    padding-inline: 1.25rem;
+    color: var(--sl-color-white);
+  }
+  .benchmark-chart {
+    text-align: center;
+  }
+  .benchmark-chart p {
+    margin-top: -0.5rem;
+  }
+  @media (min-width: 53.125rem) {
+    .hero {
+      grid-template-columns: 7fr 4fr;
+      gap: 3%;
+      padding-block: clamp(2.5rem, calc(1rem + 10vmin), 10rem);
+    }
+    .hero > img {
+      order: 2;
+      width: min(100%, 25rem);
+    }
+    .hero .stack {
+      text-align: start;
+    }
+    .hero .copy {
+      align-items: flex-start;
+    }
+    .hero .actions {
+      justify-content: center;
+    }
+  }
+`}</style>
 
 ## Why RustQC?
 
@@ -25,9 +140,9 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
     Produces bit-for-bit identical output to R's dupRadar and featureCounts.
     Over 800,000 values compared with zero mismatches.
   </Card>
-  <Card title="9x Faster" icon="rocket">
-    Processes a 10 GB BAM file in 3 minutes (single thread) vs 30 minutes for
-    the R equivalent. Multi-threaded mode brings this down to under 1 minute.
+  <Card title="Up to 33x Faster" icon="rocket">
+    Processes a 10 GB BAM file in under 1 minute vs ~30 minutes for the R
+    equivalent.
   </Card>
   <Card title="All-in-One" icon="puzzle">
     Combines dupRadar analysis, featureCounts-compatible output, and biotype
@@ -45,4 +160,4 @@ RustQC is a reimplementation of the excellent [dupRadar](https://bioconductor.or
 Bioconductor package by Sergi Sayols, and uses the same counting approach as
 [Subread featureCounts](https://subread.sourceforge.net/) by Yang Liao and Wei Shi.
 
-**If you use RustQC, please cite the original tools** — see the [Credits & Citation](/about/credits/) page.
+**If you use RustQC, please cite the original tools** — see the [Credits & Citation](/RustQC/about/credits/) page.

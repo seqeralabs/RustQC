@@ -9,9 +9,15 @@ RustQC is a fast quality control toolkit for sequencing data, written in Rust. I
 
 RNA-seq experiments rely on PCR amplification, which introduces duplicate reads. Distinguishing technical duplicates (PCR artifacts) from natural duplicates (multiple reads from highly expressed genes) is critical for data quality assessment. The original [dupRadar](https://bioconductor.org/packages/dupRadar/) tool models duplication rate as a function of gene expression, providing a clear diagnostic of library quality.
 
+<div class="benchmark-chart">
+  <img class="only-dark" src="/RustQC/benchmarks/benchmark_dark.svg" alt="Benchmark: RustQC 54s vs featureCounts 16m vs dupRadar 30m" />
+  <img class="only-light" src="/RustQC/benchmarks/benchmark_light.svg" alt="Benchmark: RustQC 54s vs featureCounts 16m vs dupRadar 30m" />
+  <p align="center"><em>Run time for a 10 GB paired-end BAM</em></p>
+</div>
+
 RustQC reimplements this analysis with several advantages:
 
-- **Speed**: 9--33x faster than the R implementation, depending on thread count
+- **Speed**: Up to 33x faster than the R implementation
 - **Single-pass architecture**: Performs read counting and duplicate analysis simultaneously, eliminating the need for a separate featureCounts run
 - **Identical output**: Produces bit-for-bit identical results to R dupRadar (verified across 820,000+ values with zero mismatches)
 - **Multiple input support**: Process several BAM files in a single command with automatic parallelisation

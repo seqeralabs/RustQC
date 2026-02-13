@@ -1,0 +1,28 @@
+/* Custom table styling */
+.sl-markdown-content table:not(:where(.not-content *)) {
+  display: table;
+  width: 100%;
+  font-size: 0.85em;
+}
+
+.sl-markdown-content :is(th, td):not(:where(.not-content *)) {
+  padding: 0.5rem 1rem;
+}
+
+.sl-markdown-content thead th:not(:where(.not-content *)) {
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 0.85em;
+  letter-spacing: 0.04em;
+  background-color: var(--sl-color-gray-6);
+}
+
+.sl-markdown-content tbody tr:hover:not(:where(.not-content *)) {
+  background-color: color-mix(in srgb, var(--sl-color-gray-7) 40%, transparent);
+}
+
+/* Dark/light theme image switching */
+:root[data-theme='light'] .only-dark,
+:root[data-theme='dark'] .only-light {
+  display: none !important;
+}

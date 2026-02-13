@@ -9,11 +9,14 @@ export default defineConfig({
   base: "/RustQC",
   integrations: [
     starlight({
+      expressiveCode: {
+        defaultProps: {
+          frame: "none",
+        },
+      },
       title: "RustQC",
       logo: {
-        light: "./src/assets/RustQC-logo.svg",
-        dark: "./src/assets/RustQC-logo-darkbg.svg",
-        replacesTitle: true,
+        src: "./src/assets/RustQC-icon.svg",
       },
       favicon: "/favicon.svg",
       social: [
@@ -40,33 +43,21 @@ export default defineConfig({
               label: "Configuration File",
               slug: "usage/configuration",
             },
-            { label: "Output Files", slug: "usage/output-files" },
           ],
         },
         {
-          label: "Guide",
+          label: "Outputs",
           items: [
-            {
-              label: "RNA-seq Duplicate Analysis",
-              slug: "guide/rna-duprate",
-            },
-            {
-              label: "Interpreting Plots",
-              slug: "guide/interpreting-plots",
-            },
-            {
-              label: "featureCounts Output",
-              slug: "guide/featurecounts",
-            },
+            { label: "dupRadar", slug: "outputs/dupradar" },
+            { label: "featureCounts", slug: "outputs/featurecounts" },
           ],
         },
         {
           label: "Benchmarks",
           items: [
-            {
-              label: "Performance",
-              slug: "benchmarks/performance",
-            },
+            { label: "Combined", slug: "benchmarks/combined" },
+            { label: "dupRadar", slug: "benchmarks/dupradar" },
+            { label: "featureCounts", slug: "benchmarks/featurecounts" },
           ],
         },
         {
@@ -83,6 +74,7 @@ export default defineConfig({
           ],
         },
       ],
+      customCss: ["./src/styles/custom.css"],
       plugins: [
         catppuccin({
           dark: { flavor: "mocha", accent: "peach" },

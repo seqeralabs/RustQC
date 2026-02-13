@@ -1,8 +1,8 @@
 <h1 align="center">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="img/RustQC-logo-darkbg.svg">
-  <source media="(prefers-color-scheme: light)" srcset="img/RustQC-logo.svg">
-  <img width="500" src="img/RustQC-logo.svg" alt="RustQC">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/public/RustQC-logo-darkbg.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/public/RustQC-logo.svg">
+  <img width="500" src="docs/public/RustQC-logo.svg" alt="RustQC">
 </picture>
 </h1>
 
@@ -14,6 +14,15 @@
 
 It analyzes duplicate-marked alignment files (SAM/BAM/CRAM) to compute per-gene duplication rates as a function of expression level. In a single pass, it produces the same outputs as the original **dupRadar** R/Bioconductor package, featureCounts-format count files, and biotype-level QC summaries — all significantly faster and compiled to a single static binary with no runtime dependencies.
 
+<p align="center">
+<picture>
+   <source media="(prefers-color-scheme: dark)" srcset="docs/public/benchmarks/benchmark_dark.svg">
+   <img src="docs/public/benchmarks/benchmark_light.svg" alt="Benchmark: RustQC 54s vs featureCounts 16m vs dupRadar 30m" width="600">
+</picture>
+</p>
+
+<p align="center"><em>Run time for a 10 GB paired-end BAM</em></p>
+
 ## Comparison with dupRadar
 
 | Feature | dupRadar (R) | RustQC |
@@ -21,21 +30,21 @@ It analyzes duplicate-marked alignment files (SAM/BAM/CRAM) to compute per-gene 
 | Language | R | Rust |
 | Dependencies | R, Bioconductor, Rsubread | None (static binary) |
 | Read counting | 4 separate featureCounts calls | Single-pass alignment reading |
-| Speed | ~30 min for 10 GB BAM | ~1 min for 10 GB BAM (with `--threads 8`) |
+| Speed | ~30 min for 10 GB BAM | <1 min for 10 GB BAM |
 | Memory | High (R overhead) | Low |
 | Output format | Identical | Identical |
 
-### Benchmarked on GM12878 REP1 (~10 GB paired-end BAM)
+Benchmark results:
 
-| Metric | dupRadar (R) | RustQC (1 thread) | RustQC (8 threads) | RustQC (10 threads) |
-| --- | --- | --- | --- | --- |
-| **Runtime** | 29m 56s | 3m 16s (~9x) | 1m 03s (~28x) | 0m 54s (~33x) |
-| **Intercept** | 0.8245 | 0.8245 | 0.8245 | 0.8245 |
-| **Slope** | 1.6774 | 1.6774 | 1.6774 | 1.6774 |
+| Metric | dupRadar (R) | RustQC |
+| --- | --- | --- |
+| **Runtime** | 29m 56s | 0m 54s (~33x faster) |
+| **Intercept** | 0.8245 | 0.8245 |
+| **Slope** | 1.6774 | 1.6774 |
 
-All gene counts — unique and multi-mapper — match **exactly** across all 63,086 genes (100%). Cell-by-cell comparison of the full duplication matrix (820,118 values) shows **zero mismatches**.
+All gene counts match **exactly** across all 63,086 genes. Cell-by-cell comparison of the full duplication matrix (820,118 values) shows **zero mismatches**.
 
-See the [benchmark README](benchmark/README.md) for full results and replication instructions.
+See the [benchmark documentation](https://ewels.github.io/RustQC/benchmarks/dupradar/) for detailed results and the [benchmark directory](benchmark/) for replication instructions.
 
 ### Density scatter plots
 
@@ -75,23 +84,23 @@ Download a pre-built binary for your platform from the [Releases](https://github
 
 ```bash
 # Linux (x86_64)
-curl -fsSL https://github.com/ewels/RustQC/releases/latest/download/rustqc-linux-x86_64.tar.gz \
-  | tar xz
+curl -fsSL https://github.com/ewels/RustQC/releases/latest/download/rustqc-linux-x86_64.tar.gz | tar xz
+chmod +x ./rustqc
 sudo mv rustqc /usr/local/bin/
 
 # Linux (aarch64)
-curl -fsSL https://github.com/ewels/RustQC/releases/latest/download/rustqc-linux-aarch64.tar.gz \
-  | tar xz
+curl -fsSL https://github.com/ewels/RustQC/releases/latest/download/rustqc-linux-aarch64.tar.gz | tar xz
+chmod +x ./rustqc
 sudo mv rustqc /usr/local/bin/
 
 # macOS (Apple Silicon)
-curl -fsSL https://github.com/ewels/RustQC/releases/latest/download/rustqc-macos-aarch64.tar.gz \
-  | tar xz
+curl -fsSL https://github.com/ewels/RustQC/releases/latest/download/rustqc-macos-aarch64.tar.gz | tar xz
+chmod +x ./rustqc
 sudo mv rustqc /usr/local/bin/
 
 # macOS (Intel)
-curl -fsSL https://github.com/ewels/RustQC/releases/latest/download/rustqc-macos-x86_64.tar.gz \
-  | tar xz
+curl -fsSL https://github.com/ewels/RustQC/releases/latest/download/rustqc-macos-x86_64.tar.gz | tar xz
+chmod +x ./rustqc
 sudo mv rustqc /usr/local/bin/
 ```
 
