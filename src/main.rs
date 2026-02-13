@@ -917,6 +917,12 @@ fn run_rseqc_tools(bam_path: &str, bam_stem: &str, params: &SharedParams) -> Res
         let result =
             rna::rseqc::read_duplication::read_duplication(bam_path, params.mapq_cut, reference)?;
         rna::rseqc::read_duplication::write_read_duplication(&result, outdir, bam_stem)?;
+
+        if config.read_duplication.plot {
+            let plot_path = outdir.join(format!("{}.DupRate_plot.png", bam_stem));
+            rna::rseqc::plots::read_duplication_plot(&result, &plot_path)?;
+        }
+
         info!(
             "[{}] read_duplication completed in {:.2}s",
             bam_stem,
@@ -999,6 +1005,17 @@ fn run_rseqc_tools(bam_path: &str, bam_stem: &str, params: &SharedParams) -> Res
             let r_prefix = outdir.join(bam_stem).to_string_lossy().to_string();
             rna::rseqc::junction_annotation::write_junction_plot_r(&results, &r_prefix, &r_path)?;
 
+            if config.junction_annotation.splice_events_plot
+                || config.junction_annotation.splice_junction_plot
+            {
+                rna::rseqc::plots::junction_annotation_plot(
+                    &results,
+                    &r_prefix,
+                    config.junction_annotation.splice_events_plot,
+                    config.junction_annotation.splice_junction_plot,
+                )?;
+            }
+
             let summary_path = outdir.join(format!("{}.junction_annotation.txt", bam_stem));
             rna::rseqc::junction_annotation::write_summary(&results, &summary_path)?;
 
@@ -1031,6 +1048,12 @@ fn run_rseqc_tools(bam_path: &str, bam_stem: &str, params: &SharedParams) -> Res
 
             let prefix = outdir.join(bam_stem).to_string_lossy().to_string();
             rna::rseqc::junction_saturation::write_r_script(&results, &prefix)?;
+
+            if config.junction_saturation.plot {
+                let plot_path = outdir.join(format!("{}.junctionSaturation_plot.png", bam_stem));
+                rna::rseqc::plots::junction_saturation_plot(&results, &plot_path)?;
+            }
+
             let summary_path = format!("{prefix}.junctionSaturation_summary.txt");
             rna::rseqc::junction_saturation::write_summary(&results, &summary_path)?;
 
@@ -1075,6 +1098,15 @@ fn run_rseqc_tools(bam_path: &str, bam_stem: &str, params: &SharedParams) -> Res
                 &r_path,
                 params.inner_distance_step,
             )?;
+
+            if config.inner_distance.plot {
+                let plot_path = outdir.join(format!("{}.inner_distance_plot.png", bam_stem));
+                rna::rseqc::plots::inner_distance_plot(
+                    &results,
+                    params.inner_distance_step,
+                    &plot_path,
+                )?;
+            }
 
             let summary_path = format!("{prefix}.inner_distance_summary.txt");
             rna::rseqc::inner_distance::write_summary(&results, &summary_path)?;

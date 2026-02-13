@@ -256,17 +256,24 @@ impl Default for InferExperimentConfig {
 /// ```yaml
 /// read_duplication:
 ///   enabled: true
+///   plot: true
 /// ```
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct ReadDuplicationConfig {
     /// Whether to run read_duplication analysis. Defaults to true.
     pub enabled: bool,
+
+    /// Generate the read duplication plot (PNG + SVG).
+    pub plot: bool,
 }
 
 impl Default for ReadDuplicationConfig {
     fn default() -> Self {
-        Self { enabled: true }
+        Self {
+            enabled: true,
+            plot: true,
+        }
     }
 }
 
@@ -301,6 +308,8 @@ impl Default for ReadDistributionConfig {
 /// junction_annotation:
 ///   enabled: true
 ///   min_intron: 50
+///   splice_events_plot: true
+///   splice_junction_plot: true
 /// ```
 #[derive(Debug, Deserialize)]
 #[serde(default)]
@@ -311,6 +320,12 @@ pub struct JunctionAnnotationConfig {
     /// Minimum intron size for junction filtering.
     /// Can be overridden by `--min-intron` CLI flag.
     pub min_intron: Option<u64>,
+
+    /// Generate the splice events pie chart (PNG + SVG).
+    pub splice_events_plot: bool,
+
+    /// Generate the splice junctions pie chart (PNG + SVG).
+    pub splice_junction_plot: bool,
 }
 
 impl Default for JunctionAnnotationConfig {
@@ -318,6 +333,8 @@ impl Default for JunctionAnnotationConfig {
         Self {
             enabled: true,
             min_intron: None,
+            splice_events_plot: true,
+            splice_junction_plot: true,
         }
     }
 }
@@ -334,6 +351,7 @@ impl Default for JunctionAnnotationConfig {
 ///   percentile_floor: 5
 ///   percentile_ceiling: 100
 ///   percentile_step: 5
+///   plot: true
 /// ```
 #[derive(Debug, Deserialize)]
 #[serde(default)]
@@ -356,6 +374,9 @@ pub struct JunctionSaturationConfig {
     /// Sampling step percentage.
     /// Can be overridden by `--junction-saturation-percentile-step` CLI flag.
     pub percentile_step: Option<u64>,
+
+    /// Generate the junction saturation plot (PNG + SVG).
+    pub plot: bool,
 }
 
 impl Default for JunctionSaturationConfig {
@@ -366,6 +387,7 @@ impl Default for JunctionSaturationConfig {
             percentile_floor: None,
             percentile_ceiling: None,
             percentile_step: None,
+            plot: true,
         }
     }
 }
@@ -382,6 +404,7 @@ impl Default for JunctionSaturationConfig {
 ///   lower_bound: -250
 ///   upper_bound: 250
 ///   step: 5
+///   plot: true
 /// ```
 #[derive(Debug, Deserialize)]
 #[serde(default)]
@@ -404,6 +427,9 @@ pub struct InnerDistanceConfig {
     /// Bin width for the inner distance histogram.
     /// Can be overridden by `--inner-distance-step` CLI flag.
     pub step: Option<i64>,
+
+    /// Generate the inner distance plot (PNG + SVG).
+    pub plot: bool,
 }
 
 impl Default for InnerDistanceConfig {
@@ -414,6 +440,7 @@ impl Default for InnerDistanceConfig {
             lower_bound: None,
             upper_bound: None,
             step: None,
+            plot: true,
         }
     }
 }
@@ -501,6 +528,12 @@ mod tests {
         assert!(config.junction_annotation.enabled);
         assert!(config.junction_saturation.enabled);
         assert!(config.inner_distance.enabled);
+        // RSeQC plot toggles default to true
+        assert!(config.read_duplication.plot);
+        assert!(config.junction_annotation.splice_events_plot);
+        assert!(config.junction_annotation.splice_junction_plot);
+        assert!(config.junction_saturation.plot);
+        assert!(config.inner_distance.plot);
     }
 
     #[test]
