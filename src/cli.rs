@@ -25,17 +25,18 @@ pub enum Commands {
     /// Analyzes PCR duplicate rates as a function of gene expression level
     /// in RNA-Seq datasets. A Rust reimplementation of the dupRadar R package.
     ///
-    /// Input BAM files must have duplicates marked (SAM flag 0x400) but NOT removed.
-    /// Use tools like Picard MarkDuplicates or samblaster to mark duplicates first.
+    /// Input alignment files (SAM/BAM/CRAM) must have duplicates marked (SAM flag 0x400)
+    /// but NOT removed. Use tools like Picard MarkDuplicates or samblaster to mark
+    /// duplicates first.
     Rna(RnaArgs),
 }
 
 /// Arguments for the `rna` (dupRadar) subcommand.
 #[derive(Parser, Debug)]
 pub struct RnaArgs {
-    /// Path to the duplicate-marked BAM file
-    #[arg(value_name = "BAM")]
-    pub bam: String,
+    /// Path to the duplicate-marked alignment file (SAM/BAM/CRAM)
+    #[arg(value_name = "INPUT")]
+    pub input: String,
 
     /// Path to the GTF gene annotation file
     #[arg(value_name = "GTF")]
@@ -61,6 +62,10 @@ pub struct RnaArgs {
     #[arg(short, long, value_name = "CONFIG")]
     pub config: Option<String>,
 
+    /// Path to reference FASTA file (required for CRAM input)
+    #[arg(short, long, value_name = "FASTA")]
+    pub reference: Option<String>,
+
     /// Skip the check for duplicate-marking tools in the BAM header.
     ///
     /// By default, RustQC verifies that the BAM file has been processed by a
@@ -85,7 +90,7 @@ mod tests {
         let cli = Cli::parse_from(["rustqc", "rna", "test.bam", "genes.gtf"]);
         match cli.command {
             Commands::Rna(args) => {
-                assert_eq!(args.bam, "test.bam");
+                assert_eq!(args.input, "test.bam");
                 assert_eq!(args.gtf, "genes.gtf");
                 assert_eq!(args.stranded, 0);
                 assert!(!args.paired);
@@ -109,6 +114,8 @@ mod tests {
             "4",
             "--outdir",
             "/tmp/out",
+            "--reference",
+            "genome.fa",
         ]);
         match cli.command {
             Commands::Rna(args) => {
@@ -116,6 +123,7 @@ mod tests {
                 assert!(args.paired);
                 assert_eq!(args.threads, 4);
                 assert_eq!(args.outdir, "/tmp/out");
+                assert_eq!(args.reference, Some("genome.fa".to_string()));
             }
         }
     }

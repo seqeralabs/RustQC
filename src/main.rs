@@ -48,10 +48,25 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         config::Config::default()
     };
 
+    // Warn early if CRAM input is likely but no reference is provided
+    if args.input.ends_with(".cram")
+        && args.reference.is_none()
+        && std::env::var("REF_PATH").is_err()
+        && std::env::var("REF_CACHE").is_err()
+    {
+        anyhow::bail!(
+            "CRAM input requires a reference FASTA. \
+             Pass --reference <FASTA> or set the REF_PATH environment variable."
+        );
+    }
+
     let start = Instant::now();
     info!("RustQC rna v{}", env!("CARGO_PKG_VERSION"));
-    info!("BAM file: {}", args.bam);
+    info!("Input file: {}", args.input);
     info!("GTF file: {}", args.gtf);
+    if let Some(ref reference) = args.reference {
+        info!("Reference FASTA: {}", reference);
+    }
     info!(
         "Stranded: {}",
         match args.stranded {
@@ -77,15 +92,16 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
     // Step 2: Count reads with featureCounts-compatible logic
     info!("Counting reads across 4 modes...");
     let count_start = Instant::now();
-    let chrom_mapping = config.bam_to_gtf_mapping();
+    let chrom_mapping = config.alignment_to_gtf_mapping();
     let count_result = counting::count_reads(
-        &args.bam,
+        &args.input,
         &genes,
         args.stranded,
         args.paired,
         args.threads,
         &chrom_mapping,
         config.chromosome_prefix(),
+        args.reference.as_deref(),
         args.skip_dup_check,
     )?;
     info!(
@@ -106,11 +122,11 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
     // Step 4: Write duplication matrix
     let outdir = Path::new(&args.outdir);
     std::fs::create_dir_all(outdir)?;
-    let bam_stem = Path::new(&args.bam)
+    let bam_stem = Path::new(&args.input)
         .file_stem()
-        .context("BAM path has no filename")?
+        .context("Input path has no filename")?
         .to_str()
-        .context("BAM filename is not valid UTF-8")?;
+        .context("Input filename is not valid UTF-8")?;
 
     let matrix_path = outdir.join(format!("{}_dupMatrix.txt", bam_stem));
     dup_matrix.write_tsv(&matrix_path)?;

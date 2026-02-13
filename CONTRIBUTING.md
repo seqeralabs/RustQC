@@ -93,7 +93,7 @@ Please open a [GitHub issue](https://github.com/ewels/RustQC/issues) with:
 
 - What you expected to happen
 - What actually happened
-- Steps to reproduce (BAM/GTF files or minimal examples if possible)
+- Steps to reproduce (SAM/BAM/CRAM/GTF files or minimal examples if possible)
 - Your OS and Rust version (`rustc --version`)
 
 ## License

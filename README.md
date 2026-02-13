@@ -12,7 +12,7 @@
 
 **RustQC** is a suite of fast QC tools for sequencing data. Currently it includes the `rna` subcommand — a reimplementation of [dupRadar](https://github.com/ssayols/dupRadar) for assessing PCR duplicate rates in RNA-Seq datasets.
 
-It analyzes duplicate-marked BAM files to compute per-gene duplication rates as a function of expression level. It produces the same outputs as the original **dupRadar** R/Bioconductor package, but runs significantly faster and compiles to a single static binary with no runtime dependencies.
+It analyzes duplicate-marked alignment files (SAM/BAM/CRAM) to compute per-gene duplication rates as a function of expression level. It produces the same outputs as the original **dupRadar** R/Bioconductor package, but runs significantly faster and compiles to a single static binary with no runtime dependencies.
 
 ## Comparison with dupRadar
 
@@ -20,7 +20,7 @@ It analyzes duplicate-marked BAM files to compute per-gene duplication rates as 
 |---------|-------------|--------|
 | Language | R | Rust |
 | Dependencies | R, Bioconductor, Rsubread | None (static binary) |
-| BAM counting | 4 separate featureCounts calls | Single-pass BAM reading |
+| Read counting | 4 separate featureCounts calls | Single-pass alignment reading |
 | Speed | ~24 min for 10 GB BAM | ~1 min for 10 GB BAM (with `--threads 8`) |
 | Memory | High (R overhead) | Low |
 | Output format | Identical | Identical |
@@ -117,14 +117,14 @@ The binary will be at `target/release/rustqc`.
 ## Usage
 
 ```bash
-rustqc rna <BAM> <GTF> [OPTIONS]
+rustqc rna <INPUT> <GTF> [OPTIONS]
 ```
 
 ### Required arguments
 
 | Argument | Description |
 |----------|-------------|
-| `<BAM>` | Path to a duplicate-marked BAM file (sorted, indexed). Duplicates must be flagged (SAM flag 0x400), not removed. |
+| `<INPUT>` | Path to a duplicate-marked alignment file (SAM/BAM/CRAM). Duplicates must be flagged (SAM flag 0x400), not removed. BAM/CRAM files should be sorted and indexed for parallel processing. |
 | `<GTF>` | Path to a GTF gene annotation file (e.g., from Ensembl or UCSC). |
 
 ### Options
@@ -133,8 +133,9 @@ rustqc rna <BAM> <GTF> [OPTIONS]
 |--------|---------|-------------|
 | `--stranded <0\|1\|2>` | `0` | Library strandedness: `0` = unstranded, `1` = stranded (forward), `2` = reverse-stranded |
 | `--paired` | `false` | Set if the library is paired-end |
-| `--threads <N>` | `1` | Number of threads for parallel BAM processing |
+| `--threads <N>` | `1` | Number of threads for parallel alignment processing |
 | `--outdir <DIR>` | `.` | Output directory |
+| `--reference <FASTA>` / `-r` | none | Reference FASTA file (required for CRAM input) |
 | `--config <FILE>` | none | Path to a YAML configuration file (see [Configuration](#configuration)) |
 | `--skip-dup-check` | `false` | Skip verification that duplicates have been marked in the BAM file (see [Duplicate marking](#duplicate-marking)) |
 
@@ -149,13 +150,19 @@ If you are confident that your BAM file has duplicates correctly flagged despite
 ### Example
 
 ```bash
-# Single-end, unstranded
+# Single-end, unstranded (BAM)
 rustqc rna sample.markdup.bam genes.gtf --outdir results/
 
-# Paired-end, reverse-stranded
+# Paired-end, reverse-stranded (BAM)
 rustqc rna sample.markdup.bam genes.gtf --paired --stranded 2 --outdir results/
 
-# With chromosome name mapping (e.g. Ensembl BAM + UCSC GTF)
+# CRAM input with reference FASTA
+rustqc rna sample.markdup.cram genes.gtf --reference genome.fa --outdir results/
+
+# SAM input (single-threaded only, no index)
+rustqc rna sample.markdup.sam genes.gtf --outdir results/
+
+# With chromosome name mapping (e.g. Ensembl alignment + UCSC GTF)
 rustqc rna sample.markdup.bam genes.gtf --paired --config config.yaml --outdir results/
 ```
 
@@ -165,15 +172,15 @@ An optional YAML configuration file can be provided with `--config` to control r
 
 ### Chromosome name mapping
 
-When the BAM and GTF files use different chromosome naming conventions (e.g. Ensembl `1, 2, X` vs. UCSC `chr1, chr2, chrX`), RustQC will detect the mismatch and exit with a helpful error. You can resolve this with either a prefix or explicit mapping.
+When the alignment and GTF files use different chromosome naming conventions (e.g. Ensembl `1, 2, X` vs. UCSC `chr1, chr2, chrX`), RustQC will detect the mismatch and exit with a helpful error. You can resolve this with either a prefix or explicit mapping.
 
-**Prefix** — prepend a string to every BAM chromosome name before matching:
+**Prefix** — prepend a string to every alignment chromosome name before matching:
 
 ```yaml
 chromosome_prefix: "chr"
 ```
 
-**Explicit mapping** — for fine-grained control, map individual GTF names to BAM names:
+**Explicit mapping** — for fine-grained control, map individual GTF names to alignment file names:
 
 ```yaml
 chromosome_mapping:
@@ -188,7 +195,7 @@ Both options can be combined. The prefix is applied first, then explicit mapping
 ### Example config file
 
 ```yaml
-# Prepend "chr" to all BAM chromosome names
+# Prepend "chr" to all alignment chromosome names
 chromosome_prefix: "chr"
 
 # Override the mitochondrial chromosome mapping
@@ -199,7 +206,7 @@ chromosome_mapping:
 
 ## Output files
 
-For an input BAM file named `sample.bam`, the following files are generated:
+For an input file named `sample.bam` (or `sample.cram`, etc.), the following files are generated:
 
 | File | Description |
 |------|-------------|
@@ -232,7 +239,7 @@ For an input BAM file named `sample.bam`, the following files are generated:
 
 ## Performance tuning
 
-RustQC uses multi-threaded BAM processing when `--threads` is set above 1. Chromosomes are distributed across threads and processed in parallel, typically achieving near-linear speedup. For a typical RNA-Seq sample, `--threads 4` is a good starting point.
+RustQC uses multi-threaded alignment processing when `--threads` is set above 1. Chromosomes are distributed across threads and processed in parallel, typically achieving near-linear speedup. For a typical RNA-Seq sample, `--threads 4` is a good starting point. Multi-threading requires an indexed file (`.bai`/`.csi` for BAM, `.crai` for CRAM). SAM files are always processed single-threaded.
 
 For maximum performance when building from source, you can enable CPU-specific optimizations:
 
@@ -263,7 +270,7 @@ Note: PGO profiles are machine-specific and `target-cpu=native` produces non-por
 ## How it works
 
 1. **GTF parsing**: Reads gene annotations and computes effective gene lengths from non-overlapping exon bases.
-2. **BAM counting**: Reads the BAM file once, assigning each read to a gene based on exon overlap. Four count modes are tracked simultaneously:
+2. **Read counting**: Reads the alignment file (SAM/BAM/CRAM) once, assigning each read to a gene based on exon overlap. Four count modes are tracked simultaneously:
    - With/without multimappers x with/without duplicates
 3. **Duplication matrix**: Computes RPK, RPKM, and duplication rates for each gene in all four modes.
 4. **Logistic regression**: Fits a binomial GLM (`dupRate ~ log10(RPK)`) using iteratively reweighted least squares (IRLS) to model the relationship between expression and duplication.
