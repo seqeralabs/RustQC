@@ -16,6 +16,7 @@ mod fitting;
 mod gtf;
 mod infer_experiment;
 mod plots;
+mod read_duplication;
 
 use anyhow::{ensure, Context, Result};
 use indexmap::IndexMap;
@@ -37,6 +38,7 @@ fn main() -> Result<()> {
         cli::Commands::Rna(args) => run_rna(args),
         cli::Commands::BamStat(args) => run_bam_stat(args),
         cli::Commands::InferExperiment(args) => run_infer_experiment(args),
+        cli::Commands::ReadDuplication(args) => run_read_duplication(args),
     }
 }
 
@@ -770,6 +772,44 @@ fn run_infer_experiment(args: cli::InferExperimentArgs) -> Result<()> {
         );
         info!(
             "[{}] infer_experiment completed in {:.2}s",
+            bam_stem,
+            bam_start.elapsed().as_secs_f64()
+        );
+    }
+
+    if args.input.len() > 1 {
+        info!(
+            "All BAM files processed in {:.2}s",
+            start.elapsed().as_secs_f64()
+        );
+    }
+
+    Ok(())
+}
+
+/// Run read duplication analysis for one or more BAM files.
+fn run_read_duplication(args: cli::ReadDuplicationArgs) -> Result<()> {
+    let start = std::time::Instant::now();
+    let outdir = std::path::Path::new(&args.outdir);
+    std::fs::create_dir_all(outdir).context("Failed to create output directory")?;
+
+    for bam_path in &args.input {
+        let bam_start = std::time::Instant::now();
+        let bam_stem = std::path::Path::new(bam_path)
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+
+        info!("[{}] Running read duplication analysis...", bam_stem);
+
+        let result =
+            read_duplication::read_duplication(bam_path, args.mapq_cut, args.reference.as_deref())?;
+
+        read_duplication::write_read_duplication(&result, outdir, &bam_stem)?;
+
+        info!(
+            "[{}] read_duplication completed in {:.2}s",
             bam_stem,
             bam_start.elapsed().as_secs_f64()
         );

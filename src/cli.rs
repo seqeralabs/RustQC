@@ -42,6 +42,12 @@ pub enum Commands {
     /// library is unstranded, forward-stranded, or reverse-stranded.
     /// Output is identical to RSeQC's infer_experiment.py.
     InferExperiment(InferExperimentArgs),
+
+    /// Compute read duplication rates (read_duplication.py equivalent).
+    ///
+    /// Calculates position-based and sequence-based read duplication
+    /// histograms from a BAM/SAM/CRAM file.
+    ReadDuplication(ReadDuplicationArgs),
 }
 
 /// Arguments for the `rna` (dupRadar) subcommand.
@@ -134,6 +140,26 @@ pub struct InferExperimentArgs {
     /// Maximum number of reads to sample (default 200000)
     #[arg(short, long, default_value_t = 200000)]
     pub sample_size: u64,
+
+    /// Output directory for results
+    #[arg(short, long, default_value = ".")]
+    pub outdir: String,
+
+    /// Path to reference FASTA file (required for CRAM input)
+    #[arg(short, long, value_name = "FASTA")]
+    pub reference: Option<String>,
+}
+
+/// Arguments for the `read-duplication` subcommand.
+#[derive(Parser, Debug)]
+pub struct ReadDuplicationArgs {
+    /// Path(s) to alignment file(s) (SAM/BAM/CRAM)
+    #[arg(value_name = "INPUT", num_args = 1.., required = true)]
+    pub input: Vec<String>,
+
+    /// MAPQ cutoff for filtering reads (default 30)
+    #[arg(short = 'q', long = "mapq", default_value_t = 30)]
+    pub mapq_cut: u8,
 
     /// Output directory for results
     #[arg(short, long, default_value = ".")]
