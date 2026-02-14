@@ -59,6 +59,7 @@ export default defineConfig({
             { label: "Combined", slug: "benchmarks/combined" },
             { label: "dupRadar", slug: "benchmarks/dupradar" },
             { label: "featureCounts", slug: "benchmarks/featurecounts" },
+            { label: "RSeQC", slug: "benchmarks/rseqc" },
           ],
         },
         {
