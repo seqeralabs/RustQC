@@ -1192,6 +1192,24 @@ fn run_rseqc_single_pass(
         .map(|tid| String::from_utf8_lossy(header.tid2name(tid)).to_string())
         .collect();
 
+    // Pre-compute resolved chromosome names (apply prefix/mapping like counting.rs)
+    let tid_to_rseqc_chrom: Vec<String> = tid_to_name
+        .iter()
+        .map(|name| {
+            if let Some(mapped) = params.chrom_mapping.get(name.as_str()) {
+                mapped.clone()
+            } else if let Some(prefix) = params.chrom_prefix {
+                format!("{prefix}{name}")
+            } else {
+                name.clone()
+            }
+        })
+        .collect();
+    let tid_to_rseqc_upper: Vec<String> = tid_to_rseqc_chrom
+        .iter()
+        .map(|s| s.to_uppercase())
+        .collect();
+
     let mut record = bam::Record::new();
     while let Some(read_result) = bam.read(&mut record) {
         read_result.context("Error reading BAM record")?;
@@ -1201,9 +1219,16 @@ fn run_rseqc_single_pass(
             accums.process_read(&record, "", "", &annotations, &rseqc_config);
             continue;
         }
-        let chrom = &tid_to_name[tid as usize];
-        let chrom_upper = chrom.to_uppercase();
-        accums.process_read(&record, chrom, &chrom_upper, &annotations, &rseqc_config);
+        let idx = tid as usize;
+        let rseqc_chrom = &tid_to_rseqc_chrom[idx];
+        let rseqc_upper = &tid_to_rseqc_upper[idx];
+        accums.process_read(
+            &record,
+            rseqc_chrom,
+            rseqc_upper,
+            &annotations,
+            &rseqc_config,
+        );
     }
 
     info!(
