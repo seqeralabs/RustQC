@@ -609,7 +609,6 @@ fn process_single_bam(
             params.chrom_prefix,
             params.reference,
             params.skip_dup_check,
-            params.biotype_attribute,
             if any_rseqc_enabled {
                 Some(&rseqc_config)
             } else {

@@ -1,5 +1,5 @@
 Status	GM12878_REP1.markdup.sorted.bam
-Assigned	24430224
+Assigned	23287718
 Unassigned_Unmapped	0
 Unassigned_Read_Type	0
 Unassigned_Singleton	0
@@ -12,4 +12,4 @@ Unassigned_Secondary	0
 Unassigned_NonSplit	0
 Unassigned_NoFeatures	142561718
 Unassigned_Overlapping_Length	0
-Unassigned_Ambiguity	1003408
+Unassigned_Ambiguity	2145914

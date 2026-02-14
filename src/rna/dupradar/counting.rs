@@ -559,15 +559,10 @@ impl ChromResult {
 /// featureCounts with `-p` (no `--countReadPairs`) processes each read
 /// independently. Multi-mapped reads (NH > 1) are categorised as
 /// Unassigned_MultiMapping and excluded from gene assignment.
-/// When multiple genes are hit, resolve at biotype level: if all hits
-/// share the same biotype, the read is Assigned (matching featureCounts
-/// `-g gene_biotype` behaviour where biotype is the meta-feature).
-fn classify_read_fc(
-    is_multi: bool,
-    gene_hits: &[GeneIdx],
-    gene_biotype_ids: &[u16],
-    result: &mut ChromResult,
-) {
+/// When multiple genes are hit, the read is Unassigned_Ambiguity
+/// (matching default featureCounts `-g gene_id` behaviour where each
+/// gene is its own meta-feature).
+fn classify_read_fc(is_multi: bool, gene_hits: &[GeneIdx], result: &mut ChromResult) {
     if is_multi {
         result.fc_multimapping += 1;
     } else if gene_hits.is_empty() {
@@ -579,21 +574,8 @@ fn classify_read_fc(
             result.gene_counts[idx].fc_reads += 1;
         }
     } else {
-        // Multiple gene hits — resolve at biotype level
-        let first_bt = gene_biotype_ids[gene_hits[0] as usize];
-        let same_biotype = gene_hits[1..]
-            .iter()
-            .all(|&g| gene_biotype_ids[g as usize] == first_bt);
-        if same_biotype {
-            // All hits share the same biotype → Assigned
-            result.fc_assigned += 1;
-            let idx = gene_hits[0] as usize;
-            if idx < result.gene_counts.len() {
-                result.gene_counts[idx].fc_reads += 1;
-            }
-        } else {
-            result.fc_ambiguous += 1;
-        }
+        // Multiple gene hits → Ambiguous (default featureCounts behaviour)
+        result.fc_ambiguous += 1;
     }
 }
 
@@ -615,7 +597,6 @@ fn process_chromosome_batch(
     chrom_prefix: Option<&str>,
     global_read_counter: &AtomicU64,
     reference: Option<&str>,
-    gene_biotype_ids: &[u16],
     rseqc_config: Option<&RseqcConfig>,
     rseqc_annotations: Option<&RseqcAnnotations>,
     htslib_threads: usize,
@@ -783,7 +764,7 @@ fn process_chromosome_batch(
             }
 
             // --- Per-read featureCounts counting (independent of mate pairing) ---
-            classify_read_fc(is_multi, &gene_hits, gene_biotype_ids, &mut result);
+            classify_read_fc(is_multi, &gene_hits, &mut result);
 
             // --- Single-end counting ---
             if !paired {
@@ -952,7 +933,6 @@ pub fn count_reads(
     chrom_prefix: Option<&str>,
     reference: Option<&str>,
     skip_dup_check: bool,
-    biotype_attribute: &str,
     rseqc_config: Option<&RseqcConfig>,
     rseqc_annotations: Option<&RseqcAnnotations>,
 ) -> Result<CountResult> {
@@ -1009,26 +989,6 @@ pub fn count_reads(
 
     // Build gene_idx → biotype_id lookup for per-read featureCounts counting.
     // When featureCounts runs with `-g gene_biotype`, exons are grouped by their
-    // biotype value (the "meta-feature"). A read overlapping multiple genes of the
-    // *same* biotype is Assigned (not Ambiguous), because they all belong to the
-    // same meta-feature. We pre-compute a compact mapping so the hot loop avoids
-    // string operations.
-    let gene_biotype_ids: Vec<u16> = {
-        let mut biotype_interner: IndexMap<String, u16> = IndexMap::new();
-        let mut ids = Vec::with_capacity(interner.len());
-        for (_gene_id, gene) in genes.iter() {
-            let biotype = gene
-                .attributes
-                .get(biotype_attribute)
-                .cloned()
-                .unwrap_or_else(|| "unknown".to_string());
-            let next_id = biotype_interner.len() as u16;
-            let bt_id = *biotype_interner.entry(biotype).or_insert(next_id);
-            ids.push(bt_id);
-        }
-        ids
-    };
-
     let (mut merged, merged_rseqc) = if use_parallel {
         // --- Parallel chromosome processing ---
         //
@@ -1083,7 +1043,6 @@ pub fn count_reads(
                         chrom_prefix,
                         &global_read_counter,
                         reference,
-                        &gene_biotype_ids,
                         rseqc_config,
                         rseqc_annotations,
                         htslib_threads,
@@ -1251,7 +1210,7 @@ pub fn count_reads(
             }
 
             // --- Per-read featureCounts counting (independent of mate pairing) ---
-            classify_read_fc(is_multi, &gene_hits, &gene_biotype_ids, &mut result);
+            classify_read_fc(is_multi, &gene_hits, &mut result);
 
             if !paired {
                 result.n_multi_dup += 1;
@@ -1734,10 +1693,9 @@ mod tests {
     #[test]
     fn test_fc_classify_multimapped_read() {
         let mut result = make_test_chrom_result(3);
-        let gene_biotype_ids = vec![0u16, 1, 2];
         let gene_hits: Vec<GeneIdx> = vec![0]; // has a hit, but is_multi=true
 
-        classify_read_fc(true, &gene_hits, &gene_biotype_ids, &mut result);
+        classify_read_fc(true, &gene_hits, &mut result);
 
         assert_eq!(
             result.fc_multimapping, 1,
@@ -1755,10 +1713,9 @@ mod tests {
     #[test]
     fn test_fc_classify_no_gene_hits() {
         let mut result = make_test_chrom_result(3);
-        let gene_biotype_ids = vec![0u16, 1, 2];
         let gene_hits: Vec<GeneIdx> = vec![];
 
-        classify_read_fc(false, &gene_hits, &gene_biotype_ids, &mut result);
+        classify_read_fc(false, &gene_hits, &mut result);
 
         assert_eq!(
             result.fc_no_features, 1,
@@ -1772,10 +1729,9 @@ mod tests {
     #[test]
     fn test_fc_classify_single_gene_hit() {
         let mut result = make_test_chrom_result(3);
-        let gene_biotype_ids = vec![0u16, 1, 2];
         let gene_hits: Vec<GeneIdx> = vec![1];
 
-        classify_read_fc(false, &gene_hits, &gene_biotype_ids, &mut result);
+        classify_read_fc(false, &gene_hits, &mut result);
 
         assert_eq!(
             result.fc_assigned, 1,
@@ -1792,42 +1748,16 @@ mod tests {
     }
 
     #[test]
-    fn test_fc_classify_multi_gene_same_biotype() {
-        // Two genes with same biotype → Assigned (biotype-level resolution)
+    fn test_fc_classify_multi_gene_hits_ambiguous() {
+        // Two genes hit → always Ambiguous (matching featureCounts -g gene_id)
         let mut result = make_test_chrom_result(4);
-        // Genes 0,1 have biotype 0; genes 2,3 have biotype 1
-        let gene_biotype_ids = vec![0u16, 0, 1, 1];
-        let gene_hits: Vec<GeneIdx> = vec![0, 1]; // two genes, same biotype
+        let gene_hits: Vec<GeneIdx> = vec![0, 1];
 
-        classify_read_fc(false, &gene_hits, &gene_biotype_ids, &mut result);
-
-        assert_eq!(
-            result.fc_assigned, 1,
-            "Multi-gene same biotype should be fc_assigned"
-        );
-        assert_eq!(
-            result.fc_ambiguous, 0,
-            "Multi-gene same biotype should NOT be ambiguous"
-        );
-        assert_eq!(
-            result.gene_counts[0].fc_reads, 1,
-            "First gene in sorted hits gets the credit"
-        );
-        assert_eq!(result.gene_counts[1].fc_reads, 0);
-    }
-
-    #[test]
-    fn test_fc_classify_multi_gene_different_biotypes() {
-        // Two genes with different biotypes → Ambiguous
-        let mut result = make_test_chrom_result(3);
-        let gene_biotype_ids = vec![0u16, 1, 2];
-        let gene_hits: Vec<GeneIdx> = vec![0, 1]; // two genes, different biotypes
-
-        classify_read_fc(false, &gene_hits, &gene_biotype_ids, &mut result);
+        classify_read_fc(false, &gene_hits, &mut result);
 
         assert_eq!(
             result.fc_ambiguous, 1,
-            "Multi-gene different biotypes should be fc_ambiguous"
+            "Multi-gene hits should be fc_ambiguous"
         );
         assert_eq!(result.fc_assigned, 0);
         assert_eq!(
@@ -1838,37 +1768,16 @@ mod tests {
     }
 
     #[test]
-    fn test_fc_classify_three_genes_same_biotype() {
-        // Three genes all with the same biotype → Assigned
+    fn test_fc_classify_three_gene_hits_ambiguous() {
+        // Three genes hit → Ambiguous
         let mut result = make_test_chrom_result(5);
-        let gene_biotype_ids = vec![0u16, 0, 0, 1, 1];
         let gene_hits: Vec<GeneIdx> = vec![0, 1, 2];
 
-        classify_read_fc(false, &gene_hits, &gene_biotype_ids, &mut result);
-
-        assert_eq!(
-            result.fc_assigned, 1,
-            "Three genes same biotype should be fc_assigned"
-        );
-        assert_eq!(result.fc_ambiguous, 0);
-        assert_eq!(
-            result.gene_counts[0].fc_reads, 1,
-            "First gene gets the credit"
-        );
-    }
-
-    #[test]
-    fn test_fc_classify_three_genes_mixed_biotypes() {
-        // Three genes: two same biotype, one different → Ambiguous
-        let mut result = make_test_chrom_result(5);
-        let gene_biotype_ids = vec![0u16, 0, 1, 1, 2];
-        let gene_hits: Vec<GeneIdx> = vec![0, 1, 2]; // biotypes 0, 0, 1
-
-        classify_read_fc(false, &gene_hits, &gene_biotype_ids, &mut result);
+        classify_read_fc(false, &gene_hits, &mut result);
 
         assert_eq!(
             result.fc_ambiguous, 1,
-            "Mixed biotypes should be fc_ambiguous"
+            "Three-gene hits should be fc_ambiguous"
         );
         assert_eq!(result.fc_assigned, 0);
         assert_eq!(result.gene_counts[0].fc_reads, 0);
@@ -1880,18 +1789,17 @@ mod tests {
     fn test_fc_classify_cumulative_counts() {
         // Verify that calling classify_read_fc multiple times accumulates counts
         let mut result = make_test_chrom_result(3);
-        let gene_biotype_ids = vec![0u16, 1, 2];
 
         // First call: single hit to gene 0
-        classify_read_fc(false, &[0], &gene_biotype_ids, &mut result);
+        classify_read_fc(false, &[0], &mut result);
         // Second call: single hit to gene 0 again
-        classify_read_fc(false, &[0], &gene_biotype_ids, &mut result);
+        classify_read_fc(false, &[0], &mut result);
         // Third call: multi-mapped
-        classify_read_fc(true, &[0], &gene_biotype_ids, &mut result);
+        classify_read_fc(true, &[0], &mut result);
         // Fourth call: no features
-        classify_read_fc(false, &[], &gene_biotype_ids, &mut result);
-        // Fifth call: ambiguous (different biotypes)
-        classify_read_fc(false, &[0, 1], &gene_biotype_ids, &mut result);
+        classify_read_fc(false, &[], &mut result);
+        // Fifth call: ambiguous (multiple genes)
+        classify_read_fc(false, &[0, 1], &mut result);
 
         assert_eq!(result.fc_assigned, 2);
         assert_eq!(result.fc_multimapping, 1);

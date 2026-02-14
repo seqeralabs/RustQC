@@ -1,9 +1,9 @@
 Biotype	Count
-protein_coding	42331
-pseudogene	124
+protein_coding	39736
 processed_transcript	116
+pseudogene	104
 antisense	64
-lincRNA	49
+lincRNA	48
 sense_overlapping	30
 misc_RNA	4
 snRNA	3
