@@ -49,11 +49,11 @@ Seven reimplementations of [RSeQC](https://rseqc.sourceforge.net/) tools, all in
 |------|-------------|
 | bam_stat | Basic BAM alignment statistics (total reads, duplicates, mapping quality, etc.) |
 | infer_experiment | Infer library strandedness from read/gene-model strand concordance |
-| read_duplication | Position-based and sequence-based read duplication histograms |
+| read_duplication | Position-based and sequence-based read duplication histograms with plots |
 | read_distribution | Classify reads across genomic features (CDS, UTR, intron, intergenic) |
-| junction_annotation | Classify splice junctions as known, partial novel, or complete novel |
-| junction_saturation | Assess saturation of splice junction detection at increasing read depths |
-| inner_distance | Compute inner distance between paired-end read mates |
+| junction_annotation | Classify splice junctions as known, partial novel, or complete novel, with pie chart plots |
+| junction_saturation | Assess saturation of splice junction detection at increasing read depths, with plot |
+| inner_distance | Compute inner distance between paired-end read mates, with histogram plot |
 
 When a GTF file is provided via `--gtf`, all 7 tools run automatically — transcript-level structure is extracted from the GTF. Alternatively, a BED12 gene model file can be provided via `--bed` (mutually exclusive with `--gtf`), which runs only the RSeQC tools. Individual tools can be disabled via the YAML configuration file.
 

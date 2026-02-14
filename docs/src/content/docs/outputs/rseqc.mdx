@@ -3,9 +3,12 @@ title: RSeQC Outputs
 description: Output files produced by RustQC's RSeQC-compatible quality control tools.
 ---
 
+import { Card, CardGrid, FileTree } from '@astrojs/starlight/components';
+
 RustQC reimplements seven tools from the [RSeQC](https://rseqc.sourceforge.net/)
 package. Each tool produces output files that match the format and content of the
-original Python implementation.
+original Python implementation, plus **native PNG and SVG plots** generated
+directly -- no R scripts required.
 
 All RSeQC tools run automatically as part of the `rustqc rna` command and use
 the input filename stem as a prefix for output files. For example,
@@ -60,8 +63,10 @@ Position-based and sequence-based duplication rate histograms.
 |------|-------------|
 | `{stem}.pos.DupRate.xls` | Position-based duplication histogram (TSV: Occurrence, UniqReadNumber, ReadNumber) |
 | `{stem}.seq.DupRate.xls` | Sequence-based duplication histogram (TSV: Occurrence, UniqReadNumber, ReadNumber) |
+| `{stem}.DupRate_plot.png` | Duplication rate plot (PNG) |
+| `{stem}.DupRate_plot.svg` | Duplication rate plot (SVG) |
 
-Each file is a tab-separated table where each row represents a duplication
+Each TSV file is a tab-separated table where each row represents a duplication
 level (number of times a read was seen). The columns are:
 
 - **Occurrence** -- the duplication count (1 = unique, 2 = seen twice, etc.)
@@ -71,6 +76,20 @@ level (number of times a read was seen). The columns are:
 Position-based deduplication groups reads by alignment position (chromosome,
 start, CIGAR-derived exon blocks). Sequence-based deduplication groups reads by
 the actual read sequence.
+
+### Plot files
+
+The duplication rate plot shows two curves: **sequence-based** (blue) and
+**position-based** (red) duplication. The x-axis shows the occurrence count
+(capped at 500) and the y-axis shows the number of reads at each duplication
+level. Most reads should appear at low occurrence counts; a long tail indicates
+high duplication.
+
+<CardGrid>
+  <Card title="Duplication rate">
+    <img src="/RustQC/examples/rseqc/read_duplication.png" alt="Read duplication rate plot" />
+  </Card>
+</CardGrid>
 
 ## read_distribution
 
@@ -96,6 +115,10 @@ Splice junction classification against a reference gene model.
 | `{stem}.junction.xls` | TSV with all observed junctions: chrom, intron_start(0-based), intron_end(1-based), read_count, annotation_status |
 | `{stem}.junction.bed` | BED12 file with color-coded junctions (red = known, green = partial novel, blue = complete novel) |
 | `{stem}.junction_plot.r` | R script for generating splice event and junction pie charts |
+| `{stem}.splice_events.png` | Splice events pie chart (PNG) |
+| `{stem}.splice_events.svg` | Splice events pie chart (SVG) |
+| `{stem}.splice_junction.png` | Splice junctions pie chart (PNG) |
+| `{stem}.splice_junction.svg` | Splice junctions pie chart (SVG) |
 | `{stem}.junction_annotation.txt` | Summary: total/known/partial novel/complete novel event and junction counts |
 
 Junctions are classified by comparing splice sites (CIGAR N-operations)
@@ -105,6 +128,21 @@ against the reference BED12 gene model:
 - **Partial novel** -- one splice site matches, the other is novel
 - **Complete novel** -- neither splice site matches any known intron
 
+### Plot files
+
+Two pie charts are generated, one for splice **events** (reads) and one for
+splice **junctions** (unique splice sites). Each chart shows the proportion of
+known (blue), partial novel (red), and complete novel (green) splicing.
+
+<CardGrid>
+  <Card title="Splice events">
+    <img src="/RustQC/examples/rseqc/splice_events.png" alt="Splice events pie chart" />
+  </Card>
+  <Card title="Splice junctions">
+    <img src="/RustQC/examples/rseqc/splice_junction.png" alt="Splice junctions pie chart" />
+  </Card>
+</CardGrid>
+
 ## junction_saturation
 
 Splice junction discovery rate at increasing sequencing depths.
@@ -112,6 +150,8 @@ Splice junction discovery rate at increasing sequencing depths.
 | File | Description |
 |------|-------------|
 | `{stem}.junctionSaturation_plot.r` | R script for saturation curve plots |
+| `{stem}.junctionSaturation_plot.png` | Junction saturation plot (PNG) |
+| `{stem}.junctionSaturation_plot.svg` | Junction saturation plot (SVG) |
 | `{stem}.junctionSaturation_summary.txt` | TSV: percent_of_reads, known_junctions, novel_junctions, all_junctions |
 
 The tool subsamples reads at configurable percentages (default: 5%, 10%, ...,
@@ -120,7 +160,20 @@ level. This reveals whether sequencing depth is sufficient for comprehensive
 junction detection. A saturated library will show a plateau in the curve; an
 unsaturated library will show continuing growth.
 
-## inner-distance
+### Plot files
+
+The junction saturation plot shows three lines: **all junctions** (blue),
+**known junctions** (red), and **novel junctions** (green). The x-axis is the
+percentage of total reads used and the y-axis is the number of splice junctions
+detected (in thousands). A plateau in the curves indicates saturation.
+
+<CardGrid>
+  <Card title="Junction saturation">
+    <img src="/RustQC/examples/rseqc/junction_saturation.png" alt="Junction saturation plot" />
+  </Card>
+</CardGrid>
+
+## inner_distance
 
 Fragment inner distance for paired-end RNA-seq libraries.
 
@@ -129,6 +182,8 @@ Fragment inner distance for paired-end RNA-seq libraries.
 | `{stem}.inner_distance.txt` | Per-pair detail: readpair_name, inner_distance, classification |
 | `{stem}.inner_distance_freq.txt` | Histogram: lower_bound, upper_bound, count |
 | `{stem}.inner_distance_plot.r` | R script for histogram and density plot |
+| `{stem}.inner_distance_plot.png` | Inner distance histogram with density overlay (PNG) |
+| `{stem}.inner_distance_plot.svg` | Inner distance histogram with density overlay (SVG) |
 | `{stem}.inner_distance_summary.txt` | Summary counts by pair classification |
 
 The inner distance is defined as the gap between the end of read 1 and the
@@ -146,10 +201,27 @@ Pairs are classified as:
 The histogram bins are configurable via `--inner-distance-lower-bound`,
 `--inner-distance-upper-bound`, and `--inner-distance-step` (defaults: -250 to 250, step 5).
 
+### Plot files
+
+The inner distance plot is a histogram showing the distribution of fragment
+inner distances, with a Gaussian density curve (red) overlaid. The title
+displays the mean and standard deviation. The distribution should be
+approximately normal for a well-prepared library.
+
+<CardGrid>
+  <Card title="Inner distance">
+    <img src="/RustQC/examples/rseqc/inner_distance.png" alt="Inner distance histogram" />
+  </Card>
+</CardGrid>
+
 ## Compatibility with RSeQC
 
 All output files are designed to be drop-in replacements for the corresponding
-RSeQC Python tool output. The generated R scripts produce identical plots when
-executed. File formats, column names, and numeric precision match the Python
-originals to facilitate migration from RSeQC to RustQC without downstream
-pipeline changes.
+RSeQC Python tool output. File formats, column names, and numeric precision
+match the Python originals to facilitate migration from RSeQC to RustQC without
+downstream pipeline changes.
+
+RustQC also generates the R scripts that RSeQC produces (for junction_annotation,
+junction_saturation, and inner_distance), maintaining full compatibility. However,
+unlike RSeQC, **RustQC generates the plots directly** as PNG and SVG files -- there
+is no need to run the R scripts separately.

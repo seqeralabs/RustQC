@@ -38,6 +38,11 @@ After running, you will find in the output directory:
 | `sample.markdup_expressionHist.png` | Expression histogram |
 | `sample.markdup.featureCounts.tsv` | Gene-level read counts |
 | `sample.markdup.featureCounts.tsv.summary` | Counting summary statistics |
+| `sample.markdup.DupRate_plot.png` | Read duplication rate plot |
+| `sample.markdup.splice_events.png` | Splice events pie chart |
+| `sample.markdup.splice_junction.png` | Splice junctions pie chart |
+| `sample.markdup.junctionSaturation_plot.png` | Junction saturation plot |
+| `sample.markdup.inner_distance_plot.png` | Inner distance histogram |
 
 Plus SVG versions of all plots, biotype count tables, and MultiQC-compatible report files.
 See [dupRadar Outputs](/outputs/dupradar/), [featureCounts Outputs](/outputs/featurecounts/), and [RSeQC Outputs](/outputs/rseqc/) for full details.
