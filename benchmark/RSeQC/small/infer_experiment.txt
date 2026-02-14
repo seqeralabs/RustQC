@@ -1,5 +1,4 @@
-WARNING: The requested image's platform (linux/amd64) does not match the detected host platform (linux/arm64/v8) and no specific platform was requested
-Reading reference gene model /data/chr6.bed ... Done
+Reading reference gene model /data/input.bed ... Done
 Loading SAM/BAM file ...  Finished
 Total 41215 usable reads were sampled
 

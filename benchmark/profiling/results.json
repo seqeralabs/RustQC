@@ -1,0 +1,142 @@
+[
+  {
+    "tool": "dupRadar",
+    "wall_seconds": 6.67,
+    "wall_formatted": "7s",
+    "peak_rss_mb": 33.4,
+    "dataset": "small"
+  },
+  {
+    "tool": "featureCounts",
+    "wall_seconds": 2.47,
+    "wall_formatted": "2s",
+    "peak_rss_mb": 33.1,
+    "dataset": "small"
+  },
+  {
+    "tool": "bam_stat",
+    "wall_seconds": 2.47,
+    "wall_formatted": "2s",
+    "peak_rss_mb": 33.0,
+    "dataset": "small"
+  },
+  {
+    "tool": "infer_experiment",
+    "wall_seconds": 2.46,
+    "wall_formatted": "2s",
+    "peak_rss_mb": 32.9,
+    "dataset": "small"
+  },
+  {
+    "tool": "read_duplication",
+    "wall_seconds": 3.46,
+    "wall_formatted": "3s",
+    "peak_rss_mb": 33.0,
+    "dataset": "small"
+  },
+  {
+    "tool": "read_distribution",
+    "wall_seconds": 3.45,
+    "wall_formatted": "3s",
+    "peak_rss_mb": 33.1,
+    "dataset": "small"
+  },
+  {
+    "tool": "junction_annotation",
+    "wall_seconds": 3.46,
+    "wall_formatted": "3s",
+    "peak_rss_mb": 33.2,
+    "dataset": "small"
+  },
+  {
+    "tool": "junction_saturation",
+    "wall_seconds": 3.59,
+    "wall_formatted": "4s",
+    "peak_rss_mb": 32.6,
+    "dataset": "small"
+  },
+  {
+    "tool": "inner_distance",
+    "wall_seconds": 4.47,
+    "wall_formatted": "4s",
+    "peak_rss_mb": 32.9,
+    "dataset": "small"
+  },
+  {
+    "tool": "RustQC",
+    "wall_seconds": 2.46,
+    "wall_formatted": "2s",
+    "peak_rss_mb": 100.4,
+    "dataset": "small"
+  },
+  {
+    "tool": "dupRadar",
+    "wall_seconds": 1641.14,
+    "wall_formatted": "27m 21s",
+    "peak_rss_mb": 33.1,
+    "dataset": "large"
+  },
+  {
+    "tool": "featureCounts",
+    "wall_seconds": 219.37,
+    "wall_formatted": "3m 39s",
+    "peak_rss_mb": 32.8,
+    "dataset": "large"
+  },
+  {
+    "tool": "bam_stat",
+    "wall_seconds": 367.06,
+    "wall_formatted": "6m 07s",
+    "peak_rss_mb": 33.1,
+    "dataset": "large"
+  },
+  {
+    "tool": "infer_experiment",
+    "wall_seconds": 6.83,
+    "wall_formatted": "7s",
+    "peak_rss_mb": 34.3,
+    "dataset": "large"
+  },
+  {
+    "tool": "read_duplication",
+    "wall_seconds": 1783.4,
+    "wall_formatted": "29m 43s",
+    "peak_rss_mb": 30.7,
+    "dataset": "large"
+  },
+  {
+    "tool": "read_distribution",
+    "wall_seconds": 360.53,
+    "wall_formatted": "6m",
+    "peak_rss_mb": 33.9,
+    "dataset": "large"
+  },
+  {
+    "tool": "junction_annotation",
+    "wall_seconds": 277.48,
+    "wall_formatted": "4m 37s",
+    "peak_rss_mb": 32.9,
+    "dataset": "large"
+  },
+  {
+    "tool": "junction_saturation",
+    "wall_seconds": 392.82,
+    "wall_formatted": "6m 32s",
+    "peak_rss_mb": 32.8,
+    "dataset": "large"
+  },
+  {
+    "tool": "inner_distance",
+    "wall_seconds": 69.41,
+    "wall_formatted": "1m 09s",
+    "peak_rss_mb": 33.1,
+    "dataset": "large"
+  },
+  {
+    "tool": "RustQC",
+    "wall_seconds": 971.54,
+    "wall_formatted": "16m 11s",
+    "peak_rss_mb": 6073.0,
+    "dataset": "large"
+  }
+]

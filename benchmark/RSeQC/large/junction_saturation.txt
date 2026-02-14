@@ -1,0 +1,23 @@
+reading reference bed file:  /data/input.bed  ...  Done! Total 344384 known splicing junctions.
+Load BAM file ...  Done
+shuffling alignments ... Done
+sampling 5% (652212) splicing reads. 109536 splicing junctions. 99222 known splicing junctions. 10314 novel splicing junctions.
+sampling 10% (1304424) splicing reads. 134377 splicing junctions. 116161 known splicing junctions. 18216 novel splicing junctions.
+sampling 15% (1956636) splicing reads. 150108 splicing junctions. 124997 known splicing junctions. 25111 novel splicing junctions.
+sampling 20% (2608848) splicing reads. 162040 splicing junctions. 131000 known splicing junctions. 31040 novel splicing junctions.
+sampling 25% (3261060) splicing reads. 172176 splicing junctions. 135546 known splicing junctions. 36630 novel splicing junctions.
+sampling 30% (3913272) splicing reads. 180897 splicing junctions. 139167 known splicing junctions. 41730 novel splicing junctions.
+sampling 35% (4565484) splicing reads. 188908 splicing junctions. 142317 known splicing junctions. 46591 novel splicing junctions.
+sampling 40% (5217696) splicing reads. 196234 splicing junctions. 145095 known splicing junctions. 51139 novel splicing junctions.
+sampling 45% (5869908) splicing reads. 202880 splicing junctions. 147464 known splicing junctions. 55416 novel splicing junctions.
+sampling 50% (6522120) splicing reads. 208967 splicing junctions. 149514 known splicing junctions. 59453 novel splicing junctions.
+sampling 55% (7174332) splicing reads. 214878 splicing junctions. 151475 known splicing junctions. 63403 novel splicing junctions.
+sampling 60% (7826544) splicing reads. 220407 splicing junctions. 153201 known splicing junctions. 67206 novel splicing junctions.
+sampling 65% (8478756) splicing reads. 225638 splicing junctions. 154815 known splicing junctions. 70823 novel splicing junctions.
+sampling 70% (9130968) splicing reads. 230665 splicing junctions. 156370 known splicing junctions. 74295 novel splicing junctions.
+sampling 75% (9783180) splicing reads. 235433 splicing junctions. 157758 known splicing junctions. 77675 novel splicing junctions.
+sampling 80% (10435392) splicing reads. 239944 splicing junctions. 159069 known splicing junctions. 80875 novel splicing junctions.
+sampling 85% (11087604) splicing reads. 244384 splicing junctions. 160347 known splicing junctions. 84037 novel splicing junctions.
+sampling 90% (11739816) splicing reads. 248560 splicing junctions. 161533 known splicing junctions. 87027 novel splicing junctions.
+sampling 95% (12392028) splicing reads. 252573 splicing junctions. 162623 known splicing junctions. 89950 novel splicing junctions.
+sampling 100% (13044240) splicing reads. 256466 splicing junctions. 163710 known splicing junctions. 92756 novel splicing junctions.

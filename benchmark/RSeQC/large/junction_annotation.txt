@@ -1,0 +1,18 @@
+Reading reference bed file:  /data/input.bed  ...  Done
+Load BAM file ...  Done
+
+===================================================================
+Total splicing  Events:	13065665
+Known Splicing Events:	12805967
+Partial Novel Splicing Events:	146659
+Novel Splicing Events:	91614
+Filtered Splicing Events:	21425
+
+Total splicing  Junctions:	256466
+Known Splicing Junctions:	178797
+Partial Novel Splicing Junctions:	50936
+Novel Splicing Junctions:	26733
+
+===================================================================
+Create BED file ...
+Create Interact file ...

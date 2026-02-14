@@ -1,4 +1,4 @@
-track type=interact name="Splice junctions" description="Splice junctions detected from /data/test.bam" maxHeightPixels=200:200:50 visibility=full
+track type=interact name="Splice junctions" description="Splice junctions detected from /data/input.bam" maxHeightPixels=200:200:50 visibility=full
 6	181858	311924	6:181858-311924_complete_novel	1	1.0	RNAseq_junction	0,0,205	6	181858	181859	6:181858-181859	.	6	311923	311924	6:311923-311924	.
 6	311961	335114	6:311961-335114_annotated	1	1.0	RNAseq_junction	205,0,0	6	311961	311962	6:311961-311962	.	6	335113	335114	6:335113-335114	.
 6	335162	345854	6:335162-345854_annotated	1	1.0	RNAseq_junction	205,0,0	6	335162	335163	6:335162-335163	.	6	345853	345854	6:345853-345854	.

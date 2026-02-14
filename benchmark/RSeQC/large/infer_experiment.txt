@@ -1,4 +1,4 @@
-Reading reference gene model /data/genes.bed ... Done
+Reading reference gene model /data/input.bed ... Done
 Loading SAM/BAM file ...  Total 200000 usable reads were sampled
 
 

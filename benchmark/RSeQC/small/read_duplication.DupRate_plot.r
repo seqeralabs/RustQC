@@ -1,4 +1,4 @@
-pdf('/out/read_duplication.DupRate_plot.pdf')
+pdf('/data/output/read_duplication.DupRate_plot.pdf')
 par(mar=c(5,4,4,5),las=0)
 seq_occ=c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,19,20,21,22,23,25,28,32,37,39,43,48,60,70,72,102)
 seq_uniqRead=c(37943,1844,492,200,111,66,46,32,17,14,15,10,11,5,3,5,6,3,4,4,3,2,1,1,1,1,1,1,1,1,1,1,1)

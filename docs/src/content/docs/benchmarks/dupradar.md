@@ -1,6 +1,6 @@
 ---
 title: dupRadar Benchmark
-description: Performance comparison between RustQC and R dupRadar, demonstrating up to 33x speedup with zero output mismatches across all values.
+description: Performance comparison between RustQC and R dupRadar, with zero output mismatches across all values.
 ---
 
 RustQC produces output **identical** to the R dupRadar package. Every value in the duplication matrix, every count, and the fitted model parameters match exactly. The benchmarks below quantify the performance difference on real RNA-seq data.
@@ -38,12 +38,12 @@ RustQC produces output **identical** to the R dupRadar package. Every value in t
 
 | Tool | Runtime | Max RSS |
 |------|---------|---------|
-| R dupRadar | 29m 56s | N/A (Docker) |
-| RustQC (1 thread) | 3m 16s | 503 MB |
-| RustQC (8 threads) | 1m 03s | 893 MB |
-| RustQC (10 threads) | 0m 54s | 1.3 GB |
+| R dupRadar | 27m 21s | N/A (Docker) |
+| RustQC (10 threads) | 16m 11s | 6.1 GB |
 
-Speedup: **~9x** with 1 thread, **~28x** with 8 threads, **~33x** with 10 threads.
+Note: RustQC now runs dupRadar, featureCounts, and all 7 RSeQC tools in a single
+pass, so its runtime reflects the full combined workload. R dupRadar timings are
+from Docker with x86 emulation on ARM Mac.
 
 ### Results comparison (large)
 

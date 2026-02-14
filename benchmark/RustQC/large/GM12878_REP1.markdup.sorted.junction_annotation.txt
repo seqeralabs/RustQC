@@ -1,0 +1,13 @@
+===================================================================
+Total splicing  Events:	13065665
+Known Splicing Events:	0
+Partial Novel Splicing Events:	0
+Novel Splicing Events:	13044240
+Filtered Splicing Events:	21425
+
+Total splicing  Junctions:	256466
+Known Splicing Junctions:	0
+Partial Novel Splicing Junctions:	0
+Novel Splicing Junctions:	256466
+
+===================================================================

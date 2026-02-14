@@ -1,0 +1,5 @@
+
+This is PairEnd Data
+Fraction of reads failed to determine: 0.0775
+Fraction of reads explained by "1++,1--,2+-,2-+": 0.0051
+Fraction of reads explained by "1+-,1-+,2++,2--": 0.9174

@@ -1,0 +1,8 @@
+pdf("/Users/ewels/GitHub/ewels/RustQC/benchmark/RustQC/small/test.splice_events.pdf")
+events=c(0.708,2.790,96.502)
+pie(events,col=c(2,3,4),init.angle=30,angle=c(60,120,150),density=c(70,70,70),main="splicing events",labels=c("partial_novel 1%","complete_novel 3%","known 97%"))
+dev.off()
+pdf("/Users/ewels/GitHub/ewels/RustQC/benchmark/RustQC/small/test.splice_junction.pdf")
+junction=c(2.699,5.857,91.444)
+pie(junction,col=c(2,3,4),init.angle=30,angle=c(60,120,150),density=c(70,70,70),main="splicing junctions",labels=c("partial_novel 3%","complete_novel 6%","known 91%"))
+dev.off()

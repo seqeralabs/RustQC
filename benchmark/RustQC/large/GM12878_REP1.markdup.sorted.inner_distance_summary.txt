@@ -1,0 +1,9 @@
+Total read pairs: 1000001
+Different chromosome: 0
+Different transcript: 1000000
+Same exon (mRNA distance): 0
+Different exon (mRNA distance): 0
+Non-exonic (genomic distance): 0
+Unknown chromosome: 0
+Read pair overlap: 0
+Mean inner distance: 28.15

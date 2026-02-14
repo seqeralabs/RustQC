@@ -1,5 +1,5 @@
-processing /data/genes.bed ... Done
-processing /data/GM12878_REP1.markdup.sorted.bam ... Finished
+processing /data/input.bed ... Done
+processing /data/input.bam ... Finished
 
 Total Reads                   41185202
 Total Tags                    55374023

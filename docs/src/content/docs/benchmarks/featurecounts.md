@@ -15,11 +15,13 @@ aligned to GRCh38 (63,086 genes).
 
 | Tool | Runtime |
 |------|---------|
-| Rsubread featureCounts | 16m 26s |
-| RustQC | 0m 54s |
+| Rsubread featureCounts | 3m 39s |
+| RustQC (all tools, single pass) | 16m 11s |
 
-RustQC is **~18x faster** than standalone Rsubread featureCounts for gene-level
-read counting on this dataset.
+RustQC's single pass includes featureCounts-compatible counting alongside
+dupRadar duplication analysis and all 7 RSeQC tools. The traditional workflow
+requires running each tool separately. Standalone featureCounts timing is from
+Docker with x86 emulation on ARM Mac.
 
 ## Output equivalence
 

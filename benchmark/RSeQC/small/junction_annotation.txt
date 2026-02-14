@@ -1,5 +1,4 @@
-WARNING: The requested image's platform (linux/amd64) does not match the detected host platform (linux/arm64/v8) and no specific platform was requested
-Reading reference bed file:  /data/chr6.bed  ...  Done
+Reading reference bed file:  /data/input.bed  ...  Done
 Load BAM file ...  Done
 
 ===================================================================
@@ -15,10 +14,5 @@ Partial Novel Splicing Junctions:	88
 Novel Splicing Junctions:	191
 
 ===================================================================
-null device 
-          1 
-null device 
-          1 
 Create BED file ...
 Create Interact file ...
-total = 23448

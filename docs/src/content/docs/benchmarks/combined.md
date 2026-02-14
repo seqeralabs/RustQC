@@ -16,19 +16,29 @@ outputs together.
 **Large benchmark input:** GM12878 REP1 -- a 10 GB paired-end RNA-seq BAM aligned
 to GRCh38 (63,086 genes).
 
-| Step | Traditional R workflow | RustQC |
-|------|----------------------:|-------:|
-| Read counting (featureCounts) | 16m 26s | -- |
-| Duplication analysis (dupRadar) | 29m 56s | -- |
+| Step | Traditional workflow | RustQC |
+|------|--------------------:|-------:|
+| Read counting (featureCounts) | 3m 39s | -- |
+| Duplication analysis (dupRadar) | 27m 21s | -- |
+| bam_stat (RSeQC) | 6m 07s | -- |
+| infer_experiment (RSeQC) | 7s | -- |
+| read_duplication (RSeQC) | 29m 43s | -- |
+| read_distribution (RSeQC) | 6m 00s | -- |
+| junction_annotation (RSeQC) | 4m 37s | -- |
+| junction_saturation (RSeQC) | 6m 32s | -- |
+| inner_distance (RSeQC) | 1m 09s | -- |
 | Biotype summaries | Additional scripting | -- |
-| **All outputs, single pass** | -- | **0m 54s** |
-| **Total** | **46m 22s** | **0m 54s** |
+| **All outputs, single pass** | -- | **16m 11s** |
+| **Total** | **~1h 25m** | **16m 11s** |
 
 RustQC produces all outputs -- dupRadar duplication matrix, model fit, plots,
 featureCounts-compatible counts, assignment summary, biotype counts, RSeQC-equivalent
 metrics (bam_stat, infer_experiment, read_duplication, read_distribution,
 junction_annotation, junction_saturation, inner_distance), and MultiQC
 files -- in a single pass over the BAM file.
+
+The traditional workflow requires 9 separate tool invocations, each reading
+the BAM file independently. RustQC replaces all of them with a single command.
 
 ## Where the speedup comes from
 

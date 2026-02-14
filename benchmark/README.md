@@ -8,8 +8,32 @@ Benchmark data and scripts for comparing RustQC against
 For detailed results, tables, and side-by-side plot comparisons, see the
 documentation:
 
+- [Combined benchmarks](https://ewels.github.io/RustQC/benchmarks/combined/)
 - [dupRadar benchmarks](https://ewels.github.io/RustQC/benchmarks/dupradar/)
 - [featureCounts benchmarks](https://ewels.github.io/RustQC/benchmarks/featurecounts/)
+
+## Latest results (large dataset)
+
+Run via `python3 benchmark/run_benchmarks.py --all` on a 10-core Apple Silicon
+Mac. Upstream tools run via Docker with x86 emulation; RustQC runs natively.
+
+| Tool | Wall time |
+|------|----------:|
+| dupRadar (R) | 27m 21s |
+| featureCounts (Subread) | 3m 39s |
+| bam_stat (RSeQC) | 6m 07s |
+| infer_experiment (RSeQC) | 7s |
+| read_duplication (RSeQC) | 29m 43s |
+| read_distribution (RSeQC) | 6m 00s |
+| junction_annotation (RSeQC) | 4m 37s |
+| junction_saturation (RSeQC) | 6m 32s |
+| inner_distance (RSeQC) | 1m 09s |
+| **Traditional total** | **1h 25m** |
+| **RustQC (10 threads)** | **16m 11s** |
+
+> **Note:** Docker x86 emulation on ARM inflates the upstream tool timings.
+> The key takeaway is that RustQC replaces 9 separate tool invocations
+> (each requiring a full BAM pass) with a single command and single BAM pass.
 
 ## Directory structure
 
@@ -86,7 +110,29 @@ pending):
 | `junction_saturation` | 256,466 junctions at 100% (163,710 known, 92,756 novel) |
 | `inner_distance` | 1,000,000 pairs sampled (mean 29.43, median 27.5, SD 32.80) |
 
-## Reproducing benchmarks
+## Running benchmarks
+
+The simplest way to run benchmarks is with the included script:
+
+```bash
+# Run everything (requires Docker for upstream tools)
+python3 benchmark/run_benchmarks.py --all
+
+# Run only specific tools
+python3 benchmark/run_benchmarks.py --rustqc --dupradar
+
+# Run only the small dataset
+python3 benchmark/run_benchmarks.py --all --small-only
+```
+
+The script profiles CPU/memory usage with `psrecord`, saves timing results to
+`benchmark/profiling/results.json`, per-tool profile logs and plots under
+`benchmark/profiling/<tool>/<dataset>/`, and regenerates the SVG bar charts
+in `docs/public/benchmarks/`.
+
+Dependencies: `pip install psrecord matplotlib psutil`
+
+## Manual reproduction
 
 ### 1. Download large benchmark input files
 

@@ -1,21 +1,48 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 134" width="720" height="134" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-  <line x1="140.0" y1="10" x2="140.0" y2="106" stroke="#ccd0da" stroke-width="1"/>
-  <line x1="265.0" y1="10" x2="265.0" y2="106" stroke="#ccd0da" stroke-width="1"/>
-  <line x1="390.0" y1="10" x2="390.0" y2="106" stroke="#ccd0da" stroke-width="1"/>
-  <line x1="515.0" y1="10" x2="515.0" y2="106" stroke="#ccd0da" stroke-width="1"/>
-  <line x1="640.0" y1="10" x2="640.0" y2="106" stroke="#ccd0da" stroke-width="1"/>
-  <text x="140.0" y="122" text-anchor="middle" fill="#6c6f85" font-size="12">0s</text>
-  <text x="265.0" y="122" text-anchor="middle" fill="#6c6f85" font-size="12">10m</text>
-  <text x="390.0" y="122" text-anchor="middle" fill="#6c6f85" font-size="12">20m</text>
-  <text x="515.0" y="122" text-anchor="middle" fill="#6c6f85" font-size="12">30m</text>
-  <text x="640.0" y="122" text-anchor="middle" fill="#6c6f85" font-size="12">40m</text>
-  <text x="128" y="31.0" text-anchor="end" fill="#4c4f69" font-size="14" font-weight="bold">RustQC</text>
-  <rect x="140" y="14.0" width="11.2" height="24" fill="#8839ef"/>
-  <text x="159.2" y="31.0" text-anchor="start" fill="#4c4f69" font-size="14" font-weight="bold">54s</text>
-  <text x="128" y="63.0" text-anchor="end" fill="#6c6f85" font-size="14" font-weight="normal">featureCounts</text>
-  <rect x="140" y="46.0" width="205.4" height="24" fill="#7c7f93"/>
-  <text x="353.4" y="63.0" text-anchor="start" fill="#4c4f69" font-size="14" font-weight="normal">16m 26s</text>
-  <text x="128" y="95.0" text-anchor="end" fill="#6c6f85" font-size="14" font-weight="normal">dupRadar</text>
-  <rect x="140" y="78.0" width="374.2" height="24" fill="#7c7f93"/>
-  <text x="522.2" y="95.0" text-anchor="start" fill="#4c4f69" font-size="14" font-weight="normal">29m 56s</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 350" width="720" height="350" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+  <line x1="190.0" y1="10" x2="190.0" y2="322" stroke="#ccd0da" stroke-width="1"/>
+  <text x="190.0" y="338" text-anchor="middle" fill="#6c6f85" font-size="12">0s</text>
+  <line x1="265.7" y1="10" x2="265.7" y2="322" stroke="#ccd0da" stroke-width="1"/>
+  <text x="265.7" y="338" text-anchor="middle" fill="#6c6f85" font-size="12">5m</text>
+  <line x1="341.4" y1="10" x2="341.4" y2="322" stroke="#ccd0da" stroke-width="1"/>
+  <text x="341.4" y="338" text-anchor="middle" fill="#6c6f85" font-size="12">10m</text>
+  <line x1="417.1" y1="10" x2="417.1" y2="322" stroke="#ccd0da" stroke-width="1"/>
+  <text x="417.1" y="338" text-anchor="middle" fill="#6c6f85" font-size="12">15m</text>
+  <line x1="492.9" y1="10" x2="492.9" y2="322" stroke="#ccd0da" stroke-width="1"/>
+  <text x="492.9" y="338" text-anchor="middle" fill="#6c6f85" font-size="12">20m</text>
+  <line x1="568.6" y1="10" x2="568.6" y2="322" stroke="#ccd0da" stroke-width="1"/>
+  <text x="568.6" y="338" text-anchor="middle" fill="#6c6f85" font-size="12">25m</text>
+  <line x1="644.3" y1="10" x2="644.3" y2="322" stroke="#ccd0da" stroke-width="1"/>
+  <text x="644.3" y="338" text-anchor="middle" fill="#6c6f85" font-size="12">30m</text>
+  <line x1="720.0" y1="10" x2="720.0" y2="322" stroke="#ccd0da" stroke-width="1"/>
+  <text x="720.0" y="338" text-anchor="middle" fill="#6c6f85" font-size="12">35m</text>
+  <text x="178" y="27.0" text-anchor="end" fill="#4c4f69" font-size="14" font-weight="bold">RustQC</text>
+  <rect x="190" y="10.0" width="245.2" height="24" fill="#8839ef"/>
+  <text x="443.2" y="27.0" text-anchor="start" fill="#4c4f69" font-size="14" font-weight="bold">16m 11s</text>
+  <text x="178" y="59.0" text-anchor="end" fill="#6c6f85" font-size="14" font-weight="normal">featureCounts</text>
+  <rect x="190" y="42.0" width="55.4" height="24" fill="#7c7f93"/>
+  <text x="253.4" y="59.0" text-anchor="start" fill="#4c4f69" font-size="14" font-weight="normal">3m 39s</text>
+  <text x="178" y="91.0" text-anchor="end" fill="#6c6f85" font-size="14" font-weight="normal">dupRadar</text>
+  <rect x="190" y="74.0" width="414.2" height="24" fill="#7c7f93"/>
+  <text x="612.2" y="91.0" text-anchor="start" fill="#4c4f69" font-size="14" font-weight="normal">27m 21s</text>
+  <text x="178" y="123.0" text-anchor="end" fill="#6c6f85" font-size="14" font-weight="normal">bam_stat</text>
+  <rect x="190" y="106.0" width="92.6" height="24" fill="#7c7f93"/>
+  <text x="290.6" y="123.0" text-anchor="start" fill="#4c4f69" font-size="14" font-weight="normal">6m 07s</text>
+  <text x="178" y="155.0" text-anchor="end" fill="#6c6f85" font-size="14" font-weight="normal">infer_experiment</text>
+  <rect x="190" y="138.0" width="2.0" height="24" fill="#7c7f93"/>
+  <text x="200.0" y="155.0" text-anchor="start" fill="#4c4f69" font-size="14" font-weight="normal">7s</text>
+  <text x="178" y="187.0" text-anchor="end" fill="#6c6f85" font-size="14" font-weight="normal">read_duplication</text>
+  <rect x="190" y="170.0" width="450.1" height="24" fill="#7c7f93"/>
+  <text x="648.1" y="187.0" text-anchor="start" fill="#4c4f69" font-size="14" font-weight="normal">29m 43s</text>
+  <text x="178" y="219.0" text-anchor="end" fill="#6c6f85" font-size="14" font-weight="normal">read_distribution</text>
+  <rect x="190" y="202.0" width="91.0" height="24" fill="#7c7f93"/>
+  <text x="289.0" y="219.0" text-anchor="start" fill="#4c4f69" font-size="14" font-weight="normal">6m</text>
+  <text x="178" y="251.0" text-anchor="end" fill="#6c6f85" font-size="14" font-weight="normal">junction_annotation</text>
+  <rect x="190" y="234.0" width="70.0" height="24" fill="#7c7f93"/>
+  <text x="268.0" y="251.0" text-anchor="start" fill="#4c4f69" font-size="14" font-weight="normal">4m 37s</text>
+  <text x="178" y="283.0" text-anchor="end" fill="#6c6f85" font-size="14" font-weight="normal">junction_saturation</text>
+  <rect x="190" y="266.0" width="99.1" height="24" fill="#7c7f93"/>
+  <text x="297.1" y="283.0" text-anchor="start" fill="#4c4f69" font-size="14" font-weight="normal">6m 32s</text>
+  <text x="178" y="315.0" text-anchor="end" fill="#6c6f85" font-size="14" font-weight="normal">inner_distance</text>
+  <rect x="190" y="298.0" width="17.5" height="24" fill="#7c7f93"/>
+  <text x="215.5" y="315.0" text-anchor="start" fill="#4c4f69" font-size="14" font-weight="normal">1m 09s</text>
 </svg>

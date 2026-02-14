@@ -346,8 +346,8 @@ expression (reads/kbp)
 <circle cx="138" cy="429" r="1" opacity="1" fill="#0081FF" stroke="none" stroke-width="1"/>
 <circle cx="302" cy="429" r="1" opacity="1" fill="#0080FF" stroke="none" stroke-width="1"/>
 <circle cx="301" cy="429" r="1" opacity="1" fill="#0078FF" stroke="none" stroke-width="1"/>
-<circle cx="140" cy="429" r="1" opacity="1" fill="#0078FF" stroke="none" stroke-width="1"/>
 <circle cx="139" cy="429" r="1" opacity="1" fill="#0078FF" stroke="none" stroke-width="1"/>
+<circle cx="140" cy="429" r="1" opacity="1" fill="#0078FF" stroke="none" stroke-width="1"/>
 <circle cx="300" cy="429" r="1" opacity="1" fill="#0071FF" stroke="none" stroke-width="1"/>
 <circle cx="142" cy="429" r="1" opacity="1" fill="#006BFF" stroke="none" stroke-width="1"/>
 <circle cx="287" cy="429" r="1" opacity="1" fill="#006AFF" stroke="none" stroke-width="1"/>
@@ -367,8 +367,8 @@ expression (reads/kbp)
 <circle cx="280" cy="429" r="1" opacity="1" fill="#0041FF" stroke="none" stroke-width="1"/>
 <circle cx="153" cy="429" r="1" opacity="1" fill="#0038FF" stroke="none" stroke-width="1"/>
 <circle cx="278" cy="429" r="1" opacity="1" fill="#0026FF" stroke="none" stroke-width="1"/>
-<circle cx="275" cy="429" r="1" opacity="1" fill="#0013FF" stroke="none" stroke-width="1"/>
 <circle cx="276" cy="429" r="1" opacity="1" fill="#0013FF" stroke="none" stroke-width="1"/>
+<circle cx="275" cy="429" r="1" opacity="1" fill="#0013FF" stroke="none" stroke-width="1"/>
 <circle cx="155" cy="429" r="1" opacity="1" fill="#0010FF" stroke="none" stroke-width="1"/>
 <circle cx="156" cy="429" r="1" opacity="1" fill="#0006FF" stroke="none" stroke-width="1"/>
 <circle cx="274" cy="429" r="1" opacity="1" fill="#0002FF" stroke="none" stroke-width="1"/>
@@ -416,8 +416,8 @@ expression (reads/kbp)
 <circle cx="179" cy="429" r="1" opacity="1" fill="#2BFF00" stroke="none" stroke-width="1"/>
 <circle cx="184" cy="429" r="1" opacity="1" fill="#2BFF00" stroke="none" stroke-width="1"/>
 <circle cx="183" cy="429" r="1" opacity="1" fill="#2DFF00" stroke="none" stroke-width="1"/>
-<circle cx="181" cy="429" r="1" opacity="1" fill="#2FFF00" stroke="none" stroke-width="1"/>
 <circle cx="182" cy="429" r="1" opacity="1" fill="#2FFF00" stroke="none" stroke-width="1"/>
+<circle cx="181" cy="429" r="1" opacity="1" fill="#2FFF00" stroke="none" stroke-width="1"/>
 <circle cx="257" cy="429" r="1" opacity="1" fill="#31FF00" stroke="none" stroke-width="1"/>
 <circle cx="194" cy="429" r="1" opacity="1" fill="#3FFF00" stroke="none" stroke-width="1"/>
 <circle cx="195" cy="429" r="1" opacity="1" fill="#48FF00" stroke="none" stroke-width="1"/>
