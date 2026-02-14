@@ -28,11 +28,12 @@ be disabled via the YAML config file.
 
 - bam_stat -- alignment statistics
 - infer_experiment -- library strandedness inference
-- read_duplication -- position-based and sequence-based duplication histograms
+- read_duplication -- position-based and sequence-based duplication histograms with duplication rate plot (PNG + SVG)
 - read_distribution -- read distribution across genomic features
-- junction_annotation -- splice junction classification
-- junction_saturation -- junction saturation curves
-- inner_distance -- insert size estimation for paired-end reads
+- junction_annotation -- splice junction classification with splice event and junction pie charts (PNG + SVG)
+- junction_saturation -- junction saturation curves with saturation plot (PNG + SVG)
+- inner_distance -- insert size estimation for paired-end reads with histogram and density plot (PNG + SVG)
+- Native plot generation for all applicable RSeQC tools -- no R required
 
 ### General
 

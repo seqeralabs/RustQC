@@ -3,7 +3,7 @@ title: dupRadar Outputs
 description: Comprehensive guide to RustQC's dupRadar output files, including the duplication matrix, fitted model parameters, diagnostic plots, and how to interpret them.
 ---
 
-import { FileTree } from '@astrojs/starlight/components';
+import { Card, CardGrid, FileTree } from '@astrojs/starlight/components';
 
 ## What is dupRadar?
 
@@ -112,13 +112,23 @@ These parameters define the fitted curve: `y = 1 / (1 + exp(-(intercept + slope 
 
 ### Plot files
 
-RustQC generates three diagnostic plots in both PNG and SVG formats:
-
-- `<sample>_duprateExpDens.png` / `.svg` -- Density scatter plot
-- `<sample>_duprateExpBoxplot.png` / `.svg` -- Duplication rate boxplot
-- `<sample>_expressionHist.png` / `.svg` -- Expression histogram
-
+RustQC generates three diagnostic plots in both PNG and SVG formats.
 See the [Interpreting plots](#interpreting-plots) section below for how to read each plot.
+
+<CardGrid>
+  <Card title="Density scatter plot">
+    `<sample>_duprateExpDens.{png,svg}`
+    ![Density scatter plot](/RustQC/examples/dupradar/duprateExpDens.png)
+  </Card>
+  <Card title="Duplication rate boxplot">
+    `<sample>_duprateExpBoxplot.{png,svg}`
+    ![Duplication rate boxplot](/RustQC/examples/dupradar/duprateExpBoxplot.png)
+  </Card>
+  <Card title="Expression histogram">
+    `<sample>_expressionHist.{png,svg}`
+    ![Expression histogram](/RustQC/examples/dupradar/expressionHist.png)
+  </Card>
+</CardGrid>
 
 ### MultiQC files
 

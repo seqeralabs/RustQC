@@ -317,11 +317,11 @@ For an input file named `sample.bam`, the following files are generated. All out
 |------|-------------|-------------|
 | bam_stat | `sample.bam_stat.txt` | Text report with alignment statistics |
 | infer_experiment | `sample.infer_experiment.txt` | Strandedness fractions |
-| read_duplication | `sample.pos.DupRate.xls`, `sample.seq.DupRate.xls` | Position-based and sequence-based duplication histograms |
+| read_duplication | `sample.pos.DupRate.xls`, `sample.seq.DupRate.xls`, `sample.DupRate_plot.{png,svg}` | Position-based and sequence-based duplication histograms with plot |
 | read_distribution | `sample.read_distribution.txt` | Per-region read distribution table |
-| junction_annotation | `sample.junction.xls`, `sample.junction.bed`, `sample.junction_plot.r`, `sample.junction_annotation.txt` | Junction classifications and summary |
-| junction_saturation | `sample.junctionSaturation_plot.r`, `sample.junctionSaturation_summary.txt` | Saturation curve data |
-| inner_distance | `sample.inner_distance.txt`, `sample.inner_distance_freq.txt`, `sample.inner_distance_plot.r`, `sample.inner_distance_summary.txt` | Per-pair distances, histogram, and summary |
+| junction_annotation | `sample.junction.xls`, `sample.junction.bed`, `sample.splice_events.{png,svg}`, `sample.splice_junction.{png,svg}`, `sample.junction_plot.r`, `sample.junction_annotation.txt` | Junction classifications, pie charts, and summary |
+| junction_saturation | `sample.junctionSaturation_plot.{png,svg}`, `sample.junctionSaturation_plot.r`, `sample.junctionSaturation_summary.txt` | Saturation curve plot and data |
+| inner_distance | `sample.inner_distance.txt`, `sample.inner_distance_freq.txt`, `sample.inner_distance_plot.{png,svg}`, `sample.inner_distance_plot.r`, `sample.inner_distance_summary.txt` | Per-pair distances, histogram plot, and summary |
 
 ### Duplication matrix columns
 
@@ -393,11 +393,11 @@ Each RSeQC tool is a single-pass BAM reader that processes the alignment file an
 
 - **bam_stat**: Flag-based read classification in a single pass (duplicates, mapping quality, splice events, proper pairs).
 - **infer_experiment**: Samples reads overlapping gene intervals and determines strand protocol fractions.
-- **read_duplication**: Builds position-based and sequence-based occurrence histograms.
+- **read_duplication**: Builds position-based and sequence-based occurrence histograms with duplication rate plot.
 - **read_distribution**: Classifies read tags by midpoint overlap with CDS, UTR, intron, and intergenic regions.
-- **junction_annotation**: Extracts CIGAR N-operations and classifies against known splice sites from the gene model.
-- **junction_saturation**: Subsamples junctions at increasing fractions to build a saturation curve.
-- **inner_distance**: Computes mRNA-level or genomic inner distance between paired-end reads with transcript-aware classification.
+- **junction_annotation**: Extracts CIGAR N-operations and classifies against known splice sites from the gene model. Generates splice event and junction pie charts.
+- **junction_saturation**: Subsamples junctions at increasing fractions to build a saturation curve with plot.
+- **inner_distance**: Computes mRNA-level or genomic inner distance between paired-end reads with transcript-aware classification and histogram plot.
 
 ## Interpreting the results
 

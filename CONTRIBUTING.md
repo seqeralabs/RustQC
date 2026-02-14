@@ -74,7 +74,8 @@ src/
       mod.rs                     Re-exports output
       output.rs                  featureCounts-format output and biotype counting
     rseqc/
-      mod.rs                     Re-exports all 7 RSeQC modules
+      mod.rs                     Re-exports all 7 RSeQC modules + plots
+      plots.rs                   Plot generation (duplication, junctions, inner distance)
       bam_stat.rs                Basic BAM alignment statistics
       infer_experiment.rs        Library strandedness inference
       read_duplication.rs        Position- and sequence-based duplication histograms
