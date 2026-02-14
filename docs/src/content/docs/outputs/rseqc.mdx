@@ -5,6 +5,8 @@ description: Output files produced by RustQC's RSeQC-compatible quality control 
 
 import { Card, CardGrid, FileTree } from '@astrojs/starlight/components';
 
+export const base = import.meta.env.BASE_URL;
+
 RustQC reimplements seven tools from the [RSeQC](https://rseqc.sourceforge.net/)
 package. Each tool produces output files that match the format and content of the
 original Python implementation, plus **native PNG and SVG plots** generated
@@ -87,7 +89,7 @@ high duplication.
 
 <CardGrid>
   <Card title="Duplication rate">
-    <img src="/RustQC/examples/rseqc/read_duplication.png" alt="Read duplication rate plot" />
+    <img src={`${base}examples/rseqc/read_duplication.png`} alt="Read duplication rate plot" />
   </Card>
 </CardGrid>
 
@@ -136,10 +138,10 @@ known (blue), partial novel (red), and complete novel (green) splicing.
 
 <CardGrid>
   <Card title="Splice events">
-    <img src="/RustQC/examples/rseqc/splice_events.png" alt="Splice events pie chart" />
+    <img src={`${base}examples/rseqc/splice_events.png`} alt="Splice events pie chart" />
   </Card>
   <Card title="Splice junctions">
-    <img src="/RustQC/examples/rseqc/splice_junction.png" alt="Splice junctions pie chart" />
+    <img src={`${base}examples/rseqc/splice_junction.png`} alt="Splice junctions pie chart" />
   </Card>
 </CardGrid>
 
@@ -169,7 +171,7 @@ detected (in thousands). A plateau in the curves indicates saturation.
 
 <CardGrid>
   <Card title="Junction saturation">
-    <img src="/RustQC/examples/rseqc/junction_saturation.png" alt="Junction saturation plot" />
+    <img src={`${base}examples/rseqc/junction_saturation.png`} alt="Junction saturation plot" />
   </Card>
 </CardGrid>
 
@@ -210,7 +212,7 @@ approximately normal for a well-prepared library.
 
 <CardGrid>
   <Card title="Inner distance">
-    <img src="/RustQC/examples/rseqc/inner_distance.png" alt="Inner distance histogram" />
+    <img src={`${base}examples/rseqc/inner_distance.png`} alt="Inner distance histogram" />
   </Card>
 </CardGrid>
 

@@ -5,6 +5,8 @@ description: Comprehensive guide to RustQC's dupRadar output files, including th
 
 import { Card, CardGrid, FileTree } from '@astrojs/starlight/components';
 
+export const base = import.meta.env.BASE_URL;
+
 ## What is dupRadar?
 
 In DNA sequencing, PCR duplicates are straightforward to identify and remove: reads with identical alignment coordinates are likely amplification artifacts. In **RNA-seq**, the situation is more nuanced.
@@ -118,15 +120,15 @@ See the [Interpreting plots](#interpreting-plots) section below for how to read 
 <CardGrid>
   <Card title="Density scatter plot">
     `<sample>_duprateExpDens.{png,svg}`
-    ![Density scatter plot](/RustQC/examples/dupradar/duprateExpDens.png)
+    <img src={`${base}examples/dupradar/duprateExpDens.png`} alt="Density scatter plot" />
   </Card>
   <Card title="Duplication rate boxplot">
     `<sample>_duprateExpBoxplot.{png,svg}`
-    ![Duplication rate boxplot](/RustQC/examples/dupradar/duprateExpBoxplot.png)
+    <img src={`${base}examples/dupradar/duprateExpBoxplot.png`} alt="Duplication rate boxplot" />
   </Card>
   <Card title="Expression histogram">
     `<sample>_expressionHist.{png,svg}`
-    ![Expression histogram](/RustQC/examples/dupradar/expressionHist.png)
+    <img src={`${base}examples/dupradar/expressionHist.png`} alt="Expression histogram" />
   </Card>
 </CardGrid>
 

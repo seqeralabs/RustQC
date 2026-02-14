@@ -48,6 +48,49 @@ exactly.
 The output format is directly compatible with downstream tools such as DESeq2
 and MultiQC.
 
+### Side-by-side plots
+
+Since dupRadar visualizations are derived from the same gene-level counts, identical plots confirm that the underlying feature counting is correct. The plots below compare R dupRadar output (left) with RustQC output (right) for the large benchmark.
+
+#### Density scatter plot
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
+  <figure style="margin: 0; text-align: center;">
+    <img src="/benchmarks/large/dupRadar/duprateExpDens.png" alt="dupRadar (R) density scatter plot" style="width: 100%;" />
+    <figcaption>dupRadar (R)</figcaption>
+  </figure>
+  <figure style="margin: 0; text-align: center;">
+    <img src="/benchmarks/large/RustQC/GM12878_REP1.markdup.sorted_duprateExpDens.png" alt="RustQC density scatter plot" style="width: 100%;" />
+    <figcaption>RustQC</figcaption>
+  </figure>
+</div>
+
+#### Duplication rate boxplot
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
+  <figure style="margin: 0; text-align: center;">
+    <img src="/benchmarks/large/dupRadar/duprateExpBoxplot.png" alt="dupRadar (R) duplication rate boxplot" style="width: 100%;" />
+    <figcaption>dupRadar (R)</figcaption>
+  </figure>
+  <figure style="margin: 0; text-align: center;">
+    <img src="/benchmarks/large/RustQC/GM12878_REP1.markdup.sorted_duprateExpBoxplot.png" alt="RustQC duplication rate boxplot" style="width: 100%;" />
+    <figcaption>RustQC</figcaption>
+  </figure>
+</div>
+
+#### Expression histogram
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
+  <figure style="margin: 0; text-align: center;">
+    <img src="/benchmarks/large/dupRadar/expressionHist.png" alt="dupRadar (R) expression histogram" style="width: 100%;" />
+    <figcaption>dupRadar (R)</figcaption>
+  </figure>
+  <figure style="margin: 0; text-align: center;">
+    <img src="/benchmarks/large/RustQC/GM12878_REP1.markdup.sorted_expressionHist.png" alt="RustQC expression histogram" style="width: 100%;" />
+    <figcaption>RustQC</figcaption>
+  </figure>
+</div>
+
 ## Additional outputs
 
 Beyond the standard featureCounts counts file and summary, RustQC also
