@@ -33,6 +33,7 @@ DUPRADAR_IMG = (
 )
 SUBREAD_IMG = "wave.seqera.io/wt/30bc38d2ad74/wave/build:subread--d7eae49d8c0e1b66"
 RSEQC_IMG = "wave.seqera.io/wt/ea3e9f972b6e/wave/build:rseqc-5.0.4--14c99cde3bff8d57"
+RBASE_IMG = "wave.seqera.io/wt/d63a19ed5f77/wave/build:r-base--6fa87e5d876579f1"
 DOCKER_PLATFORM = "linux/amd64"
 
 # ---------------------------------------------------------------------------
@@ -70,6 +71,15 @@ RSEQC_TOOLS = [
     "junction_saturation",
     "inner_distance",
 ]
+
+# RSeQC tools that produce R plot scripts, and the script filenames they generate.
+# Paths are relative to the output directory (prefix is the -o value).
+RSEQC_PLOT_SCRIPTS = {
+    "read_duplication": ["read_duplication.DupRate_plot.r"],
+    "junction_annotation": ["junction_annotation.junction_plot.r"],
+    "junction_saturation": ["junction_saturation.junctionSaturation_plot.r"],
+    "inner_distance": ["inner_distance.inner_distance_plot.r"],
+}
 
 
 # ---------------------------------------------------------------------------
@@ -290,6 +300,34 @@ def run_featurecounts(ds_name: str, ds: dict, root: Path) -> dict:
     return r
 
 
+def run_rseqc_plots(tool: str, outdir: Path) -> None:
+    """Run the R plot scripts produced by an RSeQC tool."""
+    scripts = RSEQC_PLOT_SCRIPTS.get(tool, [])
+    if not scripts:
+        return
+
+    docker_pull(RBASE_IMG)
+    for script_name in scripts:
+        script = outdir / script_name
+        if not script.exists():
+            print(f"  Warning: expected R script not found: {script}")
+            continue
+        print(f"  Running R plot: {script_name}")
+        cmd = [
+            "docker",
+            "run",
+            "--rm",
+            "--platform",
+            DOCKER_PLATFORM,
+            "-v",
+            f"{outdir}:/data/output",
+            RBASE_IMG,
+            "Rscript",
+            f"/data/output/{script_name}",
+        ]
+        subprocess.run(cmd, check=True, capture_output=True)
+
+
 def run_rseqc(ds_name: str, ds: dict, root: Path) -> list[dict]:
     """Run all 7 RSeQC tools via Docker, one at a time."""
     print(f"\n{'=' * 60}")
@@ -342,6 +380,11 @@ def run_rseqc(ds_name: str, ds: dict, root: Path) -> list[dict]:
         )
         r["dataset"] = ds_name
         results.append(r)
+
+        # Run any R plot scripts this tool generated
+        if tool in RSEQC_PLOT_SCRIPTS:
+            run_rseqc_plots(tool, outdir)
+
     return results
 
 
