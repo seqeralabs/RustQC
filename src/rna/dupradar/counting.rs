@@ -10,6 +10,7 @@
 //! This implements a simplified featureCounts-compatible counting strategy.
 
 use crate::gtf::Gene;
+use crate::rna::genebody::GenebodyCoverageAccum;
 use crate::rna::rseqc::accumulators::{RseqcAccumulators, RseqcAnnotations, RseqcConfig};
 use anyhow::{Context, Result};
 use coitrees::{COITree, Interval, IntervalTree};
@@ -287,6 +288,8 @@ pub struct CountResult {
     // --- RSeQC results (collected during the same BAM pass) ---
     /// Accumulated RSeQC tool results, if RSeQC tools were enabled
     pub rseqc: Option<RseqcAccumulators>,
+    /// Gene body coverage results (Qualimap-compatible).
+    pub genebody: Option<crate::rna::genebody::GenebodyCoverageResult>,
 }
 
 /// Metadata stored with each interval in the cache-oblivious interval tree.
@@ -495,6 +498,8 @@ struct ChromResult {
     fc_no_features: u64,
     fc_multimapping: u64,
     fc_unmapped: u64,
+    /// Gene body coverage accumulator (if enabled).
+    genebody: Option<GenebodyCoverageAccum>,
 }
 
 impl ChromResult {
@@ -520,6 +525,7 @@ impl ChromResult {
             fc_no_features: 0,
             fc_multimapping: 0,
             fc_unmapped: 0,
+            genebody: None,
         }
     }
 
@@ -551,6 +557,14 @@ impl ChromResult {
         self.fc_no_features += other.fc_no_features;
         self.fc_multimapping += other.fc_multimapping;
         self.fc_unmapped += other.fc_unmapped;
+        // Merge gene body coverage
+        if let Some(other_gb) = other.genebody {
+            if let Some(ref mut self_gb) = self.genebody {
+                self_gb.merge(&other_gb);
+            } else {
+                self.genebody = Some(other_gb);
+            }
+        }
     }
 }
 
@@ -600,8 +614,13 @@ fn process_chromosome_batch(
     rseqc_config: Option<&RseqcConfig>,
     rseqc_annotations: Option<&RseqcAnnotations>,
     htslib_threads: usize,
+    genebody_position_map: Option<&crate::rna::genebody::TranscriptPositionMap>,
+    _interner: &GeneIdInterner,
 ) -> Result<(ChromResult, Option<RseqcAccumulators>)> {
     let mut result = ChromResult::new(num_genes);
+    if genebody_position_map.is_some() {
+        result.genebody = Some(crate::rna::genebody::GenebodyCoverageAccum::new());
+    }
     let mut rseqc_accums = rseqc_config.map(|cfg| RseqcAccumulators::new(cfg, rseqc_annotations));
 
     // Pre-compute resolved chromosome names for RSeQC tools.
@@ -778,8 +797,14 @@ fn process_chromosome_batch(
 
                 if gene_hits.is_empty() {
                     result.stat_no_features += 1;
+                    if let Some(ref mut gb) = result.genebody {
+                        gb.record_no_feature(&aligned_blocks_buf);
+                    }
                 } else if gene_hits.len() > 1 {
                     result.stat_ambiguous += 1;
+                    if let Some(ref mut gb) = result.genebody {
+                        gb.record_ambiguous();
+                    }
                 } else if assign_fragment_to_gene(
                     &gene_hits,
                     &mut result.gene_counts,
@@ -787,6 +812,11 @@ fn process_chromosome_batch(
                     is_multi,
                 ) {
                     result.stat_assigned += 1;
+                    if let (Some(ref mut gb), Some(pos_map)) =
+                        (&mut result.genebody, genebody_position_map)
+                    {
+                        gb.record_coverage(gene_hits[0] as usize, &aligned_blocks_buf, pos_map);
+                    }
                 }
                 continue;
             }
@@ -868,8 +898,14 @@ fn process_chromosome_batch(
 
                 if combined_genes.is_empty() {
                     result.stat_no_features += 1;
+                    if let Some(ref mut gb) = result.genebody {
+                        gb.record_no_feature(&aligned_blocks_buf);
+                    }
                 } else if combined_genes.len() > 1 {
                     result.stat_ambiguous += 1;
+                    if let Some(ref mut gb) = result.genebody {
+                        gb.record_ambiguous();
+                    }
                 } else if assign_fragment_to_gene(
                     &combined_genes,
                     &mut result.gene_counts,
@@ -877,6 +913,15 @@ fn process_chromosome_batch(
                     frag_is_multi,
                 ) {
                     result.stat_assigned += 1;
+                    if let (Some(ref mut gb), Some(pos_map)) =
+                        (&mut result.genebody, genebody_position_map)
+                    {
+                        gb.record_coverage(
+                            combined_genes[0] as usize,
+                            &aligned_blocks_buf,
+                            pos_map,
+                        );
+                    }
                 }
             } else {
                 mate_buffer.insert(
@@ -935,6 +980,7 @@ pub fn count_reads(
     skip_dup_check: bool,
     rseqc_config: Option<&RseqcConfig>,
     rseqc_annotations: Option<&RseqcAnnotations>,
+    genebody_position_map: Option<&crate::rna::genebody::TranscriptPositionMap>,
 ) -> Result<CountResult> {
     // Build gene ID interner for allocation-free lookups in the hot loop
     let interner = GeneIdInterner::from_genes(genes);
@@ -1046,6 +1092,8 @@ pub fn count_reads(
                         rseqc_config,
                         rseqc_annotations,
                         htslib_threads,
+                        genebody_position_map,
+                        &interner,
                     )
                 })
                 .collect()
@@ -1071,6 +1119,9 @@ pub fn count_reads(
         // This avoids the need for an index file.
         let global_read_counter = AtomicU64::new(0);
         let mut result = ChromResult::new(interner.len());
+        if genebody_position_map.is_some() {
+            result.genebody = Some(crate::rna::genebody::GenebodyCoverageAccum::new());
+        }
         let mut rseqc_accums: Option<RseqcAccumulators> =
             rseqc_config.map(|cfg| RseqcAccumulators::new(cfg, rseqc_annotations));
 
@@ -1225,8 +1276,14 @@ pub fn count_reads(
 
                 if gene_hits.is_empty() {
                     result.stat_no_features += 1;
+                    if let Some(ref mut gb) = result.genebody {
+                        gb.record_no_feature(&aligned_blocks_buf);
+                    }
                 } else if gene_hits.len() > 1 {
                     result.stat_ambiguous += 1;
+                    if let Some(ref mut gb) = result.genebody {
+                        gb.record_ambiguous();
+                    }
                 } else if assign_fragment_to_gene(
                     &gene_hits,
                     &mut result.gene_counts,
@@ -1234,6 +1291,11 @@ pub fn count_reads(
                     is_multi,
                 ) {
                     result.stat_assigned += 1;
+                    if let (Some(ref mut gb), Some(pos_map)) =
+                        (&mut result.genebody, genebody_position_map)
+                    {
+                        gb.record_coverage(gene_hits[0] as usize, &aligned_blocks_buf, pos_map);
+                    }
                 }
                 continue;
             }
@@ -1314,8 +1376,14 @@ pub fn count_reads(
 
                 if combined_genes.is_empty() {
                     result.stat_no_features += 1;
+                    if let Some(ref mut gb) = result.genebody {
+                        gb.record_no_feature(&aligned_blocks_buf);
+                    }
                 } else if combined_genes.len() > 1 {
                     result.stat_ambiguous += 1;
+                    if let Some(ref mut gb) = result.genebody {
+                        gb.record_ambiguous();
+                    }
                 } else if assign_fragment_to_gene(
                     &combined_genes,
                     &mut result.gene_counts,
@@ -1323,6 +1391,15 @@ pub fn count_reads(
                     frag_is_multi,
                 ) {
                     result.stat_assigned += 1;
+                    if let (Some(ref mut gb), Some(pos_map)) =
+                        (&mut result.genebody, genebody_position_map)
+                    {
+                        gb.record_coverage(
+                            combined_genes[0] as usize,
+                            &aligned_blocks_buf,
+                            pos_map,
+                        );
+                    }
                 }
             } else {
                 mate_buffer.insert(
@@ -1403,6 +1480,8 @@ pub fn count_reads(
                     frag_is_multi,
                 ) {
                     merged.stat_assigned += 1;
+                    // Coverage recording skipped — no aligned blocks available for
+                    // cross-chromosome mate reconciliation.
                 }
             } else {
                 still_unmatched.insert(key, info);
@@ -1431,6 +1510,8 @@ pub fn count_reads(
                 mate_info.is_multi,
             ) {
                 merged.stat_assigned += 1;
+                // Coverage recording skipped here — no aligned blocks available for
+                // cross-chromosome singleton mates (rare edge case).
             }
         }
     }
@@ -1529,6 +1610,9 @@ pub fn count_reads(
         fc_multimapping: merged.fc_multimapping,
         fc_unmapped: merged.fc_unmapped,
         rseqc: merged_rseqc,
+        genebody: merged
+            .genebody
+            .map(|a: GenebodyCoverageAccum| a.into_result()),
     })
 }
 

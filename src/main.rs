@@ -628,6 +628,13 @@ fn process_single_bam(
         || rseqc_config.junction_saturation_enabled
         || rseqc_config.inner_distance_enabled;
 
+    // === Build gene body coverage position map (if enabled) ===
+    let genebody_position_map = if params.config.genebody_coverage.enabled {
+        genes.map(rna::genebody::TranscriptPositionMap::from_genes)
+    } else {
+        None
+    };
+
     // === dupRadar counting (requires GTF) ===
     let mut count_result = if let Some(genes) = genes {
         info!(
@@ -655,6 +662,7 @@ fn process_single_bam(
             } else {
                 None
             },
+            genebody_position_map.as_ref(),
         )?;
         info!(
             "[{}] Counting complete in {:.2}s",
@@ -998,6 +1006,42 @@ fn process_single_bam(
                 bam_stem,
                 stats.n_regions_duplication,
                 stats.f_regions_duplication * 100.0
+            );
+        }
+        // === Gene body coverage output ===
+        if let Some(ref gb_result) = count_result.genebody {
+            let gb_dir = if params.flat_output {
+                outdir.to_path_buf()
+            } else {
+                outdir.join("qualimap")
+            };
+            std::fs::create_dir_all(&gb_dir)?;
+
+            let profile_path = gb_dir.join("coverage_profile_along_genes_(total).txt");
+            rna::genebody::write_coverage_profile(gb_result, &profile_path)?;
+            info!(
+                "[{}] Gene body coverage profile written to {:?}",
+                bam_stem, profile_path
+            );
+
+            let qualimap_path = gb_dir.join("rnaseq_qc_results.txt");
+            // Use total_records and secondary from the count_result stats
+            let total_alignments = count_result.stat_total_reads;
+            let secondary = count_result.stat_total_reads
+                - (count_result.stat_assigned
+                    + count_result.stat_ambiguous
+                    + count_result.stat_no_features
+                    + count_result.fc_unmapped);
+            rna::genebody::write_qualimap_results(
+                gb_result,
+                bam_stem,
+                total_alignments,
+                secondary,
+                &qualimap_path,
+            )?;
+            info!(
+                "[{}] Qualimap-compatible results written to {:?}",
+                bam_stem, qualimap_path
             );
         }
     } // end if let Some(count_result) — GTF-only outputs

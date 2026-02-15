@@ -5,4 +5,5 @@
 
 pub mod dupradar;
 pub mod featurecounts;
+pub mod genebody;
 pub mod rseqc;
