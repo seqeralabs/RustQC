@@ -707,7 +707,7 @@ fn test_flat_output_no_subdirectories() {
     }
 
     // Subdirectories should NOT exist in flat mode
-    let nested_dirs = vec!["dupradar", "featurecounts", "rseqc"];
+    let nested_dirs = vec!["dupradar", "featurecounts", "rseqc", "samtools"];
     for dir in &nested_dirs {
         let path = format!("{}/{}", outdir, dir);
         assert!(

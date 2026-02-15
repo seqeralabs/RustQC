@@ -19,6 +19,7 @@ use super::junction_annotation::{Junction, JunctionClass, JunctionResults};
 use super::junction_saturation::SaturationResult;
 use super::read_distribution::{ChromIntervals, ReadDistributionResult, RegionSets};
 use super::read_duplication::ReadDuplicationResult;
+use super::tin::TinAccum;
 
 // ===================================================================
 // BAM flag constants
@@ -59,6 +60,8 @@ pub struct RseqcAnnotations<'a> {
     pub transcript_tree: Option<&'a TranscriptTree>,
     /// Chromosomes present in the known junction set (precomputed for fast lookup).
     pub ref_chroms: Option<&'a HashSet<String>>,
+    /// TIN index for transcript integrity number calculation.
+    pub tin_index: Option<&'a super::tin::TinIndex>,
 }
 
 /// Per-tool configuration parameters.
@@ -98,6 +101,12 @@ pub struct RseqcConfig {
     pub junction_annotation_enabled: bool,
     pub junction_saturation_enabled: bool,
     pub inner_distance_enabled: bool,
+    /// Whether TIN analysis is enabled.
+    pub tin_enabled: bool,
+    /// Number of equally-spaced sampling positions per transcript for TIN.
+    pub tin_sample_size: usize,
+    /// Minimum number of read starts for a transcript to compute TIN.
+    pub tin_min_coverage: u32,
 }
 
 // ===================================================================
@@ -1350,6 +1359,7 @@ pub struct RseqcAccumulators {
     pub junc_annot: Option<JuncAnnotAccum>,
     pub junc_sat: Option<JuncSatAccum>,
     pub inner_dist: Option<InnerDistAccum>,
+    pub tin: Option<TinAccum>,
 }
 
 impl RseqcAccumulators {
@@ -1363,11 +1373,12 @@ impl RseqcAccumulators {
             junc_annot: None,
             junc_sat: None,
             inner_dist: None,
+            tin: None,
         }
     }
 
     /// Create accumulators for all enabled tools.
-    pub fn new(config: &RseqcConfig) -> Self {
+    pub fn new(config: &RseqcConfig, annotations: Option<&RseqcAnnotations>) -> Self {
         RseqcAccumulators {
             bam_stat: if config.bam_stat_enabled {
                 Some(BamStatAccum::default())
@@ -1401,6 +1412,13 @@ impl RseqcAccumulators {
             },
             inner_dist: if config.inner_distance_enabled {
                 Some(InnerDistAccum::new(config.inner_distance_sample_size))
+            } else {
+                None
+            },
+            tin: if config.tin_enabled {
+                annotations
+                    .and_then(|a| a.tin_index)
+                    .map(|idx| TinAccum::new(idx, config.mapq_cut, config.tin_min_coverage))
             } else {
                 None
             },
@@ -1481,6 +1499,11 @@ impl RseqcAccumulators {
                 config.mapq_cut,
             );
         }
+
+        // tin: needs TinIndex, uses uppercased chrom for position lookup
+        if let (Some(ref mut accum), Some(tin_index)) = (&mut self.tin, annotations.tin_index) {
+            accum.process_read(record, chrom_upper, tin_index);
+        }
     }
 
     /// Merge another set of accumulators into this one.
@@ -1504,6 +1527,9 @@ impl RseqcAccumulators {
             a.merge(b);
         }
         if let (Some(ref mut a), Some(b)) = (&mut self.inner_dist, other.inner_dist) {
+            a.merge(b);
+        }
+        if let (Some(ref mut a), Some(b)) = (&mut self.tin, other.tin) {
             a.merge(b);
         }
     }

@@ -602,7 +602,7 @@ fn process_chromosome_batch(
     htslib_threads: usize,
 ) -> Result<(ChromResult, Option<RseqcAccumulators>)> {
     let mut result = ChromResult::new(num_genes);
-    let mut rseqc_accums = rseqc_config.map(RseqcAccumulators::new);
+    let mut rseqc_accums = rseqc_config.map(|cfg| RseqcAccumulators::new(cfg, rseqc_annotations));
 
     // Pre-compute resolved chromosome names for RSeQC tools.
     // These apply the chromosome prefix and mapping (BAM name -> GTF name)
@@ -1053,7 +1053,8 @@ pub fn count_reads(
 
         // Merge all chromosome results (both dupRadar and RSeQC)
         let mut merged = ChromResult::new(interner.len());
-        let mut merged_rseqc: Option<RseqcAccumulators> = rseqc_config.map(RseqcAccumulators::new);
+        let mut merged_rseqc: Option<RseqcAccumulators> =
+            rseqc_config.map(|cfg| RseqcAccumulators::new(cfg, rseqc_annotations));
         for result in results {
             let (chrom_result, rseqc_result) = result?;
             merged.merge(chrom_result);
@@ -1070,7 +1071,8 @@ pub fn count_reads(
         // This avoids the need for an index file.
         let global_read_counter = AtomicU64::new(0);
         let mut result = ChromResult::new(interner.len());
-        let mut rseqc_accums: Option<RseqcAccumulators> = rseqc_config.map(RseqcAccumulators::new);
+        let mut rseqc_accums: Option<RseqcAccumulators> =
+            rseqc_config.map(|cfg| RseqcAccumulators::new(cfg, rseqc_annotations));
 
         // Pre-compute resolved chromosome names for RSeQC tools
         // (apply chromosome prefix and mapping, same as parallel path)

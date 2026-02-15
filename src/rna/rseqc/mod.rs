@@ -17,3 +17,4 @@ pub mod junction_saturation;
 pub mod read_distribution;
 pub mod read_duplication;
 pub mod stats;
+pub mod tin;

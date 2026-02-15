@@ -304,6 +304,15 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         rna::rseqc::inner_distance::TranscriptTree::from_bed
     );
 
+    let tin_sample_size = config.tin.sample_size.unwrap_or(100) as usize;
+    let tin_index = build_rseqc_data!(
+        config.tin.enabled,
+        "Building TIN index from GTF...",
+        |genes| rna::rseqc::tin::TinIndex::from_genes(genes, tin_sample_size),
+        "Building TIN index from BED...",
+        |bed_path| rna::rseqc::tin::TinIndex::from_bed(bed_path, tin_sample_size)
+    );
+
     let chrom_mapping = config.alignment_to_gtf_mapping();
     let chrom_prefix = config.chromosome_prefix().map(|s| s.to_owned());
 
@@ -387,6 +396,9 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         inner_distance_lower_bound: args.inner_distance_lower_bound,
         inner_distance_upper_bound: args.inner_distance_upper_bound,
         inner_distance_step: args.inner_distance_step,
+        tin_index: tin_index.as_ref(),
+        tin_sample_size: config.tin.sample_size.unwrap_or(100) as usize,
+        tin_min_coverage: config.tin.min_coverage.unwrap_or(10),
     };
 
     // Step 2: Process all alignment files (in parallel when multiple)
@@ -512,6 +524,12 @@ struct SharedParams<'a> {
     inner_distance_upper_bound: i64,
     /// Bin width for inner distance histogram.
     inner_distance_step: i64,
+    /// Pre-built TIN index for transcript integrity analysis (from GTF or BED).
+    tin_index: Option<&'a rna::rseqc::tin::TinIndex>,
+    /// Number of equally-spaced positions to sample per transcript for TIN.
+    tin_sample_size: usize,
+    /// Minimum read-start count per transcript to compute TIN.
+    tin_min_coverage: u32,
 }
 
 // ============================================================================
@@ -586,6 +604,9 @@ fn process_single_bam(
         inner_distance_enabled: config.inner_distance.enabled
             && params.exon_bitset.is_some()
             && params.transcript_tree.is_some(),
+        tin_enabled: config.tin.enabled && params.tin_index.is_some(),
+        tin_sample_size: params.tin_sample_size,
+        tin_min_coverage: params.tin_min_coverage,
     };
 
     let rseqc_annotations = RseqcAnnotations {
@@ -596,6 +617,7 @@ fn process_single_bam(
         exon_bitset: params.exon_bitset,
         transcript_tree: params.transcript_tree,
         ref_chroms: Some(&ref_chroms),
+        tin_index: params.tin_index,
     };
 
     let any_rseqc_enabled = rseqc_config.bam_stat_enabled
@@ -1255,6 +1277,33 @@ fn write_rseqc_outputs(
         );
     }
 
+    // --- TIN ---
+    if let Some(accum) = accums.tin {
+        let rseqc_tin_dir = if flat {
+            outdir.to_path_buf()
+        } else {
+            outdir.join("rseqc").join("tin")
+        };
+        std::fs::create_dir_all(&rseqc_tin_dir)?;
+        let prefix = rseqc_tin_dir.join(bam_stem).to_string_lossy().to_string();
+        let tin_index = params
+            .tin_index
+            .as_ref()
+            .expect("TIN index must exist when TIN accumulator is present");
+        let results = accum.into_result(tin_index);
+        info!(
+            "[{}] Writing TIN results ({} transcripts)...",
+            bam_stem,
+            results.len()
+        );
+        rna::rseqc::tin::write_tin(&results, Path::new(&format!("{prefix}.tin.xls")))?;
+        rna::rseqc::tin::write_tin_summary(
+            &results,
+            _bam_path,
+            Path::new(&format!("{prefix}.summary.txt")),
+        )?;
+    }
+
     Ok(())
 }
 
@@ -1314,6 +1363,9 @@ fn run_rseqc_single_pass(
         inner_distance_enabled: params.config.inner_distance.enabled
             && params.exon_bitset.is_some()
             && params.transcript_tree.is_some(),
+        tin_enabled: params.config.tin.enabled && params.tin_index.is_some(),
+        tin_sample_size: params.tin_sample_size,
+        tin_min_coverage: params.tin_min_coverage,
     };
 
     let annotations = RseqcAnnotations {
@@ -1324,9 +1376,10 @@ fn run_rseqc_single_pass(
         exon_bitset: params.exon_bitset,
         transcript_tree: params.transcript_tree,
         ref_chroms: ref_chroms.as_ref(),
+        tin_index: params.tin_index,
     };
 
-    let mut accums = RseqcAccumulators::new(&rseqc_config);
+    let mut accums = RseqcAccumulators::new(&rseqc_config, Some(&annotations));
 
     // Open BAM reader
     let mut bam = bam::Reader::from_path(bam_path)

@@ -97,6 +97,10 @@ pub struct Config {
     #[serde(default)]
     pub idxstats: IdxstatsConfig,
 
+    /// TIN (Transcript Integrity Number) tool configuration.
+    #[serde(default)]
+    pub tin: TinConfig,
+
     /// samtools stats-compatible output configuration (SN section).
     #[serde(default)]
     pub samtools_stats: SamtoolsStatsConfig,
@@ -464,6 +468,39 @@ pub struct FlagstatConfig {
 impl Default for FlagstatConfig {
     fn default() -> Self {
         Self { enabled: true }
+    }
+}
+
+/// Configuration for TIN (Transcript Integrity Number) analysis.
+///
+/// TIN measures per-transcript coverage uniformity using Shannon entropy.
+/// Values range from 0 (completely degraded) to 100 (perfectly uniform).
+///
+/// Example:
+/// ```yaml
+/// tin:
+///   enabled: true
+///   sample_size: 100
+///   min_coverage: 10
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct TinConfig {
+    /// Whether to run TIN analysis. Defaults to true.
+    pub enabled: bool,
+    /// Number of equally-spaced positions to sample per transcript.
+    pub sample_size: Option<u32>,
+    /// Minimum number of reads covering a transcript to compute TIN.
+    pub min_coverage: Option<u32>,
+}
+
+impl Default for TinConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            sample_size: None,
+            min_coverage: None,
+        }
     }
 }
 
