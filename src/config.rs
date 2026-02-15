@@ -88,6 +88,18 @@ pub struct Config {
     /// inner_distance tool configuration.
     #[serde(default)]
     pub inner_distance: InnerDistanceConfig,
+
+    /// samtools flagstat-compatible output configuration.
+    #[serde(default)]
+    pub flagstat: FlagstatConfig,
+
+    /// samtools idxstats-compatible output configuration.
+    #[serde(default)]
+    pub idxstats: IdxstatsConfig,
+
+    /// samtools stats-compatible output configuration (SN section).
+    #[serde(default)]
+    pub samtools_stats: SamtoolsStatsConfig,
 }
 
 // ============================================================================
@@ -429,6 +441,79 @@ impl Default for InnerDistanceConfig {
 }
 
 // ============================================================================
+// samtools-compatible output configurations
+// ============================================================================
+
+/// Configuration for samtools flagstat-compatible output.
+///
+/// When enabled, produces a file matching `samtools flagstat` output format,
+/// which is parseable by MultiQC.
+///
+/// Example:
+/// ```yaml
+/// flagstat:
+///   enabled: true
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct FlagstatConfig {
+    /// Whether to generate flagstat output. Defaults to true.
+    pub enabled: bool,
+}
+
+impl Default for FlagstatConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+/// Configuration for samtools idxstats-compatible output.
+///
+/// When enabled, produces a file matching `samtools idxstats` output format,
+/// which is parseable by MultiQC.
+///
+/// Example:
+/// ```yaml
+/// idxstats:
+///   enabled: true
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct IdxstatsConfig {
+    /// Whether to generate idxstats output. Defaults to true.
+    pub enabled: bool,
+}
+
+impl Default for IdxstatsConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+/// Configuration for samtools stats-compatible output (SN summary numbers section).
+///
+/// When enabled, produces a file matching the `SN` (Summary Numbers) section
+/// of `samtools stats` output, which is parseable by MultiQC.
+///
+/// Example:
+/// ```yaml
+/// samtools_stats:
+///   enabled: true
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct SamtoolsStatsConfig {
+    /// Whether to generate samtools stats SN output. Defaults to true.
+    pub enabled: bool,
+}
+
+impl Default for SamtoolsStatsConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+// ============================================================================
 // Config implementation
 // ============================================================================
 
@@ -513,6 +598,10 @@ mod tests {
         assert!(config.junction_annotation.enabled);
         assert!(config.junction_saturation.enabled);
         assert!(config.inner_distance.enabled);
+        // samtools-compatible outputs all enabled by default
+        assert!(config.flagstat.enabled);
+        assert!(config.idxstats.enabled);
+        assert!(config.samtools_stats.enabled);
     }
 
     #[test]

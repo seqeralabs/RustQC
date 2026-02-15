@@ -105,58 +105,395 @@ pub struct RseqcConfig {
 // ===================================================================
 
 /// bam_stat accumulator — simple flag/MAPQ counting.
+///
+/// Also collects the additional counters needed for samtools-compatible
+/// flagstat, idxstats, and stats output.
 #[derive(Debug, Default)]
 pub struct BamStatAccum {
+    // --- RSeQC bam_stat fields (original) ---
+    /// Total BAM records seen (primary + secondary + supplementary + unmapped).
     pub total_records: u64,
+    /// Records with QC-fail flag (0x200).
     pub qc_failed: u64,
+    /// Records with duplicate flag (0x400).
     pub duplicates: u64,
+    /// Secondary alignment records (0x100). RSeQC calls these "non-primary".
     pub non_primary: u64,
+    /// Unmapped reads (0x4).
     pub unmapped: u64,
+    /// Mapped reads with MAPQ < cutoff.
     pub non_unique: u64,
+    /// Mapped reads with MAPQ >= cutoff (uniquely mapped).
     pub unique: u64,
+    /// Among unique reads: read1 in a pair.
     pub read_1: u64,
+    /// Among unique reads: read2 in a pair.
     pub read_2: u64,
+    /// Among unique reads: forward strand.
     pub forward: u64,
+    /// Among unique reads: reverse strand.
     pub reverse: u64,
+    /// Among unique reads: has splice junction (CIGAR N).
     pub splice: u64,
+    /// Among unique reads: no splice junctions.
     pub non_splice: u64,
+    /// Among unique reads: in proper pairs (0x2).
     pub proper_pairs: u64,
+    /// Among proper-paired unique reads: mates on different chromosomes.
     pub proper_pair_diff_chrom: u64,
+    /// MAPQ distribution for primary, non-QC-fail, non-dup, mapped reads.
     pub mapq_distribution: BTreeMap<u8, u64>,
+
+    // --- samtools flagstat additional fields ---
+    /// Secondary alignments (0x100) — counted independently of QC/dup.
+    pub secondary: u64,
+    /// Supplementary alignments (0x800) — counted independently of QC/dup.
+    pub supplementary: u64,
+    /// All mapped records (not 0x4), regardless of QC/dup.
+    pub mapped: u64,
+    /// Paired reads (0x1), regardless of QC/dup.
+    pub paired_flagstat: u64,
+    /// Read1 in pair (0x40), regardless of QC/dup — for flagstat.
+    pub read1_flagstat: u64,
+    /// Read2 in pair (0x80), regardless of QC/dup — for flagstat.
+    pub read2_flagstat: u64,
+    /// First fragments for samtools stats: primary reads that are not "last fragments".
+    pub first_fragments: u64,
+    /// Last fragments for samtools stats: primary reads with 0x80 flag.
+    pub last_fragments: u64,
+    /// Properly paired reads (0x1 + 0x2), regardless of QC/dup.
+    pub properly_paired: u64,
+    /// Both mates mapped (paired + both !unmapped).
+    pub both_mapped: u64,
+    /// Singletons (paired, this mapped, mate unmapped).
+    pub singletons: u64,
+    /// Paired, both mapped, different reference.
+    pub mate_diff_chr: u64,
+    /// Paired, both mapped, different reference, MAPQ >= 5.
+    pub mate_diff_chr_mapq5: u64,
+
+    // --- samtools idxstats additional fields ---
+    /// Per-reference (tid) mapped and unmapped counts.
+    pub chrom_counts: HashMap<i32, (u64, u64)>,
+    /// Unmapped reads with no reference (tid < 0).
+    pub unplaced_unmapped: u64,
+
+    // --- samtools stats SN additional fields ---
+    /// Sum of query sequence lengths for all primary reads (non-secondary, non-supplementary).
+    pub total_len: u64,
+    /// Sum of first fragment (read1 or unpaired) sequence lengths.
+    pub total_first_fragment_len: u64,
+    /// Sum of last fragment (read2) sequence lengths.
+    pub total_last_fragment_len: u64,
+    /// Sum of query lengths for mapped primary reads.
+    pub bases_mapped: u64,
+    /// Sum of M/=/X CIGAR operations for mapped primary reads.
+    pub bases_mapped_cigar: u64,
+    /// Sum of query lengths for duplicate-flagged primary reads.
+    pub bases_duplicated: u64,
+    /// Maximum query sequence length (among primary reads).
+    pub max_len: u64,
+    /// Maximum first-fragment sequence length.
+    pub max_first_fragment_len: u64,
+    /// Maximum last-fragment sequence length.
+    pub max_last_fragment_len: u64,
+    /// Sum of average per-read base qualities (for average-of-averages).
+    pub quality_sum: f64,
+    /// Number of reads contributing to quality_sum (primary, non-QC-fail).
+    pub quality_count: u64,
+    /// Sum of NM tag values across mapped primary reads.
+    pub mismatches: u64,
+    /// Sum of absolute TLEN for properly paired primary reads (for mean insert size).
+    pub insert_size_sum: f64,
+    /// Sum of squared TLEN for insert size standard deviation.
+    pub insert_size_sq_sum: f64,
+    /// Number of reads contributing to insert size stats.
+    pub insert_size_count: u64,
+    /// Inward-oriented pairs (FR).
+    pub inward_pairs: u64,
+    /// Outward-oriented pairs (RF).
+    pub outward_pairs: u64,
+    /// Other orientation pairs (FF, RR).
+    pub other_orientation: u64,
+    /// Primary reads that are paired (for "raw total sequences" = paired means /2 fragments).
+    pub primary_paired: u64,
+    /// Total primary reads (non-secondary, non-supplementary).
+    pub primary_count: u64,
+    /// Primary mapped reads count (non-secondary, non-supplementary, !unmapped).
+    pub primary_mapped: u64,
+    /// Primary duplicate reads.
+    pub primary_duplicates: u64,
+    /// All mapped reads with MAPQ = 0 (including secondary/supplementary).
+    pub reads_mq0: u64,
+    /// Primary non-QC-fail mapped paired reads where mate is also mapped.
+    pub reads_mapped_and_paired: u64,
 }
+
+/// Mate unmapped flag (0x8).
+const BAM_FMUNMAP: u16 = 0x8;
+/// Mate reverse strand flag (0x20).
+const BAM_FMREVERSE: u16 = 0x20;
 
 impl BamStatAccum {
     /// Process a single BAM record. Called for EVERY record (before counting filters).
+    ///
+    /// Collects counters for:
+    /// - RSeQC bam_stat (original cascade with early returns)
+    /// - samtools flagstat (counts all records independently)
+    /// - samtools idxstats (per-reference mapped/unmapped counts)
+    /// - samtools stats SN section (sequence lengths, quality, insert size, etc.)
     pub fn process_read(&mut self, record: &bam::Record, mapq_cut: u8) {
         let flags = record.flags();
         self.total_records += 1;
 
+        let is_secondary = flags & BAM_FSECONDARY != 0;
+        let is_supplementary = flags & BAM_FSUPPLEMENTARY != 0;
+        let is_unmapped = flags & BAM_FUNMAP != 0;
+        let is_paired = flags & BAM_FPAIRED != 0;
+        let is_dup = flags & BAM_FDUP != 0;
+        let is_qcfail = flags & BAM_FQCFAIL != 0;
+        let is_primary = !is_secondary && !is_supplementary;
+        let is_mapped = !is_unmapped;
+        let tid = record.tid();
+        let mapq = record.mapq();
+
+        // =================================================================
+        // samtools flagstat counters (count ALL records, no early returns)
+        // =================================================================
+        if is_secondary {
+            self.secondary += 1;
+        }
+        if is_supplementary {
+            self.supplementary += 1;
+        }
+        if is_mapped {
+            self.mapped += 1;
+        }
+        // samtools stats: "1st fragments" / "last fragments" count primary reads only
+        // For paired reads: read2 flag -> last, everything else -> 1st
+        // For SE reads (no PAIRED flag): all counted as 1st fragments
+        if is_primary {
+            if flags & BAM_FREAD2 != 0 {
+                self.last_fragments += 1;
+            } else {
+                self.first_fragments += 1;
+            }
+        }
+        // samtools flagstat: paired-read metrics count PRIMARY reads only
+        // (secondary/supplementary are excluded from paired/read1/read2/properly-paired counts)
+        if is_paired && is_primary {
+            self.paired_flagstat += 1;
+            if flags & BAM_FREAD1 != 0 {
+                self.read1_flagstat += 1;
+            }
+            if flags & BAM_FREAD2 != 0 {
+                self.read2_flagstat += 1;
+            }
+            if flags & BAM_FPROPER_PAIR != 0 {
+                self.properly_paired += 1;
+            }
+            let mate_unmapped = flags & BAM_FMUNMAP != 0;
+            if is_mapped && !mate_unmapped {
+                self.both_mapped += 1;
+                if tid != record.mtid() {
+                    self.mate_diff_chr += 1;
+                    if mapq >= 5 {
+                        self.mate_diff_chr_mapq5 += 1;
+                    }
+                }
+            }
+            if is_mapped && mate_unmapped {
+                self.singletons += 1;
+            }
+        }
+
+        // =================================================================
+        // samtools idxstats counters (per-reference)
+        // =================================================================
+        if is_unmapped {
+            if tid >= 0 {
+                // Unmapped read placed on a reference (has tid)
+                self.chrom_counts.entry(tid).or_insert((0, 0)).1 += 1;
+            } else {
+                self.unplaced_unmapped += 1;
+            }
+        } else if tid >= 0 {
+            // Mapped read
+            self.chrom_counts.entry(tid).or_insert((0, 0)).0 += 1;
+        }
+
+        // =================================================================
+        // samtools stats SN counters (primary reads only)
+        // =================================================================
+        if is_primary {
+            self.primary_count += 1;
+            let seq_len = record.seq_len() as u64;
+            let mate_unmapped = flags & BAM_FMUNMAP != 0;
+
+            self.total_len += seq_len;
+            if is_paired && flags & BAM_FREAD2 != 0 {
+                self.total_last_fragment_len += seq_len;
+                if seq_len > self.max_last_fragment_len {
+                    self.max_last_fragment_len = seq_len;
+                }
+            } else {
+                self.total_first_fragment_len += seq_len;
+                if seq_len > self.max_first_fragment_len {
+                    self.max_first_fragment_len = seq_len;
+                }
+            }
+            if seq_len > self.max_len {
+                self.max_len = seq_len;
+            }
+
+            if is_paired {
+                self.primary_paired += 1;
+            }
+            if is_dup {
+                self.primary_duplicates += 1;
+                self.bases_duplicated += seq_len;
+            }
+            // "reads mapped and paired" for samtools stats: primary, non-QC-fail,
+            // mapped, paired, mate also mapped
+            if is_mapped && is_paired && !is_qcfail && !mate_unmapped {
+                self.reads_mapped_and_paired += 1;
+            }
+            if is_mapped {
+                self.primary_mapped += 1;
+                self.bases_mapped += seq_len;
+                // Count primary mapped reads with MAPQ=0
+                if record.mapq() == 0 {
+                    self.reads_mq0 += 1;
+                }
+
+                // CIGAR-based mapped bases (M/=/X operations)
+                use rust_htslib::bam::record::Cigar as C;
+                let cigar_mapped: u64 = record
+                    .cigar()
+                    .iter()
+                    .map(|op| match op {
+                        C::Match(n) | C::Equal(n) | C::Diff(n) => u64::from(*n),
+                        _ => 0,
+                    })
+                    .sum();
+                self.bases_mapped_cigar += cigar_mapped;
+
+                // NM tag (edit distance)
+                if let Ok(rust_htslib::bam::record::Aux::U8(nm)) = record.aux(b"NM") {
+                    self.mismatches += u64::from(nm);
+                } else if let Ok(rust_htslib::bam::record::Aux::U16(nm)) = record.aux(b"NM") {
+                    self.mismatches += u64::from(nm);
+                } else if let Ok(rust_htslib::bam::record::Aux::U32(nm)) = record.aux(b"NM") {
+                    self.mismatches += u64::from(nm);
+                } else if let Ok(rust_htslib::bam::record::Aux::I8(nm)) = record.aux(b"NM") {
+                    if nm > 0 {
+                        self.mismatches += nm as u64;
+                    }
+                } else if let Ok(rust_htslib::bam::record::Aux::I16(nm)) = record.aux(b"NM") {
+                    if nm > 0 {
+                        self.mismatches += nm as u64;
+                    }
+                } else if let Ok(rust_htslib::bam::record::Aux::I32(nm)) = record.aux(b"NM") {
+                    if nm > 0 {
+                        self.mismatches += nm as u64;
+                    }
+                }
+
+                // Insert size for properly paired primary reads on the same
+                // chromosome. samtools stats counts insert size only for the read
+                // with positive TLEN to avoid double-counting, and excludes
+                // reads with TLEN > 65536 (outliers / structural variants).
+                if is_paired && flags & BAM_FPROPER_PAIR != 0 {
+                    let tid = record.tid();
+                    let mtid = record.mtid();
+                    if tid == mtid {
+                        let tlen = record.insert_size();
+                        if tlen > 0 {
+                            let abs_tlen = tlen as f64;
+                            self.insert_size_sum += abs_tlen;
+                            self.insert_size_sq_sum += abs_tlen * abs_tlen;
+                            self.insert_size_count += 1;
+                        }
+                    }
+                }
+
+                // Pair orientation for mapped paired reads where mate is also mapped.
+                // samtools stats determines orientation based on leftmost position
+                // and only counts from the read with the smaller position (to avoid
+                // double-counting).
+                if is_paired && !mate_unmapped {
+                    let pos = record.pos();
+                    let mpos = record.mpos();
+                    let tid = record.tid();
+                    let mtid = record.mtid();
+
+                    // Only count when this read is the leftmost (or when same
+                    // position, use read1 as tiebreaker)
+                    let is_leftmost = if tid != mtid {
+                        false // different chromosomes - skip orientation
+                    } else if pos != mpos {
+                        pos < mpos
+                    } else {
+                        flags & BAM_FREAD1 != 0 // tiebreaker: read1
+                    };
+
+                    if is_leftmost {
+                        let this_rev = flags & BAM_FREVERSE != 0;
+                        let mate_rev = flags & BAM_FMREVERSE != 0;
+
+                        // Orientation based on strand of left and right read
+                        if !this_rev && mate_rev {
+                            self.inward_pairs += 1; // F...R -> inward
+                        } else if this_rev && !mate_rev {
+                            self.outward_pairs += 1; // R...F -> outward
+                        } else {
+                            self.other_orientation += 1; // F...F or R...R
+                        }
+                    }
+                }
+            }
+
+            // Average quality for primary non-QC-fail reads
+            if !is_qcfail {
+                let quals = record.qual();
+                if !quals.is_empty() {
+                    let avg_q: f64 =
+                        quals.iter().map(|&q| f64::from(q)).sum::<f64>() / quals.len() as f64;
+                    self.quality_sum += avg_q;
+                    self.quality_count += 1;
+                }
+            }
+        }
+
+        // =================================================================
+        // RSeQC bam_stat cascade (original logic, with early returns)
+        // =================================================================
+
         // 1. QC-failed
-        if flags & BAM_FQCFAIL != 0 {
+        if is_qcfail {
             self.qc_failed += 1;
             return;
         }
 
         // 2. Duplicate
-        if flags & BAM_FDUP != 0 {
+        if is_dup {
             self.duplicates += 1;
             return;
         }
 
         // 3. Secondary (non-primary) — NOT supplementary
-        if flags & BAM_FSECONDARY != 0 {
+        if is_secondary {
             self.non_primary += 1;
             return;
         }
 
         // 4. Unmapped
-        if flags & BAM_FUNMAP != 0 {
+        if is_unmapped {
             self.unmapped += 1;
             return;
         }
 
         // Mapped primary non-QC-fail non-dup: record MAPQ distribution
-        let mapq = record.mapq();
         *self.mapq_distribution.entry(mapq).or_insert(0) += 1;
 
         // 5. MAPQ classification
@@ -192,9 +529,9 @@ impl BamStatAccum {
         }
 
         // Proper pair analysis
-        if flags & BAM_FPAIRED != 0 && flags & BAM_FPROPER_PAIR != 0 {
+        if is_paired && flags & BAM_FPROPER_PAIR != 0 {
             self.proper_pairs += 1;
-            if record.tid() != record.mtid() {
+            if tid != record.mtid() {
                 self.proper_pair_diff_chrom += 1;
             }
         }
@@ -202,6 +539,7 @@ impl BamStatAccum {
 
     /// Merge another accumulator into this one.
     pub fn merge(&mut self, other: BamStatAccum) {
+        // RSeQC bam_stat fields
         self.total_records += other.total_records;
         self.qc_failed += other.qc_failed;
         self.duplicates += other.duplicates;
@@ -220,6 +558,61 @@ impl BamStatAccum {
         for (mapq, count) in other.mapq_distribution {
             *self.mapq_distribution.entry(mapq).or_insert(0) += count;
         }
+
+        // samtools flagstat fields
+        self.secondary += other.secondary;
+        self.supplementary += other.supplementary;
+        self.mapped += other.mapped;
+        self.paired_flagstat += other.paired_flagstat;
+        self.read1_flagstat += other.read1_flagstat;
+        self.read2_flagstat += other.read2_flagstat;
+        self.first_fragments += other.first_fragments;
+        self.last_fragments += other.last_fragments;
+        self.properly_paired += other.properly_paired;
+        self.both_mapped += other.both_mapped;
+        self.singletons += other.singletons;
+        self.mate_diff_chr += other.mate_diff_chr;
+        self.mate_diff_chr_mapq5 += other.mate_diff_chr_mapq5;
+
+        // samtools idxstats fields
+        for (tid, (m, u)) in other.chrom_counts {
+            let entry = self.chrom_counts.entry(tid).or_insert((0, 0));
+            entry.0 += m;
+            entry.1 += u;
+        }
+        self.unplaced_unmapped += other.unplaced_unmapped;
+
+        // samtools stats SN fields
+        self.total_len += other.total_len;
+        self.total_first_fragment_len += other.total_first_fragment_len;
+        self.total_last_fragment_len += other.total_last_fragment_len;
+        self.bases_mapped += other.bases_mapped;
+        self.bases_mapped_cigar += other.bases_mapped_cigar;
+        self.bases_duplicated += other.bases_duplicated;
+        if other.max_len > self.max_len {
+            self.max_len = other.max_len;
+        }
+        if other.max_first_fragment_len > self.max_first_fragment_len {
+            self.max_first_fragment_len = other.max_first_fragment_len;
+        }
+        if other.max_last_fragment_len > self.max_last_fragment_len {
+            self.max_last_fragment_len = other.max_last_fragment_len;
+        }
+        self.quality_sum += other.quality_sum;
+        self.quality_count += other.quality_count;
+        self.mismatches += other.mismatches;
+        self.insert_size_sum += other.insert_size_sum;
+        self.insert_size_sq_sum += other.insert_size_sq_sum;
+        self.insert_size_count += other.insert_size_count;
+        self.inward_pairs += other.inward_pairs;
+        self.outward_pairs += other.outward_pairs;
+        self.other_orientation += other.other_orientation;
+        self.primary_paired += other.primary_paired;
+        self.primary_count += other.primary_count;
+        self.primary_mapped += other.primary_mapped;
+        self.primary_duplicates += other.primary_duplicates;
+        self.reads_mq0 += other.reads_mq0;
+        self.reads_mapped_and_paired += other.reads_mapped_and_paired;
     }
 }
 
@@ -1134,6 +1527,7 @@ impl BamStatAccum {
     /// Convert accumulated counters into a `BamStatResult` for output.
     pub fn into_result(self) -> BamStatResult {
         BamStatResult {
+            // RSeQC bam_stat fields
             total_records: self.total_records,
             qc_failed: self.qc_failed,
             duplicates: self.duplicates,
@@ -1150,6 +1544,48 @@ impl BamStatAccum {
             proper_pairs: self.proper_pairs,
             proper_pair_diff_chrom: self.proper_pair_diff_chrom,
             mapq_distribution: self.mapq_distribution,
+            // samtools flagstat fields
+            secondary: self.secondary,
+            supplementary: self.supplementary,
+            mapped: self.mapped,
+            paired_flagstat: self.paired_flagstat,
+            read1_flagstat: self.read1_flagstat,
+            read2_flagstat: self.read2_flagstat,
+            first_fragments: self.first_fragments,
+            last_fragments: self.last_fragments,
+            properly_paired: self.properly_paired,
+            both_mapped: self.both_mapped,
+            singletons: self.singletons,
+            mate_diff_chr: self.mate_diff_chr,
+            mate_diff_chr_mapq5: self.mate_diff_chr_mapq5,
+            // samtools idxstats fields
+            chrom_counts: self.chrom_counts,
+            unplaced_unmapped: self.unplaced_unmapped,
+            // samtools stats SN fields
+            total_len: self.total_len,
+            total_first_fragment_len: self.total_first_fragment_len,
+            total_last_fragment_len: self.total_last_fragment_len,
+            bases_mapped: self.bases_mapped,
+            bases_mapped_cigar: self.bases_mapped_cigar,
+            bases_duplicated: self.bases_duplicated,
+            max_len: self.max_len,
+            max_first_fragment_len: self.max_first_fragment_len,
+            max_last_fragment_len: self.max_last_fragment_len,
+            quality_sum: self.quality_sum,
+            quality_count: self.quality_count,
+            mismatches: self.mismatches,
+            insert_size_sum: self.insert_size_sum,
+            insert_size_sq_sum: self.insert_size_sq_sum,
+            insert_size_count: self.insert_size_count,
+            inward_pairs: self.inward_pairs,
+            outward_pairs: self.outward_pairs,
+            other_orientation: self.other_orientation,
+            primary_paired: self.primary_paired,
+            primary_count: self.primary_count,
+            primary_mapped: self.primary_mapped,
+            primary_duplicates: self.primary_duplicates,
+            reads_mq0: self.reads_mq0,
+            reads_mapped_and_paired: self.reads_mapped_and_paired,
         }
     }
 }

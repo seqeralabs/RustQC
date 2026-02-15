@@ -21,6 +21,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Instant;
 
+use rust_htslib::bam::Read as BamRead;
+
 use rna::rseqc::accumulators::{RseqcAccumulators, RseqcAnnotations, RseqcConfig};
 
 fn main() -> Result<()> {
@@ -570,7 +572,10 @@ fn process_single_bam(
         inner_distance_lower_bound: params.inner_distance_lower_bound,
         inner_distance_upper_bound: params.inner_distance_upper_bound,
         inner_distance_step: params.inner_distance_step,
-        bam_stat_enabled: config.bam_stat.enabled,
+        bam_stat_enabled: config.bam_stat.enabled
+            || config.flagstat.enabled
+            || config.idxstats.enabled
+            || config.samtools_stats.enabled,
         infer_experiment_enabled: config.infer_experiment.enabled && params.gene_model.is_some(),
         read_duplication_enabled: config.read_duplication.enabled,
         read_distribution_enabled: config.read_distribution.enabled && params.rd_regions.is_some(),
@@ -986,7 +991,20 @@ fn process_single_bam(
         info!("[{}] No RSeQC tools enabled, skipping", bam_stem);
         RseqcAccumulators::empty()
     };
-    write_rseqc_outputs(bam_path, bam_stem, params, rseqc_accums)?;
+    // Extract BAM header info (reference names + lengths) for samtools-compatible outputs
+    let bam_header_refs = {
+        let reader = rust_htslib::bam::Reader::from_path(bam_path)
+            .with_context(|| format!("Failed to open BAM for header: {}", bam_path))?;
+        let header = reader.header();
+        (0..header.target_count())
+            .map(|tid| {
+                let name = String::from_utf8_lossy(header.tid2name(tid)).to_string();
+                let len = header.target_len(tid).unwrap_or(0);
+                (name, len)
+            })
+            .collect::<Vec<(String, u64)>>()
+    };
+    write_rseqc_outputs(bam_path, bam_stem, params, rseqc_accums, &bam_header_refs)?;
 
     info!(
         "[{}] Completed in {:.2}s",
@@ -1010,6 +1028,7 @@ fn write_rseqc_outputs(
     bam_stem: &str,
     params: &SharedParams,
     accums: RseqcAccumulators,
+    bam_header_refs: &[(String, u64)],
 ) -> Result<()> {
     let outdir = params.outdir;
 
@@ -1051,13 +1070,48 @@ fn write_rseqc_outputs(
         outdir.join("rseqc").join("inner_distance")
     };
 
+    // --- samtools-compatible outputs (flagstat, idxstats, stats) ---
+    // These consume data from BamStatAccum, so they are written before
+    // the main bam_stat output to share the same result.
+    let samtools_dir = if flat {
+        outdir.to_path_buf()
+    } else {
+        outdir.join("samtools")
+    };
+
     // --- bam_stat ---
     if let Some(accum) = accums.bam_stat {
         info!("[{}] Writing bam_stat results...", bam_stem);
         std::fs::create_dir_all(&rseqc_bam_stat_dir)?;
         let result = accum.into_result();
-        let output_path = rseqc_bam_stat_dir.join(format!("{}.bam_stat.txt", bam_stem));
-        rna::rseqc::bam_stat::write_bam_stat(&result, &output_path)?;
+        if params.config.bam_stat.enabled {
+            let output_path = rseqc_bam_stat_dir.join(format!("{}.bam_stat.txt", bam_stem));
+            rna::rseqc::bam_stat::write_bam_stat(&result, &output_path)?;
+        }
+
+        // --- flagstat ---
+        if params.config.flagstat.enabled {
+            info!("[{}] Writing flagstat results...", bam_stem);
+            std::fs::create_dir_all(&samtools_dir)?;
+            let flagstat_path = samtools_dir.join(format!("{}.flagstat", bam_stem));
+            rna::rseqc::flagstat::write_flagstat(&result, &flagstat_path)?;
+        }
+
+        // --- idxstats ---
+        if params.config.idxstats.enabled {
+            info!("[{}] Writing idxstats results...", bam_stem);
+            std::fs::create_dir_all(&samtools_dir)?;
+            let idxstats_path = samtools_dir.join(format!("{}.idxstats", bam_stem));
+            rna::rseqc::idxstats::write_idxstats(&result, bam_header_refs, &idxstats_path)?;
+        }
+
+        // --- samtools stats SN ---
+        if params.config.samtools_stats.enabled {
+            info!("[{}] Writing samtools stats results...", bam_stem);
+            std::fs::create_dir_all(&samtools_dir)?;
+            let stats_path = samtools_dir.join(format!("{}.stats", bam_stem));
+            rna::rseqc::stats::write_stats(&result, &stats_path)?;
+        }
     }
 
     // --- read_duplication ---
@@ -1244,7 +1298,10 @@ fn run_rseqc_single_pass(
         inner_distance_lower_bound: params.inner_distance_lower_bound,
         inner_distance_upper_bound: params.inner_distance_upper_bound,
         inner_distance_step: params.inner_distance_step,
-        bam_stat_enabled: params.config.bam_stat.enabled,
+        bam_stat_enabled: params.config.bam_stat.enabled
+            || params.config.flagstat.enabled
+            || params.config.idxstats.enabled
+            || params.config.samtools_stats.enabled,
         infer_experiment_enabled: params.config.infer_experiment.enabled
             && params.gene_model.is_some(),
         read_duplication_enabled: params.config.read_duplication.enabled,
