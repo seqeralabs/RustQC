@@ -193,6 +193,23 @@ pub struct RnaArgs {
         allow_hyphen_values = true
     )]
     pub inner_distance_step: i64,
+
+    // --- preseq lc_extrap ---
+    /// Skip the preseq library complexity extrapolation analysis
+    #[arg(long, default_value_t = false)]
+    pub skip_preseq: bool,
+
+    /// Maximum extrapolation depth in total reads (preseq lc_extrap)
+    #[arg(long = "preseq-max-extrap")]
+    pub preseq_max_extrap: Option<f64>,
+
+    /// Step size between extrapolation points (preseq lc_extrap)
+    #[arg(long = "preseq-step-size")]
+    pub preseq_step_size: Option<f64>,
+
+    /// Number of bootstrap replicates for confidence intervals (preseq lc_extrap)
+    #[arg(long = "preseq-n-bootstraps")]
+    pub preseq_n_bootstraps: Option<u32>,
 }
 
 /// Parse command-line arguments and return the Cli struct.
@@ -394,6 +411,52 @@ mod tests {
                 assert_eq!(args.inner_distance_lower_bound, -500);
                 assert_eq!(args.inner_distance_upper_bound, 500);
                 assert_eq!(args.inner_distance_step, 10);
+            }
+            #[allow(unreachable_patterns)]
+            _ => panic!("Expected Rna subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_rna_preseq_params() {
+        let cli = Cli::parse_from([
+            "rustqc",
+            "rna",
+            "test.bam",
+            "--gtf",
+            "genes.gtf",
+            "--preseq-max-extrap",
+            "5000000000",
+            "--preseq-step-size",
+            "500000",
+            "--preseq-n-bootstraps",
+            "200",
+        ]);
+        match cli.command {
+            Commands::Rna(args) => {
+                assert!(!args.skip_preseq);
+                assert_eq!(args.preseq_max_extrap, Some(5_000_000_000.0));
+                assert_eq!(args.preseq_step_size, Some(500_000.0));
+                assert_eq!(args.preseq_n_bootstraps, Some(200));
+            }
+            #[allow(unreachable_patterns)]
+            _ => panic!("Expected Rna subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_rna_skip_preseq() {
+        let cli = Cli::parse_from([
+            "rustqc",
+            "rna",
+            "test.bam",
+            "--gtf",
+            "genes.gtf",
+            "--skip-preseq",
+        ]);
+        match cli.command {
+            Commands::Rna(args) => {
+                assert!(args.skip_preseq);
             }
             #[allow(unreachable_patterns)]
             _ => panic!("Expected Rna subcommand"),

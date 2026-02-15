@@ -607,6 +607,8 @@ fn process_single_bam(
         tin_enabled: config.tin.enabled && params.tin_index.is_some(),
         tin_sample_size: params.tin_sample_size,
         tin_min_coverage: params.tin_min_coverage,
+        preseq_enabled: config.preseq.enabled,
+        preseq_is_paired: params.paired,
     };
 
     let rseqc_annotations = RseqcAnnotations {
@@ -626,7 +628,8 @@ fn process_single_bam(
         || rseqc_config.read_distribution_enabled
         || rseqc_config.junction_annotation_enabled
         || rseqc_config.junction_saturation_enabled
-        || rseqc_config.inner_distance_enabled;
+        || rseqc_config.inner_distance_enabled
+        || rseqc_config.preseq_enabled;
 
     // === Build gene body coverage position map (if enabled) ===
     let genebody_position_map = if params.config.genebody_coverage.enabled {
@@ -1348,6 +1351,50 @@ fn write_rseqc_outputs(
         )?;
     }
 
+    // --- preseq (library complexity) ---
+    if let Some(accum) = accums.preseq {
+        let preseq_dir = if flat {
+            outdir.to_path_buf()
+        } else {
+            outdir.join("preseq")
+        };
+        std::fs::create_dir_all(&preseq_dir)?;
+        let output_path = preseq_dir.join(format!("{}.lc_extrap.txt", bam_stem));
+        let total_reads = accum.total_fragments;
+        let n_distinct = accum.n_distinct();
+        let histogram = accum.into_histogram();
+        info!(
+            "[{}] Running preseq complexity estimation ({} histogram bins, {} total reads, {} distinct)...",
+            bam_stem,
+            histogram.len(),
+            total_reads,
+            n_distinct,
+        );
+        match rna::preseq::estimate_complexity(
+            &histogram,
+            total_reads,
+            n_distinct,
+            &params.config.preseq,
+        ) {
+            Ok(result) => {
+                rna::preseq::write_output(
+                    &result,
+                    &output_path,
+                    params.config.preseq.confidence_level,
+                )?;
+                info!(
+                    "[{}] preseq: {} extrapolation points written to {}",
+                    bam_stem,
+                    result.curve.len(),
+                    output_path.display()
+                );
+            }
+            Err(e) => {
+                log::warn!("[{}] preseq: skipped — {}", bam_stem, e);
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -1410,6 +1457,8 @@ fn run_rseqc_single_pass(
         tin_enabled: params.config.tin.enabled && params.tin_index.is_some(),
         tin_sample_size: params.tin_sample_size,
         tin_min_coverage: params.tin_min_coverage,
+        preseq_enabled: params.config.preseq.enabled,
+        preseq_is_paired: params.paired,
     };
 
     let annotations = RseqcAnnotations {

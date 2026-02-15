@@ -108,6 +108,10 @@ pub struct Config {
     /// samtools stats-compatible output configuration (SN section).
     #[serde(default)]
     pub samtools_stats: SamtoolsStatsConfig,
+
+    /// preseq lc_extrap library complexity extrapolation configuration.
+    #[serde(default)]
+    pub preseq: PreseqConfig,
 }
 
 // ============================================================================
@@ -572,6 +576,74 @@ impl Default for SamtoolsStatsConfig {
 }
 
 // ============================================================================
+// preseq lc_extrap configuration
+// ============================================================================
+
+/// Configuration for preseq lc_extrap library complexity extrapolation.
+///
+/// Estimates the expected number of distinct molecules as a function of
+/// sequencing depth using Good-Toulmin rational function extrapolation
+/// with bootstrap confidence intervals.
+///
+/// Example:
+/// ```yaml
+/// preseq:
+///   enabled: true
+///   max_extrap: 10000000000
+///   step_size: 1000000
+///   n_bootstraps: 100
+///   confidence_level: 0.95
+///   seed: 1
+///   max_terms: 100
+///   defects: false
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct PreseqConfig {
+    /// Whether to run preseq lc_extrap analysis. Defaults to true.
+    pub enabled: bool,
+
+    /// Maximum extrapolation depth in total reads. Defaults to 1e10.
+    pub max_extrap: f64,
+
+    /// Step size between extrapolation points (in reads). Defaults to 1e6.
+    pub step_size: f64,
+
+    /// Number of bootstrap replicates for confidence intervals. Defaults to 100.
+    pub n_bootstraps: u32,
+
+    /// Confidence level for bootstrap intervals (e.g. 0.95 for 95%). Defaults to 0.95.
+    pub confidence_level: f64,
+
+    /// Random seed for bootstrap reproducibility. Defaults to 1.
+    pub seed: u64,
+
+    /// Maximum number of terms in the power series / continued fraction. Defaults to 100.
+    pub max_terms: usize,
+
+    /// Use the defects model for extrapolation. Defaults to false.
+    ///
+    /// When true, uses a modified rational function approximation that can
+    /// handle certain problematic histograms where the standard method fails.
+    pub defects: bool,
+}
+
+impl Default for PreseqConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_extrap: 1e10,
+            step_size: 1e6,
+            n_bootstraps: 100,
+            confidence_level: 0.95,
+            seed: 1,
+            max_terms: 100,
+            defects: false,
+        }
+    }
+}
+
+// ============================================================================
 // Config implementation
 // ============================================================================
 
@@ -660,6 +732,15 @@ mod tests {
         assert!(config.flagstat.enabled);
         assert!(config.idxstats.enabled);
         assert!(config.samtools_stats.enabled);
+        // preseq enabled by default with standard defaults
+        assert!(config.preseq.enabled);
+        assert!((config.preseq.max_extrap - 1e10).abs() < 1.0);
+        assert!((config.preseq.step_size - 1e6).abs() < 1.0);
+        assert_eq!(config.preseq.n_bootstraps, 100);
+        assert!((config.preseq.confidence_level - 0.95).abs() < 1e-10);
+        assert_eq!(config.preseq.seed, 1);
+        assert_eq!(config.preseq.max_terms, 100);
+        assert!(!config.preseq.defects);
     }
 
     #[test]

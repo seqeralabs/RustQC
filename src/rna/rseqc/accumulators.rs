@@ -20,6 +20,7 @@ use super::junction_saturation::SaturationResult;
 use super::read_distribution::{ChromIntervals, ReadDistributionResult, RegionSets};
 use super::read_duplication::ReadDuplicationResult;
 use super::tin::TinAccum;
+use crate::rna::preseq::PreseqAccum;
 
 // ===================================================================
 // BAM flag constants
@@ -107,6 +108,10 @@ pub struct RseqcConfig {
     pub tin_sample_size: usize,
     /// Minimum number of read starts for a transcript to compute TIN.
     pub tin_min_coverage: u32,
+    /// Whether preseq library complexity estimation is enabled.
+    pub preseq_enabled: bool,
+    /// Whether the library is paired-end (for preseq fragment key construction).
+    pub preseq_is_paired: bool,
 }
 
 // ===================================================================
@@ -1360,6 +1365,8 @@ pub struct RseqcAccumulators {
     pub junc_sat: Option<JuncSatAccum>,
     pub inner_dist: Option<InnerDistAccum>,
     pub tin: Option<TinAccum>,
+    /// preseq library complexity accumulator.
+    pub preseq: Option<PreseqAccum>,
 }
 
 impl RseqcAccumulators {
@@ -1374,6 +1381,7 @@ impl RseqcAccumulators {
             junc_sat: None,
             inner_dist: None,
             tin: None,
+            preseq: None,
         }
     }
 
@@ -1419,6 +1427,11 @@ impl RseqcAccumulators {
                 annotations
                     .and_then(|a| a.tin_index)
                     .map(|idx| TinAccum::new(idx, config.mapq_cut, config.tin_min_coverage))
+            } else {
+                None
+            },
+            preseq: if config.preseq_enabled {
+                Some(PreseqAccum::new(config.preseq_is_paired))
             } else {
                 None
             },
@@ -1504,6 +1517,18 @@ impl RseqcAccumulators {
         if let (Some(ref mut accum), Some(tin_index)) = (&mut self.tin, annotations.tin_index) {
             accum.process_read(record, chrom_upper, tin_index);
         }
+
+        // preseq: counts unique fragment fingerprints for library complexity
+        if let Some(ref mut accum) = self.preseq {
+            accum.process_read(
+                record.flags(),
+                record.tid(),
+                record.pos(),
+                record.mtid(),
+                record.mpos(),
+                record.is_reverse(),
+            );
+        }
     }
 
     /// Merge another set of accumulators into this one.
@@ -1530,6 +1555,9 @@ impl RseqcAccumulators {
             a.merge(b);
         }
         if let (Some(ref mut a), Some(b)) = (&mut self.tin, other.tin) {
+            a.merge(b);
+        }
+        if let (Some(ref mut a), Some(b)) = (&mut self.preseq, other.preseq) {
             a.merge(b);
         }
     }
