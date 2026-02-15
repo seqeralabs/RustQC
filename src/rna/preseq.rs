@@ -637,30 +637,23 @@ fn bootstrap_resample(
         }
     }
 
-    // Probabilities: p_i = count_i / total_reads
-    let total = total_reads as f64;
-
     // Multinomial resampling: draw total_reads items
-    // Use sequential approach for reproducibility with preseq
+    // Use sequential conditional binomial approach for reproducibility
     let mut resampled_counts = vec![0u64; molecule_counts.len()];
     let mut remaining = total_reads;
 
+    // Precompute the running sum to avoid O(n²) re-summation
+    let mut remaining_weight: u64 = molecule_counts.iter().sum();
+
     for (i, &count) in molecule_counts.iter().enumerate() {
-        if remaining == 0 {
+        if remaining == 0 || remaining_weight == 0 {
             break;
         }
-        let p = count as f64 / total;
-        // Draw from Binomial(remaining, p / remaining_prob)
-        // But adjust probability for remaining items
-        let remaining_prob: f64 = molecule_counts[i..].iter().sum::<u64>() as f64 / total;
-        let adjusted_p = if remaining_prob > 0.0 {
-            (p / remaining_prob).min(1.0)
-        } else {
-            0.0
-        };
+        let adjusted_p = (count as f64 / remaining_weight as f64).min(1.0);
         let draws = binomial_sample(remaining, adjusted_p, rng);
         resampled_counts[i] = draws;
         remaining = remaining.saturating_sub(draws);
+        remaining_weight = remaining_weight.saturating_sub(count);
     }
 
     // Convert resampled counts back to histogram
