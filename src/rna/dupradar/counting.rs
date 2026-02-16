@@ -724,6 +724,21 @@ fn process_chromosome_batch(
         .map(|s| s.to_uppercase())
         .collect();
 
+    // Pre-compute GTF chromosome names per TID (apply prefix/mapping once,
+    // not on every read)
+    let tid_to_gtf_chrom: Vec<String> = tid_to_name
+        .iter()
+        .map(|bam_chrom| {
+            if let Some(mapped) = chrom_mapping.get(bam_chrom.as_str()) {
+                mapped.clone()
+            } else if let Some(prefix) = chrom_prefix {
+                format!("{}{}", prefix, bam_chrom)
+            } else {
+                bam_chrom.clone()
+            }
+        })
+        .collect();
+
     // Open an indexed reader for this thread (supports BAM with .bai/.csi and CRAM with .crai)
     let mut bam = bam::IndexedReader::from_path(bam_path)
         .with_context(|| format!("Failed to open indexed alignment file: {}", bam_path))?;
@@ -830,17 +845,8 @@ fn process_chromosome_batch(
             if rec_tid < 0 || rec_tid as usize >= tid_to_name.len() {
                 continue;
             }
-            let bam_chrom = &tid_to_name[rec_tid as usize];
-            // Apply chromosome name prefix and/or mapping (alignment name -> GTF name)
-            let prefixed_chrom;
-            let chrom = if let Some(mapped) = chrom_mapping.get(bam_chrom.as_str()) {
-                mapped.as_str()
-            } else if let Some(prefix) = chrom_prefix {
-                prefixed_chrom = format!("{}{}", prefix, bam_chrom);
-                prefixed_chrom.as_str()
-            } else {
-                bam_chrom.as_str()
-            };
+            // Use pre-computed GTF chromosome name (prefix/mapping applied once at init)
+            let chrom = tid_to_gtf_chrom[rec_tid as usize].as_str();
 
             // Find gene overlaps using CIGAR-aware aligned blocks
             gene_hits.clear();
@@ -1299,19 +1305,10 @@ pub fn count_reads(
             if tid < 0 || tid as usize >= tid_to_name.len() {
                 continue;
             }
-            let bam_chrom = &tid_to_name[tid as usize];
-            let prefixed_chrom;
-            let chrom = if let Some(mapped) = chrom_mapping.get(bam_chrom.as_str()) {
-                mapped.as_str()
-            } else if let Some(prefix) = chrom_prefix {
-                prefixed_chrom = format!("{}{}", prefix, bam_chrom);
-                prefixed_chrom.as_str()
-            } else {
-                bam_chrom.as_str()
-            };
+            let chrom = &tid_to_rseqc_chrom[tid as usize];
 
             gene_hits.clear();
-            if let Some(chrom_idx) = index.get(chrom) {
+            if let Some(chrom_idx) = index.get(chrom.as_str()) {
                 cigar_to_aligned_blocks(
                     record.pos() as u64,
                     &record.cigar(),

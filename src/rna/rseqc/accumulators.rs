@@ -765,9 +765,8 @@ impl ReadDupAccum {
             return;
         }
 
-        // Sequence-based: hash the uppercased sequence
-        let seq = record.seq().as_bytes();
-        let seq_hash = hash_sequence(&seq);
+        // Sequence-based: hash directly from BAM 4-bit encoding (no allocation)
+        let seq_hash = hash_sequence_encoded(&record.seq());
         *self.seq_dup.entry(seq_hash).or_insert(0) += 1;
 
         // Position-based: hash key from CIGAR (avoids string allocation)
@@ -790,19 +789,24 @@ impl ReadDupAccum {
 
 /// Hash a read sequence to u128 for deduplication.
 ///
+/// Reads directly from the BAM 4-bit encoded nucleotide representation,
+/// avoiding the allocation that `seq.as_bytes()` would require. Each base
+/// is already case-insensitive in 4-bit encoding, so no uppercasing is needed.
+///
 /// Uses two rounds of SipHash-1-3 (via `DefaultHasher`) to produce a 128-bit
-/// fingerprint. The two halves are correlated (h2 is seeded from h1 + length),
-/// so effective collision resistance is ~64 bits (birthday bound ~2^32). This
-/// is more than sufficient for typical RNA-seq datasets (< 1B distinct reads).
-fn hash_sequence(seq: &[u8]) -> u128 {
+/// fingerprint. Effective collision resistance is ~64 bits (birthday bound ~2^32),
+/// more than sufficient for typical RNA-seq datasets (< 1B distinct reads).
+fn hash_sequence_encoded(seq: &bam::record::Seq<'_>) -> u128 {
+    let len = seq.len();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    for &b in seq {
-        b.to_ascii_uppercase().hash(&mut hasher);
+    for i in 0..len {
+        // encoded_base returns a 4-bit IUPAC code (0-15), inherently case-insensitive
+        seq.encoded_base(i).hash(&mut hasher);
     }
     // DefaultHasher produces u64; extend to u128 by double-hashing with length
     let h1 = hasher.finish();
     let mut hasher2 = std::collections::hash_map::DefaultHasher::new();
-    seq.len().hash(&mut hasher2);
+    len.hash(&mut hasher2);
     h1.hash(&mut hasher2);
     let h2 = hasher2.finish();
     (h1 as u128) << 64 | (h2 as u128)
