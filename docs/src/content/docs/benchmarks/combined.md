@@ -36,8 +36,8 @@ to GRCh38 (63,086 genes).
 | preseq lc_extrap | ~3m | -- |
 | Qualimap rnaseq | ~10m | -- |
 | Biotype summaries | Additional scripting | -- |
-| **All outputs, single pass** | -- | **5m 12s** |
-| **Total** | **~2h 5m** | **5m 12s** |
+| **All outputs, single pass** | -- | **~5m** |
+| **Total** | **~2h 5m** | **~5m** |
 
 RustQC produces all outputs -- dupRadar duplication matrix, model fit, plots,
 featureCounts-compatible counts, assignment summary, biotype counts, all 7

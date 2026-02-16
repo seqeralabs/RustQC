@@ -19,11 +19,11 @@ All tools accept SAM/BAM/CRAM input and support processing multiple files in a s
 <p align="center">
 <picture>
    <source media="(prefers-color-scheme: dark)" srcset="docs/public/benchmarks/benchmark_dark.svg">
-   <img src="docs/public/benchmarks/benchmark_light.svg" alt="Benchmark: RustQC 3m 56s vs traditional tools ~1h 25m (dupRadar + featureCounts + 7 RSeQC tools)" width="600">
+   <img src="docs/public/benchmarks/benchmark_light.svg" alt="Benchmark: RustQC ~5m vs traditional tools ~2h 45m (dupRadar + featureCounts + 9 RSeQC tools + preseq + samtools + Qualimap)" width="600">
 </picture>
 </p>
 
-<p align="center"><em>Run time for a 10 GB paired-end BAM (dupRadar + featureCounts + RSeQC)</em></p>
+<p align="center"><em>Run time for a 10 GB paired-end BAM (dupRadar + featureCounts + RSeQC + preseq + samtools + Qualimap)</em></p>
 
 ## Available tools
 

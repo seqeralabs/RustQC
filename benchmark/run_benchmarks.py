@@ -3,7 +3,8 @@
 Benchmark runner for RustQC vs. upstream tools.
 
 Runs benchmarks for dupRadar (R), featureCounts (Subread), RSeQC (Python),
-and RustQC. Profiles CPU and memory usage with psrecord.
+preseq, samtools, Qualimap, and RustQC. Profiles CPU and memory usage with
+psrecord.
 
 Usage:
     python3 benchmark/run_benchmarks.py --all
@@ -34,6 +35,9 @@ DUPRADAR_IMG = (
 SUBREAD_IMG = "wave.seqera.io/wt/30bc38d2ad74/wave/build:subread--d7eae49d8c0e1b66"
 RSEQC_IMG = "wave.seqera.io/wt/ea3e9f972b6e/wave/build:rseqc-5.0.4--14c99cde3bff8d57"
 RBASE_IMG = "wave.seqera.io/wt/d63a19ed5f77/wave/build:r-base--6fa87e5d876579f1"
+PRESEQ_IMG = "quay.io/biocontainers/preseq:3.2.0--h4ac6f70_3"
+SAMTOOLS_IMG = "quay.io/biocontainers/samtools:1.21--h50ea8bc_0"
+QUALIMAP_IMG = "quay.io/biocontainers/qualimap:2.3--hdfd78af_0"
 DOCKER_PLATFORM = "linux/amd64"
 
 # ---------------------------------------------------------------------------
@@ -388,6 +392,171 @@ def run_rseqc(ds_name: str, ds: dict, root: Path) -> list[dict]:
     return results
 
 
+def run_preseq(ds_name: str, ds: dict, root: Path) -> dict:
+    """Run preseq lc_extrap via Docker."""
+    print(f"\n{'=' * 60}")
+    print(f"preseq lc_extrap — {ds_name}")
+    print(f"{'=' * 60}")
+    docker_pull(PRESEQ_IMG)
+
+    outdir = ensure_dir(root / "benchmark" / "preseq" / ds_name)
+    bam = (root / ds["bam"]).resolve()
+
+    preseq_args = ["preseq", "lc_extrap", "-bam", "-seed", "1"]
+    if ds["paired"]:
+        preseq_args.append("-pe")
+    preseq_args.extend(["-o", "/data/output/lc_extrap.txt", "/data/input.bam"])
+
+    cmd = [
+        "docker",
+        "run",
+        "--rm",
+        "--platform",
+        DOCKER_PLATFORM,
+        "-v",
+        f"{bam}:/data/input.bam:ro",
+        "-v",
+        f"{bam}.bai:/data/input.bam.bai:ro",
+        "-v",
+        f"{outdir}:/data/output",
+        PRESEQ_IMG,
+    ] + preseq_args
+    r = run_profiled(
+        cmd, root / "benchmark" / "profiling" / "preseq" / ds_name, "preseq"
+    )
+    r["dataset"] = ds_name
+    return r
+
+
+def run_samtools(ds_name: str, ds: dict, root: Path) -> list[dict]:
+    """Run samtools flagstat, idxstats, and stats via Docker."""
+    print(f"\n{'=' * 60}")
+    print(f"samtools — {ds_name}")
+    print(f"{'=' * 60}")
+    docker_pull(SAMTOOLS_IMG)
+
+    outdir = ensure_dir(root / "benchmark" / "samtools" / ds_name)
+    bam = (root / ds["bam"]).resolve()
+
+    docker_base = [
+        "docker",
+        "run",
+        "--rm",
+        "--platform",
+        DOCKER_PLATFORM,
+        "-v",
+        f"{bam}:/data/input.bam:ro",
+        "-v",
+        f"{bam}.bai:/data/input.bam.bai:ro",
+        "-v",
+        f"{outdir}:/data/output",
+        SAMTOOLS_IMG,
+    ]
+
+    tool_cmds = {
+        "samtools_flagstat": "samtools flagstat /data/input.bam > /data/output/flagstat.txt",
+        "samtools_idxstats": "samtools idxstats /data/input.bam > /data/output/idxstats.txt",
+        "samtools_stats": "samtools stats /data/input.bam > /data/output/stats.txt",
+    }
+
+    results = []
+    for tool, tool_cmd in tool_cmds.items():
+        print(f"\n--- {tool} ---")
+        cmd = docker_base + ["bash", "-c", tool_cmd]
+        r = run_profiled(
+            cmd,
+            root / "benchmark" / "profiling" / "samtools" / tool / ds_name,
+            tool,
+        )
+        r["dataset"] = ds_name
+        results.append(r)
+
+    return results
+
+
+def run_tin(ds_name: str, ds: dict, root: Path) -> dict:
+    """Run RSeQC tin.py via Docker."""
+    print(f"\n{'=' * 60}")
+    print(f"RSeQC: tin.py — {ds_name}")
+    print(f"{'=' * 60}")
+    docker_pull(RSEQC_IMG)
+
+    outdir = ensure_dir(root / "benchmark" / "tin" / ds_name)
+    bam = (root / ds["bam"]).resolve()
+    bai = (root / (ds["bam"] + ".bai")).resolve()
+    bed = (root / ds["bed"]).resolve()
+
+    cmd = [
+        "docker",
+        "run",
+        "--rm",
+        "--platform",
+        DOCKER_PLATFORM,
+        "-v",
+        f"{bam}:/data/input.bam:ro",
+        "-v",
+        f"{bai}:/data/input.bam.bai:ro",
+        "-v",
+        f"{bed}:/data/input.bed:ro",
+        "-v",
+        f"{outdir}:/data/output",
+        "-w",
+        "/data/output",
+        RSEQC_IMG,
+        "tin.py",
+        "-i",
+        "/data/input.bam",
+        "-r",
+        "/data/input.bed",
+    ]
+    r = run_profiled(cmd, root / "benchmark" / "profiling" / "tin" / ds_name, "tin")
+    r["dataset"] = ds_name
+    return r
+
+
+def run_qualimap(ds_name: str, ds: dict, root: Path) -> dict:
+    """Run Qualimap rnaseq via Docker for gene body coverage."""
+    print(f"\n{'=' * 60}")
+    print(f"Qualimap rnaseq — {ds_name}")
+    print(f"{'=' * 60}")
+    docker_pull(QUALIMAP_IMG)
+
+    outdir = ensure_dir(root / "benchmark" / "qualimap" / ds_name)
+    bam = (root / ds["bam"]).resolve()
+    gtf = (root / ds["gtf"]).resolve()
+
+    cmd = [
+        "docker",
+        "run",
+        "--rm",
+        "--platform",
+        DOCKER_PLATFORM,
+        "-v",
+        f"{bam}:/data/input.bam:ro",
+        "-v",
+        f"{bam}.bai:/data/input.bam.bai:ro",
+        "-v",
+        f"{gtf}:/data/input.gtf:ro",
+        "-v",
+        f"{outdir}:/data/output",
+        QUALIMAP_IMG,
+        "qualimap",
+        "rnaseq",
+        "-bam",
+        "/data/input.bam",
+        "-gtf",
+        "/data/input.gtf",
+        "-outdir",
+        "/data/output",
+        "--java-mem-size=8G",
+    ]
+    r = run_profiled(
+        cmd, root / "benchmark" / "profiling" / "qualimap" / ds_name, "qualimap"
+    )
+    r["dataset"] = ds_name
+    return r
+
+
 def run_rustqc(ds_name: str, ds: dict, root: Path) -> dict:
     """Run RustQC natively."""
     print(f"\n{'=' * 60}")
@@ -436,13 +605,43 @@ def generate_svgs(results: list[dict], root: Path) -> None:
         print("No large-dataset results — skipping SVG generation.")
         return
 
-    # Order: RustQC, featureCounts, dupRadar, then each RSeQC tool
-    order = ["RustQC", "featureCounts", "dupRadar"] + RSEQC_TOOLS
+    # Order: RustQC first, then upstream tools sorted by category
+    order = (
+        ["RustQC", "featureCounts", "dupRadar"]
+        + RSEQC_TOOLS
+        + [
+            "tin",
+            "preseq",
+            "samtools_flagstat",
+            "samtools_idxstats",
+            "samtools_stats",
+            "qualimap",
+        ]
+    )
+    # Pretty display names for SVG labels
+    display_names = {
+        "RustQC": "RustQC",
+        "featureCounts": "featureCounts",
+        "dupRadar": "dupRadar",
+        "bam_stat": "RSeQC: bam_stat",
+        "infer_experiment": "RSeQC: infer_experiment",
+        "read_duplication": "RSeQC: read_duplication",
+        "read_distribution": "RSeQC: read_distribution",
+        "junction_annotation": "RSeQC: junction_annotation",
+        "junction_saturation": "RSeQC: junction_saturation",
+        "inner_distance": "RSeQC: inner_distance",
+        "tin": "RSeQC: tin.py",
+        "preseq": "preseq lc_extrap",
+        "samtools_flagstat": "samtools flagstat",
+        "samtools_idxstats": "samtools idxstats",
+        "samtools_stats": "samtools stats",
+        "qualimap": "Qualimap rnaseq",
+    }
     bars: list[tuple[str, float]] = []
     for name in order:
         match = [r for r in large if r["tool"] == name]
         if match:
-            bars.append((name, match[0]["wall_seconds"]))
+            bars.append((display_names.get(name, name), match[0]["wall_seconds"]))
     if not bars:
         return
 
@@ -580,17 +779,31 @@ def main() -> None:
     g.add_argument("--dupradar", action="store_true")
     g.add_argument("--featurecounts", action="store_true")
     g.add_argument("--rseqc", action="store_true")
+    g.add_argument("--preseq", action="store_true")
+    g.add_argument("--samtools", action="store_true")
+    g.add_argument("--tin", action="store_true")
+    g.add_argument("--qualimap", action="store_true")
     d = parser.add_argument_group("Dataset")
     d.add_argument("--small-only", action="store_true")
     d.add_argument("--large-only", action="store_true")
     parser.add_argument("--skip-svg", action="store_true", help="Skip SVG generation")
     args = parser.parse_args()
 
-    if not (
-        args.all or args.rustqc or args.dupradar or args.featurecounts or args.rseqc
-    ):
+    tool_selected = (
+        args.all
+        or args.rustqc
+        or args.dupradar
+        or args.featurecounts
+        or args.rseqc
+        or args.preseq
+        or args.samtools
+        or args.tin
+        or args.qualimap
+    )
+    if not tool_selected:
         parser.error(
-            "Select tools: --all, --rustqc, --dupradar, --featurecounts, --rseqc"
+            "Select tools: --all, --rustqc, --dupradar, --featurecounts, --rseqc, "
+            "--preseq, --samtools, --tin, --qualimap"
         )
 
     # Must run from repo root
@@ -604,7 +817,17 @@ def main() -> None:
         assert (root / "target/release/rustqc").exists(), (
             "Build first: cargo build --release"
         )
-    if args.dupradar or args.featurecounts or args.rseqc or args.all:
+    needs_docker = (
+        args.dupradar
+        or args.featurecounts
+        or args.rseqc
+        or args.preseq
+        or args.samtools
+        or args.tin
+        or args.qualimap
+        or args.all
+    )
+    if needs_docker:
         r = subprocess.run(["docker", "info"], capture_output=True)
         assert r.returncode == 0, "Docker is not running"
 
@@ -632,6 +855,14 @@ def main() -> None:
             results.append(run_featurecounts(name, ds, root))
         if args.rseqc or args.all:
             results.extend(run_rseqc(name, ds, root))
+        if args.preseq or args.all:
+            results.append(run_preseq(name, ds, root))
+        if args.samtools or args.all:
+            results.extend(run_samtools(name, ds, root))
+        if args.tin or args.all:
+            results.append(run_tin(name, ds, root))
+        if args.qualimap or args.all:
+            results.append(run_qualimap(name, ds, root))
         if args.rustqc or args.all:
             results.append(run_rustqc(name, ds, root))
 

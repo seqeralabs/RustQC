@@ -29,8 +29,8 @@ export const base = import.meta.env.BASE_URL;
       </div>
     </div>
     <div class="benchmark-chart">
-      <img class="only-dark" src={`${base}benchmarks/benchmark_dark.svg`} alt="Benchmark: RustQC 3m 56s vs traditional tools ~1h 25m" />
-      <img class="only-light" src={`${base}benchmarks/benchmark_light.svg`} alt="Benchmark: RustQC 3m 56s vs traditional tools ~1h 25m" />
+      <img class="only-dark" src={`${base}benchmarks/benchmark_dark.svg`} alt="Benchmark: RustQC ~5m vs traditional tools ~2h 45m" />
+      <img class="only-light" src={`${base}benchmarks/benchmark_light.svg`} alt="Benchmark: RustQC ~5m vs traditional tools ~2h 45m" />
       <p><em>Run time for a 10 GB paired-end BAM</em></p>
     </div>
     <div class="sl-flex actions not-content">
@@ -145,8 +145,8 @@ export const base = import.meta.env.BASE_URL;
     Over 800,000 values compared with zero mismatches.
   </Card>
   <Card title="Up to 21x Faster" icon="rocket">
-    Processes a 10 GB BAM file in under 6 minutes vs ~1h 25m for the
-    equivalent tools — saving over 80 minutes per sample for the same results.
+    Processes a 10 GB BAM file in under 5 minutes vs ~2h 45m for the
+    equivalent tools — saving over 2.5 hours per sample for the same results.
   </Card>
   <Card title="All-in-One" icon="puzzle">
     Combines dupRadar, featureCounts, biotype counting, 7 RSeQC metrics,

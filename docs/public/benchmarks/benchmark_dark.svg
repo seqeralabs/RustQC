@@ -1,75 +1,101 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 380" width="720" height="380">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 530">
   <style>
-    text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+    text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; }
   </style>
 
-  <!-- Grid lines -->
-  <line x1="190" y1="10" x2="190" y2="352" stroke="#313244" stroke-width="1"/>
-  <line x1="265.7" y1="10" x2="265.7" y2="352" stroke="#313244" stroke-width="0.5" stroke-dasharray="4,3"/>
-  <line x1="341.4" y1="10" x2="341.4" y2="352" stroke="#313244" stroke-width="0.5" stroke-dasharray="4,3"/>
-  <line x1="417.1" y1="10" x2="417.1" y2="352" stroke="#313244" stroke-width="0.5" stroke-dasharray="4,3"/>
-  <line x1="492.9" y1="10" x2="492.9" y2="352" stroke="#313244" stroke-width="0.5" stroke-dasharray="4,3"/>
-  <line x1="568.6" y1="10" x2="568.6" y2="352" stroke="#313244" stroke-width="0.5" stroke-dasharray="4,3"/>
-  <line x1="644.3" y1="10" x2="644.3" y2="352" stroke="#313244" stroke-width="0.5" stroke-dasharray="4,3"/>
-  <line x1="720" y1="10" x2="720" y2="352" stroke="#313244" stroke-width="0.5" stroke-dasharray="4,3"/>
+  <!-- Grid lines (dashed every 5 min, solid at y-axis) -->
+  <line x1="190" y1="10" x2="190" y2="525" stroke="#313244" stroke-width="1"/>
+  <line x1="288" y1="10" x2="288" y2="525" stroke="#313244" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <line x1="386" y1="10" x2="386" y2="525" stroke="#313244" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <line x1="484" y1="10" x2="484" y2="525" stroke="#313244" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <line x1="582" y1="10" x2="582" y2="525" stroke="#313244" stroke-width="0.5" stroke-dasharray="4,4"/>
+  <line x1="680" y1="10" x2="680" y2="525" stroke="#313244" stroke-width="0.5" stroke-dasharray="4,4"/>
 
-  <!-- X-axis labels -->
-  <text x="190" y="368" text-anchor="middle" fill="#a6adc8" font-size="11">0</text>
-  <text x="265.7" y="368" text-anchor="middle" fill="#a6adc8" font-size="11">5m</text>
-  <text x="341.4" y="368" text-anchor="middle" fill="#a6adc8" font-size="11">10m</text>
-  <text x="417.1" y="368" text-anchor="middle" fill="#a6adc8" font-size="11">15m</text>
-  <text x="492.9" y="368" text-anchor="middle" fill="#a6adc8" font-size="11">20m</text>
-  <text x="568.6" y="368" text-anchor="middle" fill="#a6adc8" font-size="11">25m</text>
-  <text x="644.3" y="368" text-anchor="middle" fill="#a6adc8" font-size="11">30m</text>
-  <text x="720" y="368" text-anchor="middle" fill="#a6adc8" font-size="11">35m</text>
+  <!-- Grid labels -->
+  <text x="190" y="525" fill="#a6adc8" font-size="9" text-anchor="middle" dy="9">0m</text>
+  <text x="288" y="525" fill="#a6adc8" font-size="9" text-anchor="middle" dy="9">5m</text>
+  <text x="386" y="525" fill="#a6adc8" font-size="9" text-anchor="middle" dy="9">10m</text>
+  <text x="484" y="525" fill="#a6adc8" font-size="9" text-anchor="middle" dy="9">15m</text>
+  <text x="582" y="525" fill="#a6adc8" font-size="9" text-anchor="middle" dy="9">20m</text>
+  <text x="680" y="525" fill="#a6adc8" font-size="9" text-anchor="middle" dy="9">25m</text>
 
-  <!-- Row 1: RustQC — 3m 56s = 236s -->
-  <text x="178" y="30" text-anchor="end" fill="#cdd6f4" font-size="12" font-weight="bold">RustQC (10 threads)</text>
-  <rect x="190" y="18" width="59.6" height="24" rx="3" fill="#cba6f7"/>
-  <text x="255.6" y="34" text-anchor="start" fill="#cdd6f4" font-size="11" font-weight="bold">3m 56s</text>
+  <!-- Row 1: RustQC (280s) -->
+  <text x="178" y="32" fill="#cdd6f4" font-size="11.5" font-weight="600" text-anchor="end">RustQC (10 threads)</text>
+  <rect x="190" y="20" width="55" height="24" rx="3" fill="#cba6f7"/>
+  <text x="250" y="35" fill="#cdd6f4" font-size="10" font-weight="500">4m 40s</text>
 
-  <!-- Row 2: featureCounts — 3m 39s -->
-  <text x="178" y="62" text-anchor="end" fill="#a6adc8" font-size="12">featureCounts</text>
-  <rect x="190" y="50" width="55.3" height="24" rx="3" fill="#7f849c"/>
-  <text x="251.3" y="66" text-anchor="start" fill="#cdd6f4" font-size="11">3m 39s</text>
+  <!-- Row 2: featureCounts (219s) -->
+  <text x="178" y="64" fill="#cdd6f4" font-size="11.5" text-anchor="end">featureCounts</text>
+  <rect x="190" y="52" width="43" height="24" rx="3" fill="#7f849c"/>
+  <text x="238" y="67" fill="#cdd6f4" font-size="10">3m 39s</text>
 
-  <!-- Row 3: dupRadar — 27m 21s -->
-  <text x="178" y="94" text-anchor="end" fill="#a6adc8" font-size="12">dupRadar</text>
-  <rect x="190" y="82" width="414.1" height="24" rx="3" fill="#7f849c"/>
-  <text x="610.1" y="98" text-anchor="start" fill="#cdd6f4" font-size="11">27m 21s</text>
+  <!-- Row 3: dupRadar (1641s) -->
+  <text x="178" y="96" fill="#cdd6f4" font-size="11.5" text-anchor="end">dupRadar</text>
+  <rect x="190" y="84" width="322" height="24" rx="3" fill="#7f849c"/>
+  <text x="517" y="99" fill="#cdd6f4" font-size="10">27m 21s</text>
 
-  <!-- Row 4: RSeQC: infer_experiment — 7s -->
-  <text x="178" y="126" text-anchor="end" fill="#a6adc8" font-size="12">RSeQC: infer_experiment</text>
-  <rect x="190" y="114" width="4" height="24" rx="3" fill="#7f849c"/>
-  <text x="200" y="130" text-anchor="start" fill="#cdd6f4" font-size="11">7s</text>
+  <!-- Row 4: preseq (240s) -->
+  <text x="178" y="128" fill="#cdd6f4" font-size="11.5" text-anchor="end">preseq</text>
+  <rect x="190" y="116" width="47" height="24" rx="3" fill="#7f849c"/>
+  <text x="242" y="131" fill="#cdd6f4" font-size="10">~4m</text>
 
-  <!-- Row 5: RSeQC: inner_distance — 1m 09s -->
-  <text x="178" y="158" text-anchor="end" fill="#a6adc8" font-size="12">RSeQC: inner_distance</text>
-  <rect x="190" y="146" width="17.4" height="24" rx="3" fill="#7f849c"/>
-  <text x="213.4" y="162" text-anchor="start" fill="#cdd6f4" font-size="11">1m 09s</text>
+  <!-- Row 5: samtools flagstat (60s) -->
+  <text x="178" y="160" fill="#cdd6f4" font-size="11.5" text-anchor="end">samtools flagstat</text>
+  <rect x="190" y="148" width="12" height="24" rx="3" fill="#7f849c"/>
+  <text x="207" y="163" fill="#cdd6f4" font-size="10">~1m</text>
 
-  <!-- Row 6: RSeQC: junction_annotation — 4m 37s -->
-  <text x="178" y="190" text-anchor="end" fill="#a6adc8" font-size="12">RSeQC: junction_annotation</text>
-  <rect x="190" y="178" width="69.9" height="24" rx="3" fill="#7f849c"/>
-  <text x="265.9" y="194" text-anchor="start" fill="#cdd6f4" font-size="11">4m 37s</text>
+  <!-- Row 6: samtools idxstats (1s) -->
+  <text x="178" y="192" fill="#cdd6f4" font-size="11.5" text-anchor="end">samtools idxstats</text>
+  <rect x="190" y="180" width="4" height="24" rx="3" fill="#7f849c"/>
+  <text x="199" y="195" fill="#cdd6f4" font-size="10">~1s</text>
 
-  <!-- Row 7: RSeQC: read_distribution — 6m 00s -->
-  <text x="178" y="222" text-anchor="end" fill="#a6adc8" font-size="12">RSeQC: read_distribution</text>
-  <rect x="190" y="210" width="90.9" height="24" rx="3" fill="#7f849c"/>
-  <text x="286.9" y="226" text-anchor="start" fill="#cdd6f4" font-size="11">6m 00s</text>
+  <!-- Row 7: samtools stats (180s) -->
+  <text x="178" y="224" fill="#cdd6f4" font-size="11.5" text-anchor="end">samtools stats</text>
+  <rect x="190" y="212" width="35" height="24" rx="3" fill="#7f849c"/>
+  <text x="230" y="227" fill="#cdd6f4" font-size="10">~3m</text>
 
-  <!-- Row 8: RSeQC: bam_stat — 6m 07s -->
-  <text x="178" y="254" text-anchor="end" fill="#a6adc8" font-size="12">RSeQC: bam_stat</text>
-  <rect x="190" y="242" width="92.6" height="24" rx="3" fill="#7f849c"/>
-  <text x="288.6" y="258" text-anchor="start" fill="#cdd6f4" font-size="11">6m 07s</text>
+  <!-- Row 8: Qualimap (300s) -->
+  <text x="178" y="256" fill="#cdd6f4" font-size="11.5" text-anchor="end">Qualimap</text>
+  <rect x="190" y="244" width="59" height="24" rx="3" fill="#7f849c"/>
+  <text x="254" y="259" fill="#cdd6f4" font-size="10">~5m</text>
 
-  <!-- Row 9: RSeQC: junction_saturation — 6m 32s -->
-  <text x="178" y="286" text-anchor="end" fill="#a6adc8" font-size="12">RSeQC: junction_saturation</text>
-  <rect x="190" y="274" width="98.9" height="24" rx="3" fill="#7f849c"/>
-  <text x="294.9" y="290" text-anchor="start" fill="#cdd6f4" font-size="11">6m 32s</text>
+  <!-- Row 9: infer_experiment (7s) -->
+  <text x="178" y="288" fill="#cdd6f4" font-size="11.5" text-anchor="end">RSeQC: infer_experiment</text>
+  <rect x="190" y="276" width="4" height="24" rx="3" fill="#7f849c"/>
+  <text x="199" y="291" fill="#cdd6f4" font-size="10">7s</text>
 
-  <!-- Row 10: RSeQC: read_duplication — 29m 43s -->
-  <text x="178" y="318" text-anchor="end" fill="#a6adc8" font-size="12">RSeQC: read_duplication</text>
-  <rect x="190" y="306" width="450" height="24" rx="3" fill="#7f849c"/>
-  <text x="646" y="322" text-anchor="start" fill="#cdd6f4" font-size="11">29m 43s</text>
+  <!-- Row 10: inner_distance (69s) -->
+  <text x="178" y="320" fill="#cdd6f4" font-size="11.5" text-anchor="end">RSeQC: inner_distance</text>
+  <rect x="190" y="308" width="14" height="24" rx="3" fill="#7f849c"/>
+  <text x="209" y="323" fill="#cdd6f4" font-size="10">1m 09s</text>
+
+  <!-- Row 11: junction_annotation (277s) -->
+  <text x="178" y="352" fill="#cdd6f4" font-size="11.5" text-anchor="end">RSeQC: junction_annotation</text>
+  <rect x="190" y="340" width="54" height="24" rx="3" fill="#7f849c"/>
+  <text x="249" y="355" fill="#cdd6f4" font-size="10">4m 37s</text>
+
+  <!-- Row 12: read_distribution (360s) -->
+  <text x="178" y="384" fill="#cdd6f4" font-size="11.5" text-anchor="end">RSeQC: read_distribution</text>
+  <rect x="190" y="372" width="71" height="24" rx="3" fill="#7f849c"/>
+  <text x="266" y="387" fill="#cdd6f4" font-size="10">6m 00s</text>
+
+  <!-- Row 13: bam_stat (367s) -->
+  <text x="178" y="416" fill="#cdd6f4" font-size="11.5" text-anchor="end">RSeQC: bam_stat</text>
+  <rect x="190" y="404" width="72" height="24" rx="3" fill="#7f849c"/>
+  <text x="267" y="419" fill="#cdd6f4" font-size="10">6m 07s</text>
+
+  <!-- Row 14: junction_saturation (392s) -->
+  <text x="178" y="448" fill="#cdd6f4" font-size="11.5" text-anchor="end">RSeQC: junction_saturation</text>
+  <rect x="190" y="436" width="77" height="24" rx="3" fill="#7f849c"/>
+  <text x="272" y="451" fill="#cdd6f4" font-size="10">6m 32s</text>
+
+  <!-- Row 15: RSeQC: tin.py (2700s) -->
+  <text x="178" y="480" fill="#cdd6f4" font-size="11.5" text-anchor="end">RSeQC: tin.py</text>
+  <rect x="190" y="468" width="490" height="24" rx="3" fill="#7f849c"/>
+  <text x="685" y="483" fill="#cdd6f4" font-size="10">~45m</text>
+
+  <!-- Row 16: read_duplication (1783s) -->
+  <text x="178" y="512" fill="#cdd6f4" font-size="11.5" text-anchor="end">RSeQC: read_duplication</text>
+  <rect x="190" y="500" width="350" height="24" rx="3" fill="#7f849c"/>
+  <text x="545" y="515" fill="#cdd6f4" font-size="10">29m 43s</text>
 </svg>
