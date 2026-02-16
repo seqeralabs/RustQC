@@ -48,84 +48,63 @@ const MIN_DISTINCT: u64 = 10;
 /// Accumulator that counts fragment occurrences for library complexity estimation.
 ///
 /// Counts how many times each distinct fragment is observed in the BAM file.
-/// For paired-end data, a fragment is identified by (tid, min_pos, max_pos, strand)
-/// using only read1 to avoid double-counting. For single-end data, the key is
-/// (tid, pos, strand).
+/// Matching preseq behavior: only unmapped reads (tid == -1) are skipped.
+/// Secondary, supplementary, and QC-fail reads are all counted.
 ///
-/// All mapped non-secondary non-supplementary non-QC-fail reads are counted,
-/// including duplicates (duplicate counting is the whole point).
+/// Uses a hash table to count ALL occurrences of each fragment globally. This
+/// correctly groups duplicates regardless of their order in the BAM file.
+/// Multi-thread safe (accumulators can be merged).
+///
+/// For paired-end data, a fragment is identified by `(tid, pos, mtid, mpos)` —
+/// no strand, no normalization. Both reads of a pair produce separate entries.
+/// For single-end data, the key is `(tid, pos)`.
 #[derive(Debug)]
 pub struct PreseqAccum {
     /// Maps fragment key (hash) to observation count.
     fragment_counts: HashMap<u64, u32>,
     /// Total number of fragments counted.
     pub total_fragments: u64,
-    /// Whether the library is paired-end.
-    is_paired: bool,
 }
 
 impl PreseqAccum {
     /// Create a new accumulator.
-    ///
-    /// # Arguments
-    /// * `is_paired` - Whether the library is paired-end.
-    pub fn new(is_paired: bool) -> Self {
+    pub fn new() -> Self {
         Self {
             fragment_counts: HashMap::new(),
             total_fragments: 0,
-            is_paired,
         }
     }
 
-    /// Process a BAM record, counting it if it passes filters.
+    /// Process a fragment for library complexity estimation.
+    ///
+    /// Callers are responsible for fragment-level counting:
+    /// - **PE data**: Count read1 of primary proper pairs + unpaired primary reads.
+    ///   Compute fragment boundaries: `frag_start = pos`, `frag_end = pos + tlen`.
+    ///   This matches preseq v3.2.0's `merge_mates()` behavior which creates
+    ///   fragments keyed by `(chrom, fragment_start, fragment_end)`.
+    /// - **SE data**: Count primary mapped reads with `frag_start = pos`, `frag_end = 0`.
+    ///
+    /// Each fragment is hashed and stored in a hash table. This correctly groups
+    /// all duplicates regardless of BAM order.
+    ///
+    /// Only unmapped reads (tid < 0) are skipped internally.
     ///
     /// # Arguments
-    /// * `flags` - BAM flags for the record.
     /// * `tid` - Target (chromosome) ID.
-    /// * `pos` - Record alignment position.
-    /// * `mate_tid` - Mate target ID (PE only).
-    /// * `mate_pos` - Mate position (PE only).
-    /// * `is_reverse` - Whether the record is on the reverse strand.
-    pub fn process_read(
-        &mut self,
-        flags: u16,
-        tid: i32,
-        pos: i64,
-        _mate_tid: i32,
-        mate_pos: i64,
-        is_reverse: bool,
-    ) {
-        // Skip unmapped, secondary, supplementary, QC-fail
-        if flags & 0x4 != 0 || flags & 0x100 != 0 || flags & 0x800 != 0 || flags & 0x200 != 0 {
+    /// * `frag_start` - Fragment start position (leftmost alignment position).
+    /// * `frag_end` - Fragment end position (for PE: pos + tlen; for SE: 0).
+    pub fn process_read(&mut self, tid: i32, frag_start: i64, frag_end: i64) {
+        // Only skip unmapped reads (tid == -1), matching preseq behavior
+        if tid < 0 {
             return;
         }
 
-        if self.is_paired {
-            // Only process read1 to avoid double-counting
-            if flags & 0x40 == 0 {
-                return;
-            }
-            // Skip if mate is unmapped
-            if flags & 0x8 != 0 {
-                return;
-            }
-
-            let min_pos = pos.min(mate_pos);
-            let max_pos = pos.max(mate_pos);
-            let strand: u8 = if is_reverse { 1 } else { 0 };
-
-            let key = compute_hash(tid as u64, min_pos as u64, max_pos as u64, strand as u64);
-            *self.fragment_counts.entry(key).or_insert(0) += 1;
-            self.total_fragments += 1;
-        } else {
-            let strand: u8 = if is_reverse { 1 } else { 0 };
-            let key = compute_hash(tid as u64, pos as u64, 0, strand as u64);
-            *self.fragment_counts.entry(key).or_insert(0) += 1;
-            self.total_fragments += 1;
-        }
+        let key = compute_hash(tid as u64, frag_start as u64, frag_end as u64, 0);
+        *self.fragment_counts.entry(key).or_insert(0) += 1;
+        self.total_fragments += 1;
     }
 
-    /// Merge another accumulator into this one.
+    /// Merge another accumulator into this one by combining hash tables.
     pub fn merge(&mut self, other: PreseqAccum) {
         for (key, count) in other.fragment_counts {
             *self.fragment_counts.entry(key).or_insert(0) += count;
@@ -289,34 +268,37 @@ fn qd_algorithm(ps_coeffs: &[f64]) -> Option<Vec<f64>> {
         return ps_coeffs.first().map(|&c| vec![c]);
     }
 
-    // depth = number of QD rows to compute
-    let depth = n / 2;
-    let width = n;
+    // Matches preseq quotdiff_algorithm exactly:
+    // depth = ps_coeffs.size(), tables are depth × (depth+1)
+    let depth = n;
+    let width = depth + 1;
 
     // 2D QD tables (row-major flat vectors)
-    let mut q_table = vec![0.0f64; (depth + 1) * width];
-    let mut e_table = vec![0.0f64; (depth + 1) * width];
+    let mut q_table = vec![0.0f64; depth * width];
+    let mut e_table = vec![0.0f64; depth * width];
 
     let idx = |row: usize, col: usize| -> usize { row * width + col };
 
     // Initialize first row of quotients: q[1][j] = ps[j+1]/ps[j]
-    for j in 0..n - 1 {
+    for j in 0..depth.saturating_sub(1) {
         if ps_coeffs[j].abs() < TOLERANCE {
             return None;
         }
-        q_table[idx(1, j)] = ps_coeffs[j + 1] / ps_coeffs[j];
+        if j + 1 < n {
+            q_table[idx(1, j)] = ps_coeffs[j + 1] / ps_coeffs[j];
+        }
     }
     // e_table[0][j] = 0 (already initialized)
 
     // First row of e-values: e[1][j] = q[1][j+1] - q[1][j] + e[0][j+1]
-    for j in 0..n.saturating_sub(2) {
+    for j in 0..depth.saturating_sub(1) {
         e_table[idx(1, j)] = q_table[idx(1, j + 1)] - q_table[idx(1, j)] + e_table[idx(0, j + 1)];
     }
 
-    // Build remaining QD rows
-    for i in 2..=depth {
+    // Build remaining QD rows (matching preseq: i = 2..depth-1)
+    for i in 2..depth {
         // q[i][j] = q[i-1][j+1] * e[i-1][j+1] / e[i-1][j]
-        for j in 0..n.saturating_sub(2 * i) {
+        for j in 0..depth {
             let denom = e_table[idx(i - 1, j)];
             if denom.abs() < TOLERANCE {
                 break;
@@ -324,22 +306,24 @@ fn qd_algorithm(ps_coeffs: &[f64]) -> Option<Vec<f64>> {
             q_table[idx(i, j)] = q_table[idx(i - 1, j + 1)] * e_table[idx(i - 1, j + 1)] / denom;
         }
         // e[i][j] = q[i][j+1] - q[i][j] + e[i-1][j+1]
-        for j in 0..n.saturating_sub(2 * i + 1) {
+        for j in 0..depth {
             e_table[idx(i, j)] =
                 q_table[idx(i, j + 1)] - q_table[idx(i, j)] + e_table[idx(i - 1, j + 1)];
         }
     }
 
-    // Extract CF coefficients from QD table (matching preseq convention):
+    // Extract CF coefficients (matching preseq convention):
+    // cf has exactly `depth` entries.
     // cf[0] = ps_coeffs[0]
-    // cf[i] = (i even) ? -e_table[i/2][0] : -q_table[(i+1)/2][0]
-    let mut cf_coeffs = Vec::with_capacity(2 * depth + 1);
+    // cf[i odd]  = -q_table[(i+1)/2][0]
+    // cf[i even] = -e_table[i/2][0]
+    let mut cf_coeffs = Vec::with_capacity(depth);
     cf_coeffs.push(ps_coeffs[0]);
-    for i in 1..=2 * depth {
-        if i % 2 == 0 {
-            cf_coeffs.push(-e_table[idx(i / 2, 0)]);
-        } else {
+    for i in 1..depth {
+        if i % 2 != 0 {
             cf_coeffs.push(-q_table[idx(i.div_ceil(2), 0)]);
+        } else {
+            cf_coeffs.push(-e_table[idx(i / 2, 0)]);
         }
     }
 
@@ -368,48 +352,54 @@ fn evaluate_cf(cf_coeffs: &[f64], t: f64, degree: usize) -> Option<f64> {
     }
 
     // Euler's forward recurrence (matches preseq evaluate_on_diagonal):
-    // We compute numerator/denominator iteratively:
-    //   h_{-1} = 0, h_0 = cf[0]
-    //   k_{-1} = 1, k_0 = 1
-    //   h_i = h_{i-1} + cf[i]*t * h_{i-2}
-    //   k_i = k_{i-1} + cf[i]*t * k_{i-2}
-    //   result = h_n / k_n
-    let mut prev_num2 = 0.0f64; // h_{-1}
-    let mut prev_num1 = cf_coeffs[0]; // h_0
-    let mut prev_den2 = 1.0f64; // k_{-1}
-    let mut prev_den1 = 1.0f64; // k_0
+    // Euler's forward recurrence, matching preseq's evaluate_on_diagonal:
+    //   prev_num = 0, curr_num = cf[0]
+    //   prev_den = 1, curr_den = 1
+    //   curr_num_i = curr_num_{i-1} + cf[i]*val * prev_num_{i-1}
+    //   curr_den_i = curr_den_{i-1} + cf[i]*val * prev_den_{i-1}
+    //   result = curr_num / curr_den
+    let mut prev_num = 0.0_f64;
+    let mut curr_num = cf_coeffs[0];
+    let mut prev_den = 1.0_f64;
+    let mut curr_den = 1.0_f64;
 
-    for (_i, &cf_coeff) in cf_coeffs.iter().enumerate().take(n).skip(1) {
+    let limit = n.min(cf_coeffs.len());
+    for &cf_coeff in cf_coeffs.iter().take(limit).skip(1) {
         let cf_val = cf_coeff * t;
-        let num = prev_num1 + cf_val * prev_num2;
-        let den = prev_den1 + cf_val * prev_den2;
+        let new_num = curr_num + cf_val * prev_num;
+        let new_den = curr_den + cf_val * prev_den;
 
         // Shift
-        prev_num2 = prev_num1;
-        prev_num1 = num;
-        prev_den2 = prev_den1;
-        prev_den1 = den;
+        prev_num = curr_num;
+        curr_num = new_num;
+        prev_den = curr_den;
+        curr_den = new_den;
 
-        // Rescale to avoid overflow/underflow
-        let scale = num.abs().max(den.abs());
-        if scale > 1e100 || (scale < 1e-100 && scale > 0.0) {
-            let inv_scale = 1.0 / scale;
-            prev_num1 *= inv_scale;
-            prev_num2 *= inv_scale;
-            prev_den1 *= inv_scale;
-            prev_den2 *= inv_scale;
+        // Rescale to avoid overflow/underflow (matching preseq's threshold logic)
+        let rescale_factor = curr_num.abs() + curr_den.abs();
+        if rescale_factor >= 1.0 / TOLERANCE {
+            curr_num /= rescale_factor;
+            curr_den /= rescale_factor;
+            prev_num /= rescale_factor;
+            prev_den /= rescale_factor;
+        }
+        if rescale_factor <= TOLERANCE {
+            curr_num /= rescale_factor;
+            curr_den /= rescale_factor;
+            prev_num /= rescale_factor;
+            prev_den /= rescale_factor;
         }
 
-        if !num.is_finite() || !den.is_finite() {
+        if !curr_num.is_finite() || !curr_den.is_finite() {
             return None;
         }
     }
 
-    if prev_den1.abs() < TOLERANCE {
+    if curr_den.abs() < TOLERANCE {
         return None;
     }
 
-    let val = prev_num1 / prev_den1;
+    let val = curr_num / curr_den;
     if val.is_finite() {
         Some(val)
     } else {
@@ -419,86 +409,102 @@ fn evaluate_cf(cf_coeffs: &[f64], t: f64, degree: usize) -> Option<f64> {
 
 /// Select the optimal degree for the continued fraction approximation.
 ///
-/// Tries even degrees from 4 up to max_degree, selecting the smallest
-/// degree where the extrapolation curve is non-negative, monotonically
-/// increasing, and approximately concave.
+/// Matches preseq's `optimal_cont_frac_distinct` in `continued_fraction.cpp`.
+/// Tries degrees starting at `7 + (max_terms % 2 == 0)`, stepping by 2, up to
+/// `max_terms`. For each candidate degree, evaluates `t * CF(t)` on a fine grid
+/// (step=0.05 up to search_max=100) and checks for stability: non-negative,
+/// finite, monotonically increasing, and concave (negative second derivative).
+///
+/// Falls back to trying `max_terms` if it's in [3, 6].
 ///
 /// # Arguments
 /// * `cf_coeffs` - Continued fraction coefficients.
 /// * `total_reads` - Total observed reads (N).
-/// * `n_distinct` - Total observed distinct molecules (S).
+/// * `max_terms` - Maximum number of power series terms (determines search range).
 /// * `max_extrap` - Maximum extrapolation point.
-/// * `step_size` - Step size for the test grid.
 ///
 /// # Returns
 /// The optimal degree, or None if no suitable degree is found.
 fn select_degree(
     cf_coeffs: &[f64],
     total_reads: u64,
-    n_distinct: u64,
+    max_terms: usize,
     max_extrap: f64,
-    _step_size: f64,
 ) -> Option<usize> {
     let n = total_reads as f64;
-    let s = n_distinct as f64;
 
-    let max_degree = cf_coeffs.len();
+    // preseq uses search_max = min(max_extrap/n, 100), step = 0.05
+    let search_max = (max_extrap / n).min(100.0);
+    let search_step = 0.05f64;
+    let n_test = (search_max / search_step).ceil() as usize;
 
-    // Try even degrees starting from 4 (matches preseq's search)
-    for degree in (4..=max_degree).step_by(2) {
-        let mut valid = true;
-        let mut prev_val = s;
-        let mut prev_slope = f64::MAX;
+    let check_degree = |degree: usize| -> bool {
+        if degree > cf_coeffs.len() || degree == 0 {
+            return false;
+        }
 
-        // Test on a fine grid for stability (preseq uses step=0.05 up to 100)
-        let search_max = (max_extrap / n).min(100.0);
-        let search_step = 0.05f64;
-        let n_test = (search_max / search_step).ceil() as usize;
+        // Evaluate t * CF(t) on the grid (preseq's extrapolate_distinct)
+        let mut prev_val = 0.0f64;
+        let mut prev_deriv = 0.0f64;
 
         for i in 1..=n_test {
-            let fold = search_step * i as f64;
+            let t = search_step * i as f64;
 
-            let cf_val = match evaluate_cf(cf_coeffs, fold, degree) {
+            let cf_val = match evaluate_cf(cf_coeffs, t, degree) {
                 Some(v) => v,
-                None => {
-                    valid = false;
-                    break;
-                }
+                None => return false,
             };
 
-            let val = s + fold * cf_val;
+            let val = t * cf_val;
 
-            // Check non-negative
-            if val < 0.0 {
-                valid = false;
-                break;
+            // Check non-negative and finite
+            if val < 0.0 || !val.is_finite() {
+                return false;
             }
 
-            // Check monotonically increasing (with small tolerance)
-            if val < prev_val - 1e-6 {
-                valid = false;
-                break;
+            // Check monotonically increasing
+            if val < prev_val {
+                return false;
             }
 
-            // Check approximately concave (slope should be non-increasing)
-            if i > 1 {
-                let slope = val - prev_val;
-                if slope > prev_slope + 1e-4 {
-                    valid = false;
-                    break;
+            // Check concavity (second derivative <= 0)
+            if i >= 2 {
+                let curr_deriv = val - prev_val;
+                if curr_deriv > prev_deriv {
+                    return false;
                 }
-                prev_slope = slope;
+                prev_deriv = curr_deriv;
             } else {
-                prev_slope = val - prev_val;
+                prev_deriv = val - prev_val;
             }
 
             prev_val = val;
         }
 
-        if valid {
+        true
+    };
+
+    // For small max_terms (3-6), just check if the full CF works
+    if (3..=6).contains(&max_terms) {
+        if check_degree(max_terms) {
+            debug!(
+                "Selected CF degree {} for extrapolation (small max_terms)",
+                max_terms
+            );
+            return Some(max_terms);
+        }
+        return None;
+    }
+
+    // preseq: for i = 7 + (max_terms % 2 == 0); i <= max_terms; i += 2
+    let start = 7 + if max_terms.is_multiple_of(2) { 1 } else { 0 };
+    let mut degree = start;
+    while degree <= max_terms {
+        if check_degree(degree) {
             debug!("Selected CF degree {} for extrapolation", degree);
             return Some(degree);
         }
+        degree += 2;
     }
 
     None
@@ -602,11 +608,17 @@ fn power_series_coeffs_defects(
 // Bootstrap confidence intervals
 // ============================================================================
 
-/// Resample a histogram using multinomial sampling to create a bootstrap replicate.
+/// Resample a histogram using categorical (multinomial) sampling to create a bootstrap
+/// replicate, matching preseq's `resample_hist` implementation.
+///
+/// preseq builds a "distinct-counts histogram" — the histogram of multiplicities
+/// of the original histogram — and uses `std::discrete_distribution` (categorical
+/// sampling) to draw `n_distinct` samples. Each draw picks a frequency bin
+/// weighted by how many distinct molecules have that frequency, then the
+/// selected bin's count is incremented.
 ///
 /// # Arguments
 /// * `histogram` - Original frequency-of-frequencies.
-/// * `total_reads` - Total reads in original sample.
 /// * `rng` - Random number generator.
 ///
 /// # Returns
@@ -614,99 +626,64 @@ fn power_series_coeffs_defects(
 /// number of distinct molecules in the resample.
 fn bootstrap_resample(
     histogram: &[(u64, u64)],
-    total_reads: u64,
     rng: &mut ChaCha8Rng,
 ) -> (Vec<(u64, u64)>, u64, u64) {
-    // Expand histogram to a list of counts (one entry per distinct molecule)
-    // Instead of actually expanding, we resample by drawing from a multinomial
-    // where each molecule contributes its count to the total
+    use rand::distr::weighted::WeightedIndex;
 
-    // Total distinct molecules
-    let n_distinct: u64 = histogram.iter().map(|&(_, n_j)| n_j).sum();
-
-    // Build probability distribution: each molecule has count/total_reads probability
-    // of being drawn. We resample total_reads times.
-    // Efficient approach: for each frequency j with n_j molecules, each of those
-    // n_j molecules contributes j reads out of total_reads total.
-
-    // Create a flat vector: each entry is the count for that molecule
-    let mut molecule_counts: Vec<u64> = Vec::with_capacity(n_distinct as usize);
+    // Build parallel vectors of histogram indices and their counts (n_j values).
+    // These are the indices into the original histogram that have nonzero n_j.
+    // In preseq this is "orig_hist_distinct_counts" (the indices) and
+    // "distinct_orig_hist" (the positive n_j values).
+    let mut hist_indices: Vec<u64> = Vec::new();
+    let mut hist_weights: Vec<u64> = Vec::new();
     for &(j, n_j) in histogram {
-        for _ in 0..n_j {
-            molecule_counts.push(j);
+        if n_j > 0 {
+            hist_indices.push(j);
+            hist_weights.push(n_j);
         }
     }
 
-    // Multinomial resampling: draw total_reads items
-    // Use sequential conditional binomial approach for reproducibility
-    let mut resampled_counts = vec![0u64; molecule_counts.len()];
-    let mut remaining = total_reads;
+    // Total distinct molecules = sum of all n_j values
+    let n_distinct: u64 = hist_weights.iter().sum();
 
-    // Precompute the running sum to avoid O(n²) re-summation
-    let mut remaining_weight: u64 = molecule_counts.iter().sum();
-
-    for (i, &count) in molecule_counts.iter().enumerate() {
-        if remaining == 0 || remaining_weight == 0 {
-            break;
-        }
-        let adjusted_p = (count as f64 / remaining_weight as f64).min(1.0);
-        let draws = binomial_sample(remaining, adjusted_p, rng);
-        resampled_counts[i] = draws;
-        remaining = remaining.saturating_sub(draws);
-        remaining_weight = remaining_weight.saturating_sub(count);
+    if n_distinct == 0 || hist_weights.is_empty() {
+        return (Vec::new(), 0, 0);
     }
 
-    // Convert resampled counts back to histogram
+    // Categorical sampling: draw n_distinct samples weighted by hist_weights.
+    // Each draw selects a frequency bin; we increment that bin's count in the
+    // resampled histogram.
+    let weights_f64: Vec<f64> = hist_weights.iter().map(|&w| w as f64).collect();
+    let dist = match WeightedIndex::new(&weights_f64) {
+        Ok(d) => d,
+        Err(_) => return (Vec::new(), 0, 0),
+    };
+
+    // sample[k] = how many times frequency bin k was drawn
+    let mut sample = vec![0u64; hist_indices.len()];
+    for _ in 0..n_distinct {
+        let idx = dist.sample(rng);
+        sample[idx] += 1;
+    }
+
+    // Reconstruct the histogram from the resampled data.
+    // For each frequency bin j (from hist_indices), if sample[k] > 0, then
+    // sample[k] distinct molecules have frequency j in the bootstrap sample.
     let mut freq_of_freq: HashMap<u64, u64> = HashMap::new();
-    let mut resample_distinct = 0u64;
     let mut resample_total = 0u64;
-    for &count in &resampled_counts {
+    let mut resample_distinct = 0u64;
+    for (k, &count) in sample.iter().enumerate() {
         if count > 0 {
-            *freq_of_freq.entry(count).or_insert(0) += 1;
-            resample_distinct += 1;
+            let freq = hist_indices[k];
+            *freq_of_freq.entry(freq).or_insert(0) += count;
+            resample_total += freq * count;
+            resample_distinct += count;
         }
-        resample_total += count;
     }
 
     let mut hist: Vec<(u64, u64)> = freq_of_freq.into_iter().collect();
     hist.sort_by_key(|&(j, _)| j);
     (hist, resample_total, resample_distinct)
-}
-
-/// Sample from Binomial(n, p) using the inverse CDF method for small n,
-/// or normal approximation for large n.
-fn binomial_sample(n: u64, p: f64, rng: &mut ChaCha8Rng) -> u64 {
-    if n == 0 || p <= 0.0 {
-        return 0;
-    }
-    if p >= 1.0 {
-        return n;
-    }
-
-    // For small n, use direct simulation
-    if n <= 1000 {
-        let mut count = 0u64;
-        for _ in 0..n {
-            if rng.random::<f64>() < p {
-                count += 1;
-            }
-        }
-        return count;
-    }
-
-    // For large n, use normal approximation
-    let mean = n as f64 * p;
-    let std = (n as f64 * p * (1.0 - p)).sqrt();
-    let z: f64 = standard_normal(rng);
-    let result = (mean + z * std).round();
-    result.clamp(0.0, n as f64) as u64
-}
-
-/// Generate a standard normal random variable using Box-Muller transform.
-fn standard_normal(rng: &mut ChaCha8Rng) -> f64 {
-    let u1: f64 = rng.random::<f64>();
-    let u2: f64 = rng.random::<f64>();
-    (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()
 }
 
 // ============================================================================
@@ -720,7 +697,29 @@ pub struct PreseqResult {
     pub curve: Vec<(f64, f64, f64, f64)>,
 }
 
+/// Check the Good-Toulmin 2x extrapolation condition.
+///
+/// In preseq, this checks that `sum((-1)^(i+1) * hist[i])` is non-negative.
+/// If negative, extrapolation is unreliable.
+fn good_toulmin_2x_extrap(histogram: &[(u64, u64)]) -> f64 {
+    let mut result = 0.0f64;
+    for &(j, n_j) in histogram {
+        if j == 0 {
+            continue;
+        }
+        let sign = if j % 2 == 1 { 1.0 } else { -1.0 };
+        result += sign * n_j as f64;
+    }
+    result
+}
+
 /// Run the full library complexity estimation pipeline.
+///
+/// Matches preseq's `lc_extrap` behavior: bootstrap replicates are used to
+/// compute the median as the point estimate (not a separate non-bootstrap curve),
+/// with quantile confidence intervals. Uses the original histogram's
+/// `initial_distinct` for extrapolation, but each bootstrap's `vals_sum` for
+/// the fold calculation.
 ///
 /// # Arguments
 /// * `histogram` - Frequency-of-frequencies from the accumulator.
@@ -749,10 +748,20 @@ pub fn estimate_complexity(
         total_reads, n_distinct
     );
 
+    // Good-Toulmin 2x extrapolation check
+    let gt2x = good_toulmin_2x_extrap(histogram);
+    if gt2x < 0.0 {
+        bail!(
+            "Good-Toulmin 2x extrapolation check failed (value={:.2}). \
+             Library complexity estimation is unreliable for this sample.",
+            gt2x
+        );
+    }
+
     let max_extrap = config.max_extrap;
     let step = config.step_size;
 
-    // Build the evaluation grid
+    // Build the evaluation grid: starts at step_size, goes to max_extrap
     let mut targets: Vec<f64> = Vec::new();
     let mut t = step;
     while t <= max_extrap {
@@ -760,22 +769,19 @@ pub fn estimate_complexity(
         t += step;
     }
 
-    // --- Compute the point estimate curve ---
-    let point_curve = compute_curve(
-        histogram,
-        total_reads,
-        n_distinct,
-        &targets,
-        config.max_terms,
-        max_extrap,
-        step,
-        config.defects,
-    )?;
-
-    // --- Bootstrap for confidence intervals ---
     let n_bootstraps = config.n_bootstraps;
+
     if n_bootstraps == 0 {
-        // No bootstrapping — return point estimates with NaN CIs
+        // No bootstrapping — return a single point estimate curve
+        let point_curve = compute_curve(
+            histogram,
+            total_reads,
+            n_distinct,
+            &targets,
+            config.max_terms,
+            max_extrap,
+            config.defects,
+        )?;
         let curve: Vec<(f64, f64, f64, f64)> = point_curve
             .iter()
             .map(|&(t, e)| (t, e, f64::NAN, f64::NAN))
@@ -783,72 +789,119 @@ pub fn estimate_complexity(
         return Ok(PreseqResult { curve });
     }
 
+    // --- Bootstrap mode (matching preseq's extrap_bootstrap) ---
+    // The point estimate is the MEDIAN of bootstrap replicates, NOT a separate
+    // curve from the original histogram.
+    // Uses original n_distinct (initial_distinct) for extrapolation, but each
+    // bootstrap's vals_sum for the fold calculation.
+
     info!("Running {} bootstrap replicates...", n_bootstraps);
     let mut rng = ChaCha8Rng::seed_from_u64(config.seed);
 
+    let max_iter = 100 * n_bootstraps as u64;
     let mut bootstrap_curves: Vec<Vec<f64>> = vec![Vec::new(); targets.len()];
     let mut successful_bootstraps = 0u32;
+    let mut iterations = 0u64;
 
-    for b in 0..n_bootstraps {
-        let (boot_hist, boot_total, boot_distinct) =
-            bootstrap_resample(histogram, total_reads, &mut rng);
+    while (successful_bootstraps as u64) < n_bootstraps as u64 && iterations < max_iter {
+        iterations += 1;
 
-        if boot_distinct < MIN_DISTINCT || boot_total == 0 {
+        let (boot_hist, boot_total, _boot_distinct) = bootstrap_resample(histogram, &mut rng);
+
+        if boot_total == 0 {
             continue;
         }
 
+        // Use ORIGINAL n_distinct for extrapolation, but boot_total as vals_sum
+        // This matches preseq's extrap_bootstrap behavior
         match compute_curve(
             &boot_hist,
             boot_total,
-            boot_distinct,
+            n_distinct, // original initial_distinct
             &targets,
             config.max_terms,
             max_extrap,
-            step,
             config.defects,
         ) {
             Ok(boot_curve) => {
-                for (i, &(_, expected)) in boot_curve.iter().enumerate() {
-                    if i < bootstrap_curves.len() {
-                        bootstrap_curves[i].push(expected);
+                // Check stability: all values must be non-negative and finite
+                let stable = boot_curve.iter().all(|&(_, e)| e.is_finite() && e >= 0.0);
+
+                if stable {
+                    for (i, &(_, expected)) in boot_curve.iter().enumerate() {
+                        if i < bootstrap_curves.len() {
+                            bootstrap_curves[i].push(expected);
+                        }
                     }
+                    successful_bootstraps += 1;
+                } else {
+                    debug!(
+                        "Bootstrap replicate {} unstable, skipping (iter {})",
+                        successful_bootstraps, iterations
+                    );
                 }
-                successful_bootstraps += 1;
             }
             Err(_) => {
-                debug!("Bootstrap replicate {} failed, skipping", b);
+                debug!(
+                    "Bootstrap replicate {} failed, skipping (iter {})",
+                    successful_bootstraps, iterations
+                );
             }
         }
     }
 
+    if successful_bootstraps == 0 {
+        bail!(
+            "All {} bootstrap iterations failed. Cannot estimate confidence intervals.",
+            iterations
+        );
+    }
+
     info!(
-        "Completed {}/{} bootstrap replicates successfully",
-        successful_bootstraps, n_bootstraps
+        "Completed {}/{} bootstrap replicates successfully ({} total iterations)",
+        successful_bootstraps, n_bootstraps, iterations
     );
 
-    // Compute quantile confidence intervals
+    // Compute median and quantile confidence intervals (matching preseq's
+    // vector_median_and_ci)
     let alpha = 1.0 - config.confidence_level;
     let lower_q = alpha / 2.0;
     let upper_q = 1.0 - alpha / 2.0;
 
-    let curve: Vec<(f64, f64, f64, f64)> = point_curve
+    let curve: Vec<(f64, f64, f64, f64)> = targets
         .iter()
         .enumerate()
-        .map(|(i, &(target, expected))| {
-            let (lower, upper) = if i < bootstrap_curves.len() && bootstrap_curves[i].len() >= 2 {
+        .map(|(i, &target)| {
+            if i < bootstrap_curves.len() && bootstrap_curves[i].len() >= 2 {
                 let mut vals = bootstrap_curves[i].clone();
                 vals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-                let l = quantile(&vals, lower_q);
-                let u = quantile(&vals, upper_q);
-                (l, u)
+                let median = median_sorted(&vals);
+                let lower = quantile(&vals, lower_q);
+                let upper = quantile(&vals, upper_q);
+                (target, median, lower, upper)
+            } else if i < bootstrap_curves.len() && bootstrap_curves[i].len() == 1 {
+                let val = bootstrap_curves[i][0];
+                (target, val, f64::NAN, f64::NAN)
             } else {
-                (f64::NAN, f64::NAN)
-            };
-            (target, expected, lower, upper)
+                (target, f64::NAN, f64::NAN, f64::NAN)
+            }
         })
         .collect();
 
     Ok(PreseqResult { curve })
+}
+
+/// Compute the median of a sorted slice.
+fn median_sorted(sorted: &[f64]) -> f64 {
+    let n = sorted.len();
+    if n == 0 {
+        return f64::NAN;
+    }
+    if n % 2 == 1 {
+        sorted[n / 2]
+    } else {
+        (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0
+    }
 }
 
 /// Compute a single complexity curve (point estimates only).
@@ -860,10 +913,33 @@ fn compute_curve(
     targets: &[f64],
     max_terms: usize,
     max_extrap: f64,
-    step_size: f64,
     use_defects: bool,
 ) -> Result<Vec<(f64, f64)>> {
     let n = total_reads as f64;
+
+    // Cap max_terms at first_zero - 1 (matching preseq's load_histogram behavior).
+    // first_zero is the first multiplicity index j where histogram has no entry.
+    // Then make it even so the QD algorithm produces balanced CF approximants.
+    let max_j = histogram.iter().map(|&(j, _)| j).max().unwrap_or(0) as usize;
+    let first_zero = {
+        let mut fz = max_j + 1; // default: no gap found
+        for j in 1..=max_j {
+            if !histogram.iter().any(|&(mult, _)| mult == j as u64) {
+                fz = j;
+                break;
+            }
+        }
+        fz
+    };
+    let adjusted_max_terms = if first_zero > 1 {
+        let capped = max_terms.min(first_zero - 1);
+        // Make even
+        capped - (capped % 2)
+    } else {
+        // No usable histogram entries
+        0
+    };
+    let max_terms = adjusted_max_terms;
 
     // Compute PS coefficients
     let ps_coeffs = if use_defects {
@@ -877,8 +953,8 @@ fn compute_curve(
         .context("Failed to compute continued fraction coefficients via QD algorithm")?;
 
     // Select optimal degree
-    let degree = select_degree(&cf_coeffs, total_reads, n_distinct, max_extrap, step_size)
-        .unwrap_or_else(|| {
+    let degree =
+        select_degree(&cf_coeffs, total_reads, max_terms, max_extrap).unwrap_or_else(|| {
             warn!("Could not find optimal CF degree, using max available");
             cf_coeffs.len().min(max_terms)
         });
@@ -1044,25 +1120,26 @@ mod tests {
 
     #[test]
     fn test_histogram_construction() {
-        let mut accum = PreseqAccum::new(false);
+        let mut accum = PreseqAccum::new();
 
-        // Simulate: 3 fragments seen once, 2 seen twice, 1 seen three times
+        // Simulate fragments: 3 seen once, 2 seen twice, 1 seen three times
+        // Key is (tid, frag_start, frag_end)
         // Fragment A: 1 time
-        accum.process_read(0, 0, 100, 0, 0, false);
+        accum.process_read(0, 100, 100);
         // Fragment B: 1 time
-        accum.process_read(0, 0, 200, 0, 0, false);
+        accum.process_read(0, 200, 200);
         // Fragment C: 1 time
-        accum.process_read(0, 0, 300, 0, 0, false);
+        accum.process_read(0, 300, 300);
         // Fragment D: 2 times
-        accum.process_read(0, 0, 400, 0, 0, false);
-        accum.process_read(0, 0, 400, 0, 0, false);
+        accum.process_read(0, 400, 400);
+        accum.process_read(0, 400, 400);
         // Fragment E: 2 times
-        accum.process_read(0, 0, 500, 0, 0, false);
-        accum.process_read(0, 0, 500, 0, 0, false);
+        accum.process_read(0, 500, 500);
+        accum.process_read(0, 500, 500);
         // Fragment F: 3 times
-        accum.process_read(0, 0, 600, 0, 0, false);
-        accum.process_read(0, 0, 600, 0, 0, false);
-        accum.process_read(0, 0, 600, 0, 0, false);
+        accum.process_read(0, 600, 600);
+        accum.process_read(0, 600, 600);
+        accum.process_read(0, 600, 600);
 
         assert_eq!(accum.total_fragments, 10);
         assert_eq!(accum.n_distinct(), 6);
@@ -1076,59 +1153,76 @@ mod tests {
 
     #[test]
     fn test_accumulator_filters() {
-        let mut accum = PreseqAccum::new(false);
+        let mut accum = PreseqAccum::new();
 
-        // Normal read — should be counted
-        accum.process_read(0, 0, 100, 0, 0, false);
+        // Mapped read — should be counted
+        accum.process_read(0, 100, 100);
         assert_eq!(accum.total_fragments, 1);
 
-        // Unmapped — should be skipped
-        accum.process_read(0x4, 0, 200, 0, 0, false);
+        // Unmapped (tid == -1) — should be skipped
+        accum.process_read(-1, 200, 200);
         assert_eq!(accum.total_fragments, 1);
 
-        // Secondary — should be skipped
-        accum.process_read(0x100, 0, 300, 0, 0, false);
-        assert_eq!(accum.total_fragments, 1);
-
-        // Supplementary — should be skipped
-        accum.process_read(0x800, 0, 400, 0, 0, false);
-        assert_eq!(accum.total_fragments, 1);
-
-        // QC fail — should be skipped
-        accum.process_read(0x200, 0, 500, 0, 0, false);
-        assert_eq!(accum.total_fragments, 1);
-
-        // Duplicate — should be COUNTED (this is the point!)
-        accum.process_read(0x400, 0, 600, 0, 0, false);
+        // Another mapped read at different position — should be counted
+        accum.process_read(0, 300, 300);
         assert_eq!(accum.total_fragments, 2);
+
+        // Duplicate at same position — should be counted (whole point!)
+        accum.process_read(0, 300, 300);
+        assert_eq!(accum.total_fragments, 3);
     }
 
     #[test]
     fn test_pe_accumulator() {
-        let mut accum = PreseqAccum::new(true);
+        let mut accum = PreseqAccum::new();
 
-        // Read1 of a PE pair — should be counted
-        accum.process_read(0x41, 0, 100, 0, 200, false); // paired + read1
+        // PE fragment spanning 100-200 (callers compute frag_start/frag_end from BAM)
+        accum.process_read(0, 100, 200);
         assert_eq!(accum.total_fragments, 1);
 
-        // Read2 of same pair — should be skipped (only read1 counted)
-        accum.process_read(0x81, 0, 200, 0, 100, false); // paired + read2
-        assert_eq!(accum.total_fragments, 1);
+        // Same fragment again (PCR duplicate) — same key
+        accum.process_read(0, 100, 200);
+        assert_eq!(accum.total_fragments, 2);
 
-        // Read1 with unmapped mate — should be skipped
-        accum.process_read(0x49, 0, 300, 0, 0, false); // paired + read1 + mate_unmapped
-        assert_eq!(accum.total_fragments, 1);
+        // Different fragment (same start, different end = different insert size)
+        accum.process_read(0, 100, 300);
+        assert_eq!(accum.total_fragments, 3);
+        assert_eq!(accum.n_distinct(), 2); // Two distinct fragments
+    }
+
+    #[test]
+    fn test_interleaved_fragments_grouped_correctly() {
+        // Simulate fragments at the same start but different ends (different insert sizes):
+        //   (0, 100, 200) — fragment A
+        //   (0, 100, 300) — fragment B (different end)
+        //   (0, 100, 200) — fragment A duplicate
+        //
+        // Hash-based counting correctly groups A (count 2), B (count 1) → 2 distinct
+
+        let mut accum = PreseqAccum::new();
+        accum.process_read(0, 100, 200); // A
+        accum.process_read(0, 100, 300); // B (different end)
+        accum.process_read(0, 100, 200); // A duplicate
+
+        assert_eq!(accum.total_fragments, 3);
+        assert_eq!(accum.n_distinct(), 2, "2 distinct (A and B)");
+
+        let hist = accum.into_histogram();
+        // A has count 2, B has count 1 → histogram: {1: 1, 2: 1}
+        assert_eq!(hist.len(), 2);
+        assert!(hist.contains(&(1, 1)), "One singleton (B)");
+        assert!(hist.contains(&(2, 1)), "One duplicate pair (A)");
     }
 
     #[test]
     fn test_accumulator_merge() {
-        let mut accum1 = PreseqAccum::new(false);
-        accum1.process_read(0, 0, 100, 0, 0, false);
-        accum1.process_read(0, 0, 200, 0, 0, false);
+        let mut accum1 = PreseqAccum::new();
+        accum1.process_read(0, 100, 100);
+        accum1.process_read(0, 200, 200);
 
-        let mut accum2 = PreseqAccum::new(false);
-        accum2.process_read(0, 0, 100, 0, 0, false); // Same fragment as accum1
-        accum2.process_read(0, 0, 300, 0, 0, false);
+        let mut accum2 = PreseqAccum::new();
+        accum2.process_read(0, 100, 100); // Same fragment as accum1
+        accum2.process_read(0, 300, 300);
 
         accum1.merge(accum2);
         assert_eq!(accum1.total_fragments, 4);
@@ -1240,10 +1334,10 @@ mod tests {
         let total_reads = 225;
 
         let mut rng1 = ChaCha8Rng::seed_from_u64(42);
-        let (h1, t1, d1) = bootstrap_resample(&hist, total_reads, &mut rng1);
+        let (h1, t1, d1) = bootstrap_resample(&hist, &mut rng1);
 
         let mut rng2 = ChaCha8Rng::seed_from_u64(42);
-        let (h2, t2, d2) = bootstrap_resample(&hist, total_reads, &mut rng2);
+        let (h2, t2, d2) = bootstrap_resample(&hist, &mut rng2);
 
         assert_eq!(t1, t2, "Same seed should give same total");
         assert_eq!(d1, d2, "Same seed should give same distinct");

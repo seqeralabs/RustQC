@@ -110,8 +110,6 @@ pub struct RseqcConfig {
     pub tin_min_coverage: u32,
     /// Whether preseq library complexity estimation is enabled.
     pub preseq_enabled: bool,
-    /// Whether the library is paired-end (for preseq fragment key construction).
-    pub preseq_is_paired: bool,
 }
 
 // ===================================================================
@@ -1431,7 +1429,7 @@ impl RseqcAccumulators {
                 None
             },
             preseq: if config.preseq_enabled {
-                Some(PreseqAccum::new(config.preseq_is_paired))
+                Some(PreseqAccum::new())
             } else {
                 None
             },
@@ -1518,16 +1516,58 @@ impl RseqcAccumulators {
             accum.process_read(record, chrom_upper, tin_index);
         }
 
-        // preseq: counts unique fragment fingerprints for library complexity
+        // preseq: counts unique fragment fingerprints for library complexity.
+        //
+        // Matches preseq v3.2.0 PE BAM behavior (load_counts_BAM_pe):
+        //   - Only skip SECONDARY reads (flag 0x100). Note: preseq v3.2.0's
+        //     `is_primary` check is `!(flag & 0x100)` — it does NOT filter
+        //     supplementary alignments (0x800), so we include them.
+        //   - Must also be mapped (not flag 0x4).
+        //   - For PROPER PAIRS (flag 0x2): only count read1 — one per fragment.
+        //     Fragment key = (chrom, frag_start, frag_end), matching preseq's
+        //     `merge_mates()` which merges pairs by read name.
+        //   - For non-proper-pair reads (including paired reads without 0x2):
+        //     treat each read individually with key = (tid, pos, cigar_end).
+        //     preseq pushes both mates as individual GenomicRegions in this case.
+        //   - We compute frag_start/frag_end from pos + insert_size (TLEN) to
+        //     avoid needing a read-name lookup buffer.
+        //
+        // NOTE: preseq v3.2.0 (used by nf-core/rnaseq) differs significantly
+        // from preseq master branch which uses a simple aln_pos_pair template.
+        // We match v3.2.0 behavior here.
+        //
+        // Unmapped reads (tid < 0) are additionally skipped inside process_read().
         if let Some(ref mut accum) = self.preseq {
-            accum.process_read(
-                record.flags(),
-                record.tid(),
-                record.pos(),
-                record.mtid(),
-                record.mpos(),
-                record.is_reverse(),
-            );
+            // preseq's is_primary = !(flag & 0x100) — only filters secondary,
+            // not supplementary. Must also be mapped.
+            if !record.is_secondary() && !record.is_unmapped() {
+                if record.is_proper_pair() {
+                    // Proper pair (flag 0x2): merge mates into one fragment.
+                    // Only count read1 to avoid double-counting the pair.
+                    if record.is_first_in_template() {
+                        let tlen = record.insert_size();
+                        let (frag_start, frag_end) = if tlen > 0 {
+                            // Read1 is leftmost: frag spans pos to pos+tlen
+                            (record.pos(), record.pos() + tlen)
+                        } else if tlen < 0 {
+                            // Read1 is rightmost: fragment end = cigar_end,
+                            // fragment start = cigar_end + tlen (tlen is negative,
+                            // abs(tlen) = frag_end - frag_start per SAM spec)
+                            let cigar_end = record.cigar().end_pos();
+                            (cigar_end + tlen, cigar_end)
+                        } else {
+                            // TLEN == 0: mate unmapped or same position
+                            (record.pos(), record.cigar().end_pos())
+                        };
+                        accum.process_read(record.tid(), frag_start, frag_end);
+                    }
+                } else {
+                    // Non-proper-pair or unpaired: count each read individually.
+                    // preseq pushes these as individual GenomicRegions with
+                    // key = (chrom, start, end) from CIGAR.
+                    accum.process_read(record.tid(), record.pos(), record.cigar().end_pos());
+                }
+            }
         }
     }
 

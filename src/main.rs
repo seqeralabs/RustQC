@@ -105,7 +105,7 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
     );
 
     // Load configuration file if provided
-    let config = if let Some(ref config_path) = args.config {
+    let mut config = if let Some(ref config_path) = args.config {
         let cfg = config::Config::from_file(Path::new(config_path))?;
         info!("Loaded config from: {}", config_path);
         if cfg.has_chromosome_mapping() {
@@ -119,6 +119,19 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         config::Config::default()
     };
 
+    // Apply CLI overrides to preseq config
+    if args.skip_preseq {
+        config.preseq.enabled = false;
+    }
+    if let Some(val) = args.preseq_max_extrap {
+        config.preseq.max_extrap = val;
+    }
+    if let Some(val) = args.preseq_step_size {
+        config.preseq.step_size = val;
+    }
+    if let Some(val) = args.preseq_n_bootstraps {
+        config.preseq.n_bootstraps = val;
+    }
     // Warn early if CRAM input is likely but no reference is provided
     if args.input.iter().any(|f| f.ends_with(".cram"))
         && args.reference.is_none()
@@ -608,7 +621,6 @@ fn process_single_bam(
         tin_sample_size: params.tin_sample_size,
         tin_min_coverage: params.tin_min_coverage,
         preseq_enabled: config.preseq.enabled,
-        preseq_is_paired: params.paired,
     };
 
     let rseqc_annotations = RseqcAnnotations {
@@ -1093,7 +1105,7 @@ fn process_single_bam(
 /// Converts accumulated data to tool-specific result types and writes all
 /// output files, plots, and summaries.
 fn write_rseqc_outputs(
-    _bam_path: &str,
+    bam_path: &str,
     bam_stem: &str,
     params: &SharedParams,
     accums: RseqcAccumulators,
@@ -1346,7 +1358,7 @@ fn write_rseqc_outputs(
         rna::rseqc::tin::write_tin(&results, Path::new(&format!("{prefix}.tin.xls")))?;
         rna::rseqc::tin::write_tin_summary(
             &results,
-            _bam_path,
+            bam_path,
             Path::new(&format!("{prefix}.summary.txt")),
         )?;
     }
@@ -1458,7 +1470,6 @@ fn run_rseqc_single_pass(
         tin_sample_size: params.tin_sample_size,
         tin_min_coverage: params.tin_min_coverage,
         preseq_enabled: params.config.preseq.enabled,
-        preseq_is_paired: params.paired,
     };
 
     let annotations = RseqcAnnotations {

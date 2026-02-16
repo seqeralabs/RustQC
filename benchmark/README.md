@@ -244,7 +244,50 @@ docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data -v 
   $RSEQC_IMG inner_distance.py -i /data/test.bam -r /data/chr6.bed -o /out/inner_distance
 ```
 
-### 7. Compare results
+### 7. Generate preseq reference outputs
+
+Reference outputs for validating the preseq `lc_extrap` reimplementation are stored
+in `input/large/`. These were generated with
+[preseq 3.2.0](https://github.com/smithlabcode/preseq) run via Docker
+(`--platform linux/amd64`).
+
+Two reference files are provided:
+
+| File | Mode | Command |
+| ---- | ---- | ------- |
+| `GM12878_REP1.preseq_reference.txt` | SE (default) | `preseq lc_extrap -bam -seed 1` |
+| `GM12878_REP1.preseq_reference_pe_nfcore.txt` | PE (nf-core style) | `preseq lc_extrap -bam -pe -seed 1 -seg_len 100000000` |
+
+The **PE reference** matches the invocation used by
+[nf-core/rnaseq](https://nf-co.re/rnaseq), which auto-adds `-pe` for
+paired-end data with a large `-seg_len` window. Both references use the
+coordinate-sorted BAM directly (no name-sorting required).
+
+```bash
+PRESEQ_IMG="community.wave.seqera.io/library/preseq:3.2.0--79856d506efa2665"
+
+# SE reference (preseq default — uses only {tid, pos} as fragment key)
+docker run --rm --platform linux/amd64 \
+  -v $(pwd)/benchmark/input/large:/data \
+  $PRESEQ_IMG preseq lc_extrap -bam -seed 1 \
+  -output /data/GM12878_REP1.preseq_reference.txt \
+  /data/GM12878_REP1.markdup.sorted.bam
+
+# PE reference (nf-core/rnaseq style — merges concordant pairs into fragments)
+docker run --rm --platform linux/amd64 \
+  -v $(pwd)/benchmark/input/large:/data \
+  $PRESEQ_IMG preseq lc_extrap -bam -pe -seed 1 -seg_len 100000000 \
+  -output /data/GM12878_REP1.preseq_reference_pe_nfcore.txt \
+  /data/GM12878_REP1.markdup.sorted.bam
+```
+
+> **Note:** preseq's `-pe` mode on coordinate-sorted BAMs uses the `-seg_len`
+> parameter to find mates within a window. Without `-pe`, preseq treats every
+> mapped read independently using only `{tid, pos}` as the unique identifier,
+> even for paired-end BAMs. The nf-core/rnaseq pipeline always passes `-pe`
+> for paired-end data.
+
+### 8. Compare results
 
 ```bash
 # Compare duplication matrices cell-by-cell
