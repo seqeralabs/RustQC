@@ -33,7 +33,7 @@ benchmark/input/**/*.bed.gz
 benchmark/RSeQC/**/junction_annotation.junction.Interact.bed
 
 # Large TIN reference outputs
-benchmark/input/**/*tin_reference.xls
+benchmark/rseqc/**/tin.xls
 
 # Session files
 session-*.md
