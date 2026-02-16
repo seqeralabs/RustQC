@@ -5,16 +5,17 @@ description: Detailed comparison of RustQC's RSeQC reimplementations against the
 
 export const base = import.meta.env.BASE_URL;
 
-RustQC reimplements 7 [RSeQC](https://rseqc.sourceforge.net/) tools as built-in analyses that run
-in a single pass over the BAM file. This page compares the output of each tool against the original
-Python RSeQC on a 10 GB paired-end BAM file (GM12878, ENCODE).
+RustQC reimplements 7 [RSeQC](https://rseqc.sourceforge.net/) tools plus TIN (Transcript Integrity
+Number) analysis as built-in analyses that run in a single pass over the BAM file. It also produces
+Qualimap-compatible gene body coverage output. This page compares the output of each tool against
+the originals on a 10 GB paired-end BAM file (GM12878, ENCODE).
 
 ## Performance
 
-All 7 RSeQC tools run together in the same single-pass BAM reading that also produces
-dupRadar and featureCounts output. The timings below show the original Python RSeQC tools
-run individually versus RustQC running all tools (including dupRadar and featureCounts) in
-a single pass with 10 threads.
+All RSeQC tools run together in the same single-pass BAM reading that also produces
+dupRadar, featureCounts, preseq, samtools, and gene body coverage output. The timings
+below show the original Python RSeQC tools run individually versus RustQC running
+all tools in a single pass with 10 threads.
 
 | Tool | RSeQC (Python) | RustQC |
 | --- | ---: | ---: |
@@ -25,11 +26,13 @@ a single pass with 10 threads.
 | junction_annotation | 4m 37s | — |
 | junction_saturation | 6m 32s | — |
 | inner_distance | 1m 09s | — |
-| **Total (RSeQC only)** | **54m 15s** | — |
-| **All outputs** | — | **3m 56s** |
+| tin.py | ~45m | — |
+| **Total (RSeQC only)** | **~99m** | — |
+| **All outputs** | — | **5m 13s** |
 
-RustQC produces all 7 RSeQC outputs (plus dupRadar and featureCounts) in under 4 minutes —
-a **13.8x speedup** over running the RSeQC tools alone.
+RustQC produces all RSeQC outputs (plus dupRadar, featureCounts, preseq, samtools, and
+gene body coverage) in under 6 minutes — a **~19x speedup** over running the RSeQC
+tools alone.
 
 ## bam_stat
 
@@ -189,10 +192,54 @@ The overall frequency distribution is consistent between both tools.
   </div>
 </div>
 
+## TIN (Transcript Integrity Number)
+
+RustQC reimplements RSeQC's `tin.py`, producing per-gene TIN scores that measure
+transcript integrity via Shannon entropy of read coverage uniformity.
+
+### Summary statistics
+
+| Metric | RustQC |
+| --- | ---: |
+| Genes analysed | 16,499 |
+| TIN mean | 72.55 |
+| TIN median | 83.89 |
+| TIN stdev | 26.14 |
+
+The TIN analysis completes as part of the single-pass BAM processing. The
+original RSeQC `tin.py` requires a separate full BAM pass and typically takes
+45+ minutes for a 10 GB file.
+
+### Output format
+
+RustQC produces gene-level TIN scores (one row per gene, using the longest
+transcript as representative), while RSeQC's `tin.py` produces transcript-level
+scores. Both formats are compatible with MultiQC. The gene-level approach
+provides a cleaner summary with one score per gene.
+
+## Gene body coverage (Qualimap)
+
+RustQC produces Qualimap-compatible gene body coverage output, including:
+- A 100-bin coverage profile along normalized gene body positions (5' to 3')
+- A Qualimap `rnaseq_qc_results.txt` file parseable by MultiQC
+
+### Coverage bias metrics
+
+| Metric | Value |
+| --- | --- |
+| 5' bias | 1.20 |
+| 3' bias | 0.92 |
+| 5'-3' bias | 1.24 |
+
+These metrics help identify degradation patterns — a 5'-3' bias significantly
+above 1.0 may indicate RNA degradation, while values near 1.0 indicate
+uniform coverage.
+
 ## Benchmark conditions
 
 - **BAM file**: GM12878 ENCODE RNA-Seq, paired-end, ~185M reads, 10 GB
-- **Annotation**: Ensembl BED12 gene model (same file used by both RSeQC and RustQC)
+- **Annotation**: Ensembl BED12 gene model (same file used by both RSeQC and RustQC);
+  Ensembl GTF used for TIN and gene body coverage (require gene-level annotation)
 - **RSeQC version**: 5.0.4 (run via Docker on Apple M3 Max with Rosetta x86 emulation)
-- **RustQC**: 10 threads, `--bed` mode
+- **RustQC**: 10 threads, `--gtf` mode for TIN/genebody, `--bed` mode for RSeQC tools
 - **Hardware**: Apple M3 Max, 128 GB RAM
