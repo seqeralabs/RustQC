@@ -53,7 +53,7 @@ pub struct TinIndex {
     pub transcripts: Vec<TranscriptSampling>,
     /// Per-chromosome sorted position entries for binary search.
     /// Each entry: (genomic_position, transcript_index, slot_index).
-    pub chrom_positions: HashMap<String, Vec<(u64, u32, u8)>>,
+    pub chrom_positions: HashMap<String, Vec<(u64, u32, u16)>>,
     /// Per-chromosome transcript spans for overlap pre-filtering.
     /// Each entry: (tx_start, tx_end, transcript_index), sorted by tx_start.
     pub chrom_spans: HashMap<String, Vec<(u64, u64, u32)>>,
@@ -240,7 +240,7 @@ impl TinIndex {
             self.chrom_positions
                 .entry(chrom_upper.clone())
                 .or_default()
-                .push((pos, tx_idx, slot_idx as u8));
+                .push((pos, tx_idx, slot_idx as u16));
         }
 
         // Add transcript span
@@ -325,7 +325,7 @@ pub struct TinAccum {
     pub read_starts: Vec<u32>,
     /// Number of sampled slots per transcript.
     #[allow(dead_code)]
-    pub n_samples: Vec<u8>,
+    pub n_samples: Vec<u16>,
     /// Minimum MAPQ threshold.
     pub mapq_cut: u8,
     /// Minimum coverage threshold.
@@ -342,7 +342,7 @@ impl TinAccum {
         for tx in &index.transcripts {
             let n = tx.sampled_positions.len();
             coverage.push(vec![0u32; n]);
-            n_samples.push(n as u8);
+            n_samples.push(n as u16);
         }
 
         TinAccum {

@@ -615,7 +615,6 @@ fn process_chromosome_batch(
     rseqc_annotations: Option<&RseqcAnnotations>,
     htslib_threads: usize,
     genebody_position_map: Option<&crate::rna::genebody::TranscriptPositionMap>,
-    _interner: &GeneIdInterner,
 ) -> Result<(ChromResult, Option<RseqcAccumulators>)> {
     let mut result = ChromResult::new(num_genes);
     if genebody_position_map.is_some() {
@@ -1093,7 +1092,6 @@ pub fn count_reads(
                         rseqc_annotations,
                         htslib_threads,
                         genebody_position_map,
-                        &interner,
                     )
                 })
                 .collect()

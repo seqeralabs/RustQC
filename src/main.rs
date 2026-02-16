@@ -1040,13 +1040,13 @@ fn process_single_bam(
             );
 
             let qualimap_path = gb_dir.join("rnaseq_qc_results.txt");
-            // Use total_records and secondary from the count_result stats
+            // Get actual secondary + supplementary counts from the bam_stat accumulator
             let total_alignments = count_result.stat_total_reads;
-            let secondary = count_result.stat_total_reads
-                - (count_result.stat_assigned
-                    + count_result.stat_ambiguous
-                    + count_result.stat_no_features
-                    + count_result.fc_unmapped);
+            let secondary = rseqc_accums
+                .as_ref()
+                .and_then(|a| a.bam_stat.as_ref())
+                .map(|bs| bs.secondary + bs.supplementary)
+                .unwrap_or(0);
             rna::genebody::write_qualimap_results(
                 gb_result,
                 bam_stem,

@@ -2,6 +2,7 @@
 name = "rustqc"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.87"
 authors = ["Phil Ewels"]
 description = "Fast RNA-seq QC: dupRadar, featureCounts, and RSeQC reimplemented in Rust"
 license = "MIT"

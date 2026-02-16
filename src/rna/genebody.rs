@@ -182,7 +182,7 @@ impl GenebodyCoverageAccum {
 
         // Map each aligned block to transcript-relative positions
         for &(block_start, block_end) in aligned_blocks {
-            let mut block_is_exonic = false;
+            let mut exonic_bases: u64 = 0;
 
             for (i, &(exon_start, exon_end)) in gene_map.exons.iter().enumerate() {
                 // Find overlap between aligned block and this exon
@@ -193,7 +193,7 @@ impl GenebodyCoverageAccum {
                     continue;
                 }
 
-                block_is_exonic = true;
+                exonic_bases += overlap_end - overlap_start;
                 exons_hit += 1;
 
                 // Map overlapping bases to transcript-relative positions
@@ -215,12 +215,13 @@ impl GenebodyCoverageAccum {
                 }
             }
 
-            if block_is_exonic {
-                self.exonic += block_end - block_start;
-            } else {
-                // Block doesn't overlap any exon — could be intronic
-                self.intronic += block_end - block_start;
-            }
+            // Count exonic bases from actual overlap, remainder is intronic.
+            // Cap exonic_bases at block_len in case overlapping exons
+            // (from merged transcript models) double-count the same bases.
+            let block_len = block_end - block_start;
+            let exonic_capped = exonic_bases.min(block_len);
+            self.exonic += exonic_capped;
+            self.intronic += block_len - exonic_capped;
         }
 
         if exons_hit > 1 {
