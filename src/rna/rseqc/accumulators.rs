@@ -748,8 +748,8 @@ impl InferExpAccum {
 pub struct ReadDupAccum {
     /// Sequence hash → occurrence count (hash-based dedup to save memory).
     pub seq_dup: HashMap<u128, u64>,
-    /// Position key → occurrence count.
-    pub pos_dup: HashMap<String, u64>,
+    /// Position key hash → occurrence count (hash-based dedup to save memory).
+    pub pos_dup: HashMap<u64, u64>,
 }
 
 impl ReadDupAccum {
@@ -770,10 +770,10 @@ impl ReadDupAccum {
         let seq_hash = hash_sequence(&seq);
         *self.seq_dup.entry(seq_hash).or_insert(0) += 1;
 
-        // Position-based: build key from CIGAR
+        // Position-based: hash key from CIGAR (avoids string allocation)
         let pos = record.pos();
         let cigar = record.cigar();
-        let key = build_position_key(chrom, pos, &cigar);
+        let key = hash_position_key(chrom, pos, &cigar);
         *self.pos_dup.entry(key).or_insert(0) += 1;
     }
 
@@ -808,18 +808,30 @@ fn hash_sequence(seq: &[u8]) -> u128 {
     (h1 as u128) << 64 | (h2 as u128)
 }
 
-/// Build position key matching RSeQC's `fetch_exon` + position key logic.
-fn build_position_key(chrom: &str, pos: i64, cigar: &bam::record::CigarStringView) -> String {
+/// Hash position key matching RSeQC's `fetch_exon` + position key logic.
+/// Uses FNV-1a hashing to avoid string allocation per read.
+fn hash_position_key(chrom: &str, pos: i64, cigar: &bam::record::CigarStringView) -> u64 {
     use rust_htslib::bam::record::Cigar;
 
-    let mut key = format!("{}:{}:", chrom, pos);
-    let mut ref_pos = pos;
+    // FNV-1a hash of the position key components
+    let mut h: u64 = 0xcbf29ce484222325;
+    let mix = |h: &mut u64, bytes: &[u8]| {
+        for &b in bytes {
+            *h ^= b as u64;
+            *h = h.wrapping_mul(0x100000001b3);
+        }
+    };
 
+    mix(&mut h, chrom.as_bytes());
+    mix(&mut h, &pos.to_le_bytes());
+
+    let mut ref_pos = pos;
     for op in cigar.iter() {
         match op {
             Cigar::Match(len) | Cigar::Equal(len) | Cigar::Diff(len) => {
                 let end = ref_pos + *len as i64;
-                key.push_str(&format!("{}-{}:", ref_pos, end));
+                mix(&mut h, &ref_pos.to_le_bytes());
+                mix(&mut h, &end.to_le_bytes());
                 ref_pos = end;
             }
             Cigar::Del(len) | Cigar::RefSkip(len) => {
@@ -833,7 +845,7 @@ fn build_position_key(chrom: &str, pos: i64, cigar: &bam::record::CigarStringVie
         }
     }
 
-    key
+    h
 }
 
 // -------------------------------------------------------------------
@@ -1766,7 +1778,7 @@ impl ReadDupAccum {
 
 /// Build duplication-level histogram from a count map.
 /// Key = duplication level, Value = number of positions/sequences at that level.
-fn build_dup_histogram(counts: &HashMap<String, u64>) -> BTreeMap<u64, u64> {
+fn build_dup_histogram(counts: &HashMap<u64, u64>) -> BTreeMap<u64, u64> {
     let mut histogram = BTreeMap::new();
     for &count in counts.values() {
         *histogram.entry(count).or_insert(0) += 1;

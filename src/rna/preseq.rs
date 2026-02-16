@@ -8,6 +8,7 @@ use anyhow::{bail, Context, Result};
 use log::{debug, info, warn};
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
@@ -796,37 +797,99 @@ pub fn estimate_complexity(
     // bootstrap's vals_sum for the fold calculation.
 
     info!("Running {} bootstrap replicates...", n_bootstraps);
-    let mut rng = ChaCha8Rng::seed_from_u64(config.seed);
 
-    let max_iter = 100 * n_bootstraps as u64;
-    let mut bootstrap_curves: Vec<Vec<f64>> = vec![Vec::new(); targets.len()];
+    // Generate deterministic per-replicate seeds from the master seed.
+    // We generate 2x n_bootstraps seeds initially (enough for most cases
+    // where failures are rare), and fall back to a sequential retry loop
+    // if more are needed.
+    let boot_max_terms = config.max_terms;
+    let boot_defects = config.defects;
+    let n_targets = targets.len();
+
+    // Phase 1: generate seeds and run replicates in parallel.
+    // Use 2x over-provisioning to handle occasional failures.
+    let initial_batch = (2 * n_bootstraps as usize).max(n_bootstraps as usize + 10);
+    let replicate_seeds: Vec<u64> = {
+        let mut master_rng = ChaCha8Rng::seed_from_u64(config.seed);
+        (0..initial_batch).map(|_| master_rng.next_u64()).collect()
+    };
+
+    let all_results: Vec<Option<Vec<f64>>> = replicate_seeds
+        .par_iter()
+        .map(|&seed| {
+            let mut rng = ChaCha8Rng::seed_from_u64(seed);
+            let (boot_hist, boot_total, _boot_distinct) = bootstrap_resample(histogram, &mut rng);
+
+            if boot_total == 0 {
+                return None;
+            }
+
+            // Use ORIGINAL n_distinct for extrapolation, but boot_total as vals_sum
+            // This matches preseq's extrap_bootstrap behavior
+            match compute_curve(
+                &boot_hist,
+                boot_total,
+                n_distinct, // original initial_distinct
+                &targets,
+                boot_max_terms,
+                max_extrap,
+                boot_defects,
+            ) {
+                Ok(boot_curve) => {
+                    let stable = boot_curve.iter().all(|&(_, e)| e.is_finite() && e >= 0.0);
+                    if stable {
+                        let vals: Vec<f64> =
+                            boot_curve.iter().map(|&(_, expected)| expected).collect();
+                        Some(vals)
+                    } else {
+                        None
+                    }
+                }
+                Err(_) => None,
+            }
+        })
+        .collect();
+
+    // Collect successful results, stopping after n_bootstraps successes
+    let mut bootstrap_curves: Vec<Vec<f64>> = vec![Vec::new(); n_targets];
     let mut successful_bootstraps = 0u32;
-    let mut iterations = 0u64;
 
-    while (successful_bootstraps as u64) < n_bootstraps as u64 && iterations < max_iter {
-        iterations += 1;
-
-        let (boot_hist, boot_total, _boot_distinct) = bootstrap_resample(histogram, &mut rng);
-
-        if boot_total == 0 {
-            continue;
+    for vals in all_results.into_iter().flatten() {
+        for (i, &expected) in vals.iter().enumerate() {
+            if i < bootstrap_curves.len() {
+                bootstrap_curves[i].push(expected);
+            }
         }
+        successful_bootstraps += 1;
+        if successful_bootstraps >= n_bootstraps {
+            break;
+        }
+    }
 
-        // Use ORIGINAL n_distinct for extrapolation, but boot_total as vals_sum
-        // This matches preseq's extrap_bootstrap behavior
-        match compute_curve(
-            &boot_hist,
-            boot_total,
-            n_distinct, // original initial_distinct
-            &targets,
-            config.max_terms,
-            max_extrap,
-            config.defects,
-        ) {
-            Ok(boot_curve) => {
-                // Check stability: all values must be non-negative and finite
+    // Phase 2: if we still need more replicates, run sequentially with
+    // fresh seeds (rare — only when failure rate > 50%).
+    if successful_bootstraps < n_bootstraps {
+        let max_extra = 100 * n_bootstraps as u64;
+        let mut extra_rng = ChaCha8Rng::seed_from_u64(config.seed.wrapping_add(1));
+        let mut extra_iter = 0u64;
+        while successful_bootstraps < n_bootstraps && extra_iter < max_extra {
+            extra_iter += 1;
+            let seed = extra_rng.next_u64();
+            let mut rng = ChaCha8Rng::seed_from_u64(seed);
+            let (boot_hist, boot_total, _) = bootstrap_resample(histogram, &mut rng);
+            if boot_total == 0 {
+                continue;
+            }
+            if let Ok(boot_curve) = compute_curve(
+                &boot_hist,
+                boot_total,
+                n_distinct,
+                &targets,
+                boot_max_terms,
+                max_extrap,
+                boot_defects,
+            ) {
                 let stable = boot_curve.iter().all(|&(_, e)| e.is_finite() && e >= 0.0);
-
                 if stable {
                     for (i, &(_, expected)) in boot_curve.iter().enumerate() {
                         if i < bootstrap_curves.len() {
@@ -834,33 +897,10 @@ pub fn estimate_complexity(
                         }
                     }
                     successful_bootstraps += 1;
-                } else {
-                    debug!(
-                        "Bootstrap replicate {} unstable, skipping (iter {})",
-                        successful_bootstraps, iterations
-                    );
                 }
-            }
-            Err(_) => {
-                debug!(
-                    "Bootstrap replicate {} failed, skipping (iter {})",
-                    successful_bootstraps, iterations
-                );
             }
         }
     }
-
-    if successful_bootstraps == 0 {
-        bail!(
-            "All {} bootstrap iterations failed. Cannot estimate confidence intervals.",
-            iterations
-        );
-    }
-
-    info!(
-        "Completed {}/{} bootstrap replicates successfully ({} total iterations)",
-        successful_bootstraps, n_bootstraps, iterations
-    );
 
     // Compute median and quantile confidence intervals (matching preseq's
     // vector_median_and_ci)

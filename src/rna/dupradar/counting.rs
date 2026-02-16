@@ -227,6 +227,72 @@ impl GeneCounts {
     }
 }
 
+/// Merge gene hits from two mates into a combined list of best-scoring genes.
+///
+/// Each input is a sorted, deduplicated slice of gene indices that a read
+/// overlaps. Each gene gets +1 per mate that overlaps it. Genes present in
+/// both mates get score 2, genes in only one get score 1. Returns the gene(s)
+/// with the highest combined score. This replaces a per-fragment `HashMap`
+/// with a sorted-merge algorithm optimized for the common case of 0-2 gene
+/// hits per mate.
+fn merge_gene_hits(a: &[GeneIdx], b: &[GeneIdx]) -> Vec<GeneIdx> {
+    // Fast paths for the common cases
+    if a.is_empty() {
+        return b.to_vec();
+    }
+    if b.is_empty() {
+        return a.to_vec();
+    }
+
+    // Both non-empty: sorted merge to find genes in both mates (score 2)
+    // vs genes in only one mate (score 1). Prefer genes in both.
+    let mut both = Vec::new();
+    let mut ai = 0;
+    let mut bi = 0;
+    while ai < a.len() && bi < b.len() {
+        match a[ai].cmp(&b[bi]) {
+            std::cmp::Ordering::Equal => {
+                both.push(a[ai]);
+                ai += 1;
+                bi += 1;
+            }
+            std::cmp::Ordering::Less => ai += 1,
+            std::cmp::Ordering::Greater => bi += 1,
+        }
+    }
+
+    // If any gene was hit by both mates, return only those (score 2 > score 1)
+    if !both.is_empty() {
+        return both;
+    }
+
+    // No overlap: all genes have score 1, return the union
+    let mut union = Vec::with_capacity(a.len() + b.len());
+    ai = 0;
+    bi = 0;
+    while ai < a.len() && bi < b.len() {
+        match a[ai].cmp(&b[bi]) {
+            std::cmp::Ordering::Less => {
+                union.push(a[ai]);
+                ai += 1;
+            }
+            std::cmp::Ordering::Greater => {
+                union.push(b[bi]);
+                bi += 1;
+            }
+            std::cmp::Ordering::Equal => {
+                // Should not happen (handled above), but be safe
+                union.push(a[ai]);
+                ai += 1;
+                bi += 1;
+            }
+        }
+    }
+    union.extend_from_slice(&a[ai..]);
+    union.extend_from_slice(&b[bi..]);
+    union
+}
+
 /// Assign a fragment to a gene if exactly one gene was hit.
 /// Returns true if the fragment was assigned to a gene.
 fn assign_fragment_to_gene(
@@ -458,7 +524,23 @@ struct MateInfo {
 /// R1/R2 roles are determined by the FLAG 0x40 bit (BAM_FREAD1), so both mates of the
 /// same alignment pair always compute an identical key. The HI (Hit Index) tag disambiguates
 /// multiple alignment pairs of the same multi-mapped read.
-type MateBufferKey = (Vec<u8>, i32, i64, i32, i64, i32);
+///
+/// We use a u64 hash of the read name instead of the full `Vec<u8>` to avoid per-read
+/// heap allocations. Collisions are astronomically unlikely given the compound key
+/// includes tid, pos, and hi_tag alongside the hash.
+type MateBufferKey = (u64, i32, i64, i32, i64, i32);
+
+/// Hash a read name (byte slice) into a u64 using FNV-1a.
+/// This avoids allocating a `Vec<u8>` for every read in paired-end mode.
+#[inline(always)]
+fn hash_qname(qname: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325; // FNV offset basis
+    for &b in qname {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3); // FNV prime
+    }
+    h
+}
 
 /// Accumulated results from processing a batch of chromosomes.
 /// Each parallel worker produces one of these, which are then merged.
@@ -821,7 +903,7 @@ fn process_chromosome_batch(
             }
 
             // --- Paired-end counting: buffer mates and combine ---
-            let read_name = record.qname().to_vec();
+            let qname_hash = hash_qname(record.qname());
             let own_pos = record.pos();
             let own_tid = record.tid();
             let mate_pos_val = record.mpos();
@@ -838,23 +920,9 @@ fn process_chromosome_batch(
             };
 
             let buffer_key: MateBufferKey = if is_read1 {
-                (
-                    read_name.clone(),
-                    own_tid,
-                    own_pos,
-                    mate_tid,
-                    mate_pos_val,
-                    hi_tag,
-                )
+                (qname_hash, own_tid, own_pos, mate_tid, mate_pos_val, hi_tag)
             } else {
-                (
-                    read_name.clone(),
-                    mate_tid,
-                    mate_pos_val,
-                    own_tid,
-                    own_pos,
-                    hi_tag,
-                )
+                (qname_hash, mate_tid, mate_pos_val, own_tid, own_pos, hi_tag)
             };
 
             if let Some(mate_info) = mate_buffer.remove(&buffer_key) {
@@ -923,10 +991,11 @@ fn process_chromosome_batch(
                     }
                 }
             } else {
+                // Take ownership of gene_hits instead of cloning (it's cleared at loop start)
                 mate_buffer.insert(
                     buffer_key,
                     MateInfo {
-                        gene_hits: gene_hits.clone(),
+                        gene_hits: std::mem::take(&mut gene_hits),
                         is_dup,
                         is_multi,
                     },
@@ -1299,7 +1368,7 @@ pub fn count_reads(
             }
 
             // Paired-end mate buffering (same logic as process_chromosome_batch)
-            let read_name = record.qname().to_vec();
+            let qname_hash = hash_qname(record.qname());
             let own_pos = record.pos();
             let own_tid = record.tid();
             let mate_pos_val = record.mpos();
@@ -1317,7 +1386,7 @@ pub fn count_reads(
 
             let buffer_key: MateBufferKey = if is_read1 {
                 (
-                    read_name.clone(),
+                    qname_hash,
                     own_tid,
                     own_pos,
                     mate_tid_val,
@@ -1326,7 +1395,7 @@ pub fn count_reads(
                 )
             } else {
                 (
-                    read_name.clone(),
+                    qname_hash,
                     mate_tid_val,
                     mate_pos_val,
                     own_tid,
@@ -1352,25 +1421,7 @@ pub fn count_reads(
                 }
 
                 let combined_genes: Vec<GeneIdx> =
-                    if mate_info.gene_hits.is_empty() && gene_hits.is_empty() {
-                        Vec::new()
-                    } else {
-                        let mut scores: HashMap<GeneIdx, u8> = HashMap::new();
-                        for &g in &mate_info.gene_hits {
-                            *scores.entry(g).or_insert(0) += 1;
-                        }
-                        for &g in &gene_hits {
-                            *scores.entry(g).or_insert(0) += 1;
-                        }
-                        let max_score = scores.values().copied().max().unwrap_or(0);
-                        let mut best: Vec<GeneIdx> = scores
-                            .iter()
-                            .filter(|(_, &s)| s == max_score)
-                            .map(|(&g, _)| g)
-                            .collect();
-                        best.sort_unstable();
-                        best
-                    };
+                    merge_gene_hits(&mate_info.gene_hits, &gene_hits);
 
                 if combined_genes.is_empty() {
                     result.stat_no_features += 1;
@@ -1400,10 +1451,11 @@ pub fn count_reads(
                     }
                 }
             } else {
+                // Take ownership of gene_hits instead of cloning (it's cleared at loop start)
                 mate_buffer.insert(
                     buffer_key,
                     MateInfo {
-                        gene_hits: gene_hits.clone(),
+                        gene_hits: std::mem::take(&mut gene_hits),
                         is_dup,
                         is_multi,
                     },
@@ -1447,25 +1499,7 @@ pub fn count_reads(
 
                 // Combine gene hits with featureCounts scoring
                 let combined_genes: Vec<GeneIdx> =
-                    if mate_info.gene_hits.is_empty() && info.gene_hits.is_empty() {
-                        Vec::new()
-                    } else {
-                        let mut scores: HashMap<GeneIdx, u8> = HashMap::new();
-                        for &g in &mate_info.gene_hits {
-                            *scores.entry(g).or_insert(0) += 1;
-                        }
-                        for &g in &info.gene_hits {
-                            *scores.entry(g).or_insert(0) += 1;
-                        }
-                        let max_score = scores.values().copied().max().unwrap_or(0);
-                        let mut best: Vec<GeneIdx> = scores
-                            .iter()
-                            .filter(|(_, &s)| s == max_score)
-                            .map(|(&g, _)| g)
-                            .collect();
-                        best.sort_unstable();
-                        best
-                    };
+                    merge_gene_hits(&mate_info.gene_hits, &info.gene_hits);
 
                 if combined_genes.is_empty() {
                     merged.stat_no_features += 1;
