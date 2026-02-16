@@ -1,0 +1,41 @@
+# This file was produced by samtools stats and RustQC
+# The command line was: rustqc rna (samtools stats compatible output)
+SN	raw total sequences:	49573	# excluding supplementary and secondary reads
+SN	filtered sequences:	0
+SN	sequences:	49573
+SN	is sorted:	1	# sorted by coordinate
+SN	1st fragments:	24797
+SN	last fragments:	24776
+SN	reads mapped:	49573
+SN	reads mapped and paired:	49546	# paired-end technology bit set + both mates mapped
+SN	reads unmapped:	0
+SN	reads properly paired:	49546	# proper-pair bit set
+SN	reads paired:	49573	# paired-end technology bit set
+SN	reads duplicated:	6097	# PCR or optical duplicate bit set
+SN	reads MQ0:	42	# mapped and MQ=0
+SN	reads QC failed:	0
+SN	non-primary alignments:	3266
+SN	supplementary alignments:	0
+SN	total length:	7198960	# ignores clipping
+SN	total first fragment length:	3585769	# ignores clipping
+SN	total last fragment length:	3613191	# ignores clipping
+SN	bases mapped:	7198960	# ignores clipping
+SN	bases mapped (cigar):	6923776	# more accurate
+SN	bases trimmed:	0
+SN	bases duplicated:	892156
+SN	mismatches:	39821	# from NM fields
+SN	error rate:	5.751341e-03	# mismatches / bases mapped (cigar)
+SN	average length:	145
+SN	average first fragment length:	144
+SN	average last fragment length:	145
+SN	maximum length:	151
+SN	maximum first fragment length:	151
+SN	maximum last fragment length:	151
+SN	average quality:	38.6
+SN	insert size average:	5771.6
+SN	insert size standard deviation:	29364.0
+SN	inward oriented pairs:	23385
+SN	outward oriented pairs:	1388
+SN	pairs with other orientation:	0
+SN	pairs on different chromosomes:	0
+SN	percentage of properly paired reads (%):	99.9

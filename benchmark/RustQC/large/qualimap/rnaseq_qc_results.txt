@@ -1,0 +1,26 @@
+>>>>>>> Input
+
+     bam file = GM12878_REP1.markdup.sorted
+
+>>>>>>> Reads alignment
+
+     reads aligned = 175,097,721
+     total alignments = 185,718,543
+     secondary alignments = 10,620,822
+     non-unique alignments = 10,620,822
+     aligned to genes = 16,061,453
+     ambiguous alignments = 1,277,361
+     no feature assigned = 75,375,961
+
+>>>>>>> Reads genomic origin
+
+     exonic = 744,941,713 (8.29%)
+     intronic = 837,462,849 (9.32%)
+     intergenic = 7,406,659,875 (82.40%)
+     overlapping exon = 1,700,860 (10.59%)
+
+>>>>>>> Transcript coverage profile
+
+     5' bias = 1.20
+     3' bias = 0.92
+     5'-3' bias = 1.24

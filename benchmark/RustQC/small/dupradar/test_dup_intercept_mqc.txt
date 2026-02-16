@@ -9,4 +9,4 @@
 #         min: 0
 #         format: '{:.2f}'
 Sample	dupRadar_intercept
-test	0.027975359216305267
+test	0.031858934078430205

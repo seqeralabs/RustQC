@@ -220,6 +220,21 @@ approximately normal for a well-prepared library.
   </Card>
 </CardGrid>
 
+## tin (Transcript Integrity Number)
+
+Measures transcript integrity via Shannon entropy of read coverage uniformity.
+A reimplementation of RSeQC's `tin.py` tool. For full details, see the
+dedicated [TIN & Gene Body Coverage](/outputs/tin/) documentation page.
+
+| File | Description |
+|------|-------------|
+| `{stem}.tin.xls` | Per-gene TIN scores (TSV: geneID, chrom, tx_start, tx_end, TIN) |
+| `{stem}.summary.txt` | Summary statistics: mean, median, and standard deviation of TIN scores |
+
+TIN scores range from 0 (completely degraded) to 100 (perfectly uniform coverage).
+The tool uses the longest transcript per gene and samples equally-spaced positions
+within exonic regions.
+
 ## Compatibility with RSeQC
 
 All output files are designed to be drop-in replacements for the corresponding

@@ -1,0 +1,100 @@
+---
+title: Preseq Benchmark
+description: Comparison of RustQC's preseq lc_extrap implementation against preseq v3.2.0 for library complexity estimation.
+---
+
+export const base = import.meta.env.BASE_URL;
+
+RustQC includes a built-in reimplementation of
+[preseq lc_extrap](http://smithlabresearch.org/software/preseq/) for library complexity
+estimation. This page compares the output against preseq v3.2.0, which is the version
+used by the [nf-core/rnaseq](https://nf-co.re/rnaseq) pipeline.
+
+## Performance
+
+Preseq runs as part of the single-pass `rustqc rna` analysis alongside all other
+tools. The fragment counting is performed during the same BAM read that powers
+dupRadar, featureCounts, and the 7 RSeQC tools. The extrapolation computation
+itself is fast (under 1 second) -- it is purely a function of the histogram data.
+
+| Tool | Runtime |
+| --- | ---: |
+| preseq lc_extrap (standalone) | ~2m 30s |
+| RustQC (all tools, single pass) | **5m 13s** |
+
+RustQC produces preseq output at zero additional I/O cost -- the fragment
+histogram is collected during the same BAM pass that produces all other outputs.
+
+## Output comparison
+
+**Input:** GM12878 REP1 -- a 10 GB paired-end RNA-seq BAM (93M fragments).
+
+The preseq reference was generated with:
+```bash
+preseq lc_extrap -bam -pe -seed 1 -seg_len 100000000 \
+  GM12878_REP1.markdup.sorted.bam
+```
+
+### Complexity curve
+
+RustQC's extrapolation matches preseq v3.2.0 within **0.1%** across the entire
+range, from 1M to 10B reads. The difference is consistent with expected
+stochastic variation from the bootstrap confidence interval estimation.
+
+| Total reads | preseq v3.2.0 | RustQC | Difference |
+| ---: | ---: | ---: | ---: |
+| 1,000,000 | 897,694 | 897,332 | -0.04% |
+| 10,000,000 | 6,581,472 | 6,580,040 | -0.02% |
+| 50,000,000 | 23,587,800 | 23,583,614 | -0.02% |
+| 100,000,000 | 37,212,648 | 37,205,668 | -0.02% |
+| 500,000,000 | 83,289,016 | 83,274,130 | -0.02% |
+| 1,000,000,000 | 103,397,736 | 103,380,000 | -0.02% |
+
+### Fragment counting
+
+The fragment histogram (frequency-of-frequencies table) is the input to the
+extrapolation algorithm. RustQC's parallel hash-based counting matches preseq's
+priority-queue-based mate merging within 0.001% for the singleton count (the
+most sensitive histogram bin).
+
+| Metric | preseq v3.2.0 | RustQC |
+| --- | ---: | ---: |
+| Total fragments | 93,003,768 | 93,003,768 |
+| Distinct fragments | ~52.4M | ~52.4M |
+| Singleton count | Matches within 0.001% | Matches within 0.001% |
+
+### Confidence intervals
+
+Bootstrap confidence intervals overlap between preseq and RustQC at every
+extrapolation point. RustQC's intervals are marginally wider due to minor
+differences in bootstrap random sampling, but the point estimates (medians)
+are within 0.1% at all depths.
+
+## Algorithm details
+
+RustQC implements the same Good-Toulmin rational function extrapolation as
+preseq v3.2.0:
+
+1. **Fragment counting**: PE reads are merged into fragments using
+   `(tid, min_start, max_end)` keys derived from CIGAR-based alignment
+   coordinates, matching preseq's `merge_mates()` behavior
+2. **Power series**: Coefficients derived from the frequency-of-frequencies
+   histogram
+3. **Continued fraction**: Evaluated using Euler's forward recurrence with
+   preseq-style rescaling
+4. **Degree selection**: Starts at degree 7, steps by 2, selects the most
+   stable approximation
+5. **Bootstrap**: Categorical resampling with configurable seed for
+   reproducibility
+
+Key implementation choices matched to preseq v3.2.0:
+- Read filtering: `!(flag & 0x100)` only (secondary excluded, supplementary included)
+- Proper pair flag `0x2` determines PE vs SE fragment construction
+- Non-proper-pair reads treated as individual fragments
+
+## Benchmark conditions
+
+- **BAM file**: GM12878 ENCODE RNA-Seq, paired-end, ~185M reads, 10 GB
+- **preseq version**: 3.2.0 (via Docker, matching nf-core/rnaseq)
+- **RustQC**: 10 threads, `--gtf` mode
+- **Hardware**: Apple M3 Max, 128 GB RAM

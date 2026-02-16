@@ -2,8 +2,11 @@
 
 Benchmark data and scripts for comparing RustQC against
 [dupRadar](https://bioconductor.org/packages/dupRadar/) (R/Bioconductor),
-[Subread featureCounts](http://subread.sourceforge.net/), and
-[RSeQC](https://rseqc.sourceforge.net/).
+[Subread featureCounts](http://subread.sourceforge.net/),
+[RSeQC](https://rseqc.sourceforge.net/),
+[preseq](https://github.com/smithlabcode/preseq),
+[samtools](http://www.htslib.org/), and
+[Qualimap](http://qualimap.conesalab.org/).
 
 For detailed results, tables, and side-by-side plot comparisons, see the
 documentation:
@@ -11,6 +14,8 @@ documentation:
 - [Combined benchmarks](https://ewels.github.io/RustQC/benchmarks/combined/)
 - [dupRadar benchmarks](https://ewels.github.io/RustQC/benchmarks/dupradar/)
 - [featureCounts benchmarks](https://ewels.github.io/RustQC/benchmarks/featurecounts/)
+- [Preseq benchmarks](https://ewels.github.io/RustQC/benchmarks/preseq/)
+- [Samtools benchmarks](https://ewels.github.io/RustQC/benchmarks/samtools/)
 
 ## Latest results (large dataset)
 
@@ -28,8 +33,13 @@ Mac. Upstream tools run via Docker with x86 emulation; RustQC runs natively.
 | junction_annotation (RSeQC) | 4m 37s |
 | junction_saturation (RSeQC) | 6m 32s |
 | inner_distance (RSeQC) | 1m 09s |
-| **Traditional total** | **1h 25m** |
-| **RustQC (10 threads)** | **3m 56s** |
+| preseq lc_extrap | ~4m |
+| samtools flagstat | ~1m |
+| samtools idxstats | ~1s |
+| samtools stats | ~3m |
+| tin.py (RSeQC) | ~30m |
+| **Traditional total** | **~2h 45m** |
+| **RustQC (10 threads)** | **~5m** |
 
 > **Note:** Docker x86 emulation on ARM inflates the upstream tool timings.
 > The key takeaway is that RustQC replaces 9 separate tool invocations
@@ -45,9 +55,10 @@ benchmark/
   dupRadar/         — R dupRadar reference output
     large/          — R script + output for large dataset
     small/          — R script + output for small dataset
-  RustQC/           — RustQC output (dupRadar + featureCounts)
+  RustQC/           — RustQC output (all tools)
     large/          — Output for large dataset
     small/          — Output for small dataset
+  expected/         — Reference outputs (samtools, TIN) for validation
   RSeQC/            — Python RSeQC reference output
     large/          — Reference output for large dataset
     small/          — Reference output for small dataset

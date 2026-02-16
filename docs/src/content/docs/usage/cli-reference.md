@@ -189,6 +189,18 @@ tool runs by default as part of `rustqc rna` and can be disabled via the
 | `--inner-distance-upper-bound <N>` | `250` | Histogram upper bound |
 | `--inner-distance-step <N>` | `5` | Histogram bin width |
 
+### Preseq options
+
+These flags control parameters for the preseq library complexity extrapolation.
+Preseq runs by default and can be skipped entirely with `--skip-preseq`.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--skip-preseq` | `false` | Skip the preseq library complexity analysis entirely |
+| `--preseq-max-extrap <N>` | `1e10` | Maximum extrapolation depth in total reads |
+| `--preseq-step-size <N>` | `1e6` | Step size between extrapolation points |
+| `--preseq-n-bootstraps <N>` | `100` | Number of bootstrap replicates for confidence intervals |
+
 ### Examples
 
 ```bash

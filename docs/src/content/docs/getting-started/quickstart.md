@@ -44,12 +44,18 @@ will find in the output directory:
 | `rseqc/junction_annotation/sample.markdup.splice_junction.png` | Splice junctions pie chart |
 | `rseqc/junction_saturation/sample.markdup.junctionSaturation_plot.png` | Junction saturation plot |
 | `rseqc/inner_distance/sample.markdup.inner_distance_plot.png` | Inner distance histogram |
+| `rseqc/tin/sample.markdup.tin.xls` | Transcript Integrity Numbers |
+| `samtools/sample.markdup.flagstat` | samtools flagstat-compatible output |
+| `samtools/sample.markdup.idxstats` | samtools idxstats-compatible output |
+| `samtools/sample.markdup.stats` | samtools stats SN-compatible output |
+| `preseq/sample.markdup.lc_extrap.txt` | Library complexity extrapolation |
+| `qualimap/rnaseq_qc_results.txt` | Qualimap-compatible QC summary |
 
 Plus SVG versions of all plots, biotype count tables, and MultiQC-compatible
 report files. Use `--flat-output` to write all files directly to the output
 directory without subdirectories.
 
-See [dupRadar Outputs](/outputs/dupradar/), [featureCounts Outputs](/outputs/featurecounts/), and [RSeQC Outputs](/outputs/rseqc/) for full details.
+See [dupRadar Outputs](/outputs/dupradar/), [featureCounts Outputs](/outputs/featurecounts/), [RSeQC Outputs](/outputs/rseqc/), [Preseq Outputs](/outputs/preseq/), [Samtools Outputs](/outputs/samtools/), and [TIN & Gene Body Coverage](/outputs/tin/) for full details.
 
 ## RSeQC quality control tools
 

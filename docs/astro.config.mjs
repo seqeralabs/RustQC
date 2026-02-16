@@ -51,6 +51,9 @@ export default defineConfig({
             { label: "dupRadar", slug: "outputs/dupradar" },
             { label: "featureCounts", slug: "outputs/featurecounts" },
             { label: "RSeQC", slug: "outputs/rseqc" },
+            { label: "TIN & Gene Body", slug: "outputs/tin" },
+            { label: "preseq", slug: "outputs/preseq" },
+            { label: "Samtools", slug: "outputs/samtools" },
           ],
         },
         {
@@ -60,6 +63,8 @@ export default defineConfig({
             { label: "dupRadar", slug: "benchmarks/dupradar" },
             { label: "featureCounts", slug: "benchmarks/featurecounts" },
             { label: "RSeQC", slug: "benchmarks/rseqc" },
+            { label: "preseq", slug: "benchmarks/preseq" },
+            { label: "Samtools", slug: "benchmarks/samtools" },
           ],
         },
         {

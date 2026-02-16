@@ -1,0 +1,2 @@
+Bam_file	TIN(mean)	TIN(median)	TIN(stdev)
+benchmark/input/small/test.bam	85.22	86.78	8.46

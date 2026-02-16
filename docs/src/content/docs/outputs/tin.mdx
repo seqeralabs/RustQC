@@ -1,0 +1,225 @@
+---
+title: TIN & Gene Body Coverage Outputs
+description: Output files produced by RustQC's TIN (Transcript Integrity Number) and gene body coverage analyses.
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+
+RustQC includes two complementary RNA integrity analyses:
+
+- **TIN (Transcript Integrity Number)** -- reimplementation of RSeQC's `tin.py`,
+  measuring transcript-level coverage uniformity via Shannon entropy
+- **Gene body coverage** -- Qualimap-compatible output showing coverage distribution
+  along normalized gene body positions
+
+Both run automatically as part of `rustqc rna` in the same single-pass BAM scan.
+
+## TIN (Transcript Integrity Number)
+
+### What is TIN?
+
+TIN measures the **uniformity of read coverage** across a transcript. A TIN
+score of 100 means perfectly uniform coverage; lower scores indicate degradation
+or bias. TIN is computed using Shannon entropy of read-start coverage at sampled
+positions along each transcript's exonic regions.
+
+TIN is particularly useful for:
+
+- **Detecting RNA degradation** -- degraded samples show low TIN scores across
+  most transcripts
+- **Sample QC** -- median TIN provides a single-number summary of RNA integrity,
+  complementing RIN (RNA Integrity Number) from Bioanalyzer/TapeStation
+- **Identifying problematic samples** -- samples with unusually low median TIN
+  should be flagged for potential exclusion
+
+### Output files
+
+TIN output files use the BAM file stem as a prefix and are written to a
+`rseqc/tin/` subdirectory under the output directory.
+
+<FileTree>
+- rseqc/
+  - tin/
+    - sample.tin.xls Per-transcript TIN scores
+    - sample.summary.txt Summary statistics (mean, median, stdev)
+</FileTree>
+
+#### TIN scores
+
+**File:** `<sample>.tin.xls`
+
+A tab-separated file with one row per transcript (gene), reporting the TIN score
+for each:
+
+| Column | Description |
+|--------|-------------|
+| `geneID` | Gene identifier from the annotation |
+| `chrom` | Chromosome |
+| `tx_start` | Transcript start position |
+| `tx_end` | Transcript end position |
+| `TIN` | Transcript Integrity Number (0-100) |
+
+Transcripts below the minimum coverage threshold are excluded from the output.
+TIN values are formatted to 2 decimal places.
+
+Example:
+
+```
+geneID	chrom	tx_start	tx_end	TIN
+ENSG00000227232.6	chr1	14695	24886	74.86
+ENSG00000268903.1	chr1	135140	135895	60.32
+ENSG00000269981.1	chr1	137681	137965	85.89
+```
+
+#### Summary
+
+**File:** `<sample>.summary.txt`
+
+A single-row tab-separated summary of TIN statistics across all transcripts:
+
+| Column | Description |
+|--------|-------------|
+| `Bam_file` | Path to the input BAM file |
+| `TIN(mean)` | Mean TIN across all transcripts |
+| `TIN(median)` | Median TIN |
+| `TIN(stdev)` | Standard deviation of TIN |
+
+Example:
+
+```
+Bam_file	TIN(mean)	TIN(median)	TIN(stdev)
+sample.bam	72.55	83.89	26.14
+```
+
+### Interpreting TIN scores
+
+| Median TIN | Interpretation |
+|------------|---------------|
+| > 70 | Good RNA integrity |
+| 50-70 | Moderate degradation |
+| < 50 | Significant degradation -- consider excluding |
+| < 30 | Severe degradation |
+
+A bimodal distribution of per-transcript TIN scores (some very high, some very
+low) can indicate selective degradation of certain transcript classes rather
+than global degradation.
+
+### Configuration
+
+```yaml
+tin:
+  enabled: true
+  sample_size: 100    # Equally-spaced positions to sample per transcript
+  min_coverage: 10    # Minimum read-start count to compute TIN
+```
+
+TIN uses the shared `--mapq` / `-q` flag for mapping quality filtering.
+
+## Gene body coverage
+
+### What is gene body coverage?
+
+Gene body coverage profiles show the distribution of read coverage along
+normalized transcript positions from 5' to 3'. Each transcript is divided into
+100 equal percentile bins, and coverage depth is accumulated across all
+expressed genes. This reveals systematic biases such as:
+
+- **3' bias** -- typical of degraded RNA or oligo-dT primed libraries
+- **5' bias** -- can indicate incomplete reverse transcription
+- **Uniform coverage** -- ideal result, expected from high-quality libraries
+
+### Output files
+
+Gene body coverage output is written to a `qualimap/` subdirectory in a format
+compatible with [Qualimap](http://qualimap.conesalab.org/) rnaseq output, which
+[MultiQC](https://multiqc.info/) can parse directly.
+
+<FileTree>
+- qualimap/
+  - coverage_profile_along_genes_(total).txt Coverage profile (100 bins)
+  - rnaseq_qc_results.txt Qualimap-compatible QC summary
+</FileTree>
+
+#### Coverage profile
+
+**File:** `coverage_profile_along_genes_(total).txt`
+
+A tab-separated file with 100 rows, one per percentile bin (0-99), showing the
+cumulative coverage depth at each normalized position along the gene body:
+
+| Column | Description |
+|--------|-------------|
+| Position | Percentile position along gene body (0.0 to 99.0) |
+| Coverage | Cumulative read depth at this position across all genes |
+
+#### QC results
+
+**File:** `rnaseq_qc_results.txt`
+
+A Qualimap rnaseq-compatible text file with four sections:
+
+- **Input** -- BAM file name
+- **Reads alignment** -- total reads, alignments, secondary, aligned to genes,
+  ambiguous, no feature assigned
+- **Reads genomic origin** -- exonic, intronic, and intergenic base counts with
+  percentages; overlapping exon count
+- **Transcript coverage profile** -- 5' bias, 3' bias, and 5'-3' bias ratios
+
+Example:
+
+```
+>>>>>>> Input
+     bam file = sample
+
+>>>>>>> Reads alignment
+     reads aligned = 175,097,721
+     total alignments = 185,718,543
+     secondary alignments = 10,620,822
+
+>>>>>>> Reads genomic origin
+     exonic = 744,941,713 (8.29%)
+     intronic = 837,462,849 (9.32%)
+     intergenic = 7,406,659,875 (82.40%)
+
+>>>>>>> Transcript coverage profile
+     5' bias = 1.20
+     3' bias = 0.92
+     5'-3' bias = 1.24
+```
+
+### Configuration
+
+```yaml
+genebody_coverage:
+  enabled: true    # Whether to produce gene body coverage output
+```
+
+Gene body coverage requires GTF annotation (`--gtf` mode) -- it is not
+available in BED-only mode because it requires transcript-level exon structure
+to normalize positions along the gene body.
+
+## Compatibility
+
+### TIN
+
+RustQC's TIN output uses the same file format and column names as RSeQC's
+`tin.py`. The key difference is that RustQC reports one row per **gene** (using
+the longest transcript as representative), while RSeQC reports one row per
+**transcript**. TIN scores are computed using the same Shannon entropy formula.
+
+### Gene body coverage
+
+The Qualimap-compatible output files are designed for direct parsing by MultiQC's
+Qualimap rnaseq module. The coverage profile format and QC results sections match
+Qualimap's output structure.
+
+## References
+
+- **TIN:** Wang L, Nie J, Sicotte H, et al. Measure transcript integrity using
+  RNA-seq data. *BMC Bioinformatics*. 2016;17:58.
+- **RSeQC:** Wang L, Wang S, Li W. RSeQC: quality control of RNA-seq experiments.
+  *Bioinformatics*. 2012;28(16):2184-2185.
+  [RSeQC website](https://rseqc.sourceforge.net/)
+- **Qualimap:** Garcia-Alcalde F, et al. Qualimap: evaluating next-generation
+  sequencing alignment data. *Bioinformatics*. 2012;28(20):2678-2679.
+  [Qualimap website](http://qualimap.conesalab.org/)

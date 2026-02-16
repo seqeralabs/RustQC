@@ -128,16 +128,16 @@ mean expression (reads/kbp)
 75 - 80 % / 0.0
 </text>
 <text x="390" y="444" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="4.032258064516129" opacity="1" fill="#000000" transform="rotate(270, 390, 444)">
-80 - 85 % / 1.2
+80 - 85 % / 0.7
 </text>
 <text x="410" y="444" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="4.032258064516129" opacity="1" fill="#000000" transform="rotate(270, 410, 444)">
-85 - 90 % / 3.2
+85 - 90 % / 1.6
 </text>
 <text x="430" y="444" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="4.032258064516129" opacity="1" fill="#000000" transform="rotate(270, 430, 444)">
-90 - 95 % / 6.8
+90 - 95 % / 3.5
 </text>
 <text x="450" y="444" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="4.032258064516129" opacity="1" fill="#000000" transform="rotate(270, 450, 444)">
-95 - 100 % / 79.0
+95 - 100 % / 40.4
 </text>
 <rect x="367" y="404" width="12" height="0" opacity="1" fill="#BEBEBE" stroke="none"/>
 <rect x="367" y="404" width="12" height="0" opacity="1" fill="none" stroke="#000000"/>
@@ -147,7 +147,7 @@ mean expression (reads/kbp)
 <polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="373,404 373,404 "/>
 <polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="369,404 377,404 "/>
 <circle cx="373" cy="368" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
-<circle cx="373" cy="283" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
+<circle cx="373" cy="222" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="373" cy="40" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <rect x="387" y="404" width="12" height="0" opacity="1" fill="#BEBEBE" stroke="none"/>
 <rect x="387" y="404" width="12" height="0" opacity="1" fill="none" stroke="#000000"/>
@@ -161,7 +161,7 @@ mean expression (reads/kbp)
 <circle cx="393" cy="344" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="393" cy="344" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="393" cy="332" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
-<circle cx="393" cy="313" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
+<circle cx="393" cy="332" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="393" cy="313" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="393" cy="283" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="393" cy="283" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
@@ -175,14 +175,14 @@ mean expression (reads/kbp)
 <polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="409,404 417,404 "/>
 <polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="413,404 413,404 "/>
 <polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="409,404 417,404 "/>
-<circle cx="413" cy="392" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
+<circle cx="413" cy="393" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="413" cy="387" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="413" cy="385" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
-<circle cx="413" cy="384" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
+<circle cx="413" cy="385" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="413" cy="383" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="413" cy="383" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="413" cy="378" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
-<circle cx="413" cy="376" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
+<circle cx="413" cy="378" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="413" cy="374" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="413" cy="371" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="413" cy="371" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
@@ -205,31 +205,27 @@ mean expression (reads/kbp)
 <circle cx="413" cy="344" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="413" cy="344" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="413" cy="332" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
-<circle cx="413" cy="324" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
+<circle cx="413" cy="332" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="413" cy="313" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
-<circle cx="413" cy="307" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
-<circle cx="413" cy="259" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
+<circle cx="413" cy="313" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
+<circle cx="413" cy="283" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="413" cy="40" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
-<rect x="427" y="390" width="12" height="14" opacity="1" fill="#BEBEBE" stroke="none"/>
-<rect x="427" y="390" width="12" height="14" opacity="1" fill="none" stroke="#000000"/>
+<rect x="427" y="387" width="12" height="17" opacity="1" fill="#BEBEBE" stroke="none"/>
+<rect x="427" y="387" width="12" height="17" opacity="1" fill="none" stroke="#000000"/>
 <polyline fill="none" opacity="1" stroke="#000000" stroke-width="2" points="427,404 439,404 "/>
 <polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="433,404 433,404 "/>
 <polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="429,404 437,404 "/>
-<polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="433,390 433,371 "/>
-<polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="429,371 437,371 "/>
-<circle cx="433" cy="369" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
-<circle cx="433" cy="368" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
-<circle cx="433" cy="368" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
-<circle cx="433" cy="364" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
+<polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="433,387 433,364 "/>
+<polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="429,364 437,364 "/>
 <circle cx="433" cy="361" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
+<circle cx="433" cy="360" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="433" cy="359" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
-<circle cx="433" cy="358" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="433" cy="352" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
-<circle cx="433" cy="352" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
-<circle cx="433" cy="346" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
+<circle cx="433" cy="348" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
+<circle cx="433" cy="338" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="433" cy="338" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="433" cy="332" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
-<circle cx="433" cy="307" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
+<circle cx="433" cy="313" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="433" cy="283" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="433" cy="248" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="433" cy="222" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
@@ -238,11 +234,12 @@ mean expression (reads/kbp)
 <polyline fill="none" opacity="1" stroke="#000000" stroke-width="2" points="447,391 459,391 "/>
 <polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="453,404 453,404 "/>
 <polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="449,404 457,404 "/>
-<polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="453,379 453,340 "/>
-<polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="449,340 457,340 "/>
+<polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="453,379 453,342 "/>
+<polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="449,342 457,342 "/>
+<circle cx="453" cy="340" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="453" cy="337" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="453" cy="328" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
-<circle cx="453" cy="302" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 <circle cx="453" cy="284" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
-<circle cx="453" cy="233" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
+<circle cx="453" cy="266" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
+<circle cx="453" cy="234" r="3" opacity="1" fill="none" stroke="#000000" stroke-width="1"/>
 </svg>

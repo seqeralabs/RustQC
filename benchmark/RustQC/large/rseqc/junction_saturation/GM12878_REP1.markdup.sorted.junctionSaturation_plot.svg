@@ -238,21 +238,21 @@ Percent of total reads
 100.0
 </text>
 <polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="469,435 469,440 "/>
-<polyline fill="none" opacity="1" stroke="#0000FF" stroke-width="1" points="60,262 81,224 103,199 124,180 146,164 167,150 189,137 210,126 232,115 253,106 275,96 296,87 318,79 339,71 361,64 382,57 404,50 425,43 447,37 469,31 "/>
-<circle cx="60" cy="262" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
-<circle cx="81" cy="224" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
-<circle cx="103" cy="199" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
+<polyline fill="none" opacity="1" stroke="#0000FF" stroke-width="1" points="60,263 81,223 103,198 124,180 146,164 167,150 189,137 210,126 232,115 253,105 275,96 296,88 318,79 339,72 361,64 382,57 404,50 425,43 447,37 469,31 "/>
+<circle cx="60" cy="263" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
+<circle cx="81" cy="223" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
+<circle cx="103" cy="198" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
 <circle cx="124" cy="180" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
 <circle cx="146" cy="164" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
 <circle cx="167" cy="150" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
 <circle cx="189" cy="137" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
 <circle cx="210" cy="126" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
 <circle cx="232" cy="115" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
-<circle cx="253" cy="106" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
+<circle cx="253" cy="105" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
 <circle cx="275" cy="96" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
-<circle cx="296" cy="87" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
+<circle cx="296" cy="88" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
 <circle cx="318" cy="79" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
-<circle cx="339" cy="71" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
+<circle cx="339" cy="72" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
 <circle cx="361" cy="64" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
 <circle cx="382" cy="57" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
 <circle cx="404" cy="50" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
@@ -280,21 +280,21 @@ Percent of total reads
 <circle cx="425" cy="432" r="3" opacity="1" fill="#FF0000" stroke="none" stroke-width="1"/>
 <circle cx="447" cy="432" r="3" opacity="1" fill="#FF0000" stroke="none" stroke-width="1"/>
 <circle cx="469" cy="432" r="3" opacity="1" fill="#FF0000" stroke="none" stroke-width="1"/>
-<polyline fill="none" opacity="1" stroke="#00FF00" stroke-width="1" points="60,264 81,225 103,201 124,182 146,166 167,152 189,139 210,128 232,117 253,108 275,98 296,89 318,81 339,73 361,66 382,59 404,52 425,45 447,39 469,33 "/>
+<polyline fill="none" opacity="1" stroke="#00FF00" stroke-width="1" points="60,264 81,225 103,200 124,181 146,165 167,151 189,139 210,128 232,117 253,107 275,98 296,90 318,81 339,74 361,66 382,59 404,52 425,45 447,39 469,33 "/>
 <circle cx="60" cy="264" r="3" opacity="1" fill="#00FF00" stroke="none" stroke-width="1"/>
 <circle cx="81" cy="225" r="3" opacity="1" fill="#00FF00" stroke="none" stroke-width="1"/>
-<circle cx="103" cy="201" r="3" opacity="1" fill="#00FF00" stroke="none" stroke-width="1"/>
-<circle cx="124" cy="182" r="3" opacity="1" fill="#00FF00" stroke="none" stroke-width="1"/>
-<circle cx="146" cy="166" r="3" opacity="1" fill="#00FF00" stroke="none" stroke-width="1"/>
-<circle cx="167" cy="152" r="3" opacity="1" fill="#00FF00" stroke="none" stroke-width="1"/>
+<circle cx="103" cy="200" r="3" opacity="1" fill="#00FF00" stroke="none" stroke-width="1"/>
+<circle cx="124" cy="181" r="3" opacity="1" fill="#00FF00" stroke="none" stroke-width="1"/>
+<circle cx="146" cy="165" r="3" opacity="1" fill="#00FF00" stroke="none" stroke-width="1"/>
+<circle cx="167" cy="151" r="3" opacity="1" fill="#00FF00" stroke="none" stroke-width="1"/>
 <circle cx="189" cy="139" r="3" opacity="1" fill="#00FF00" stroke="none" stroke-width="1"/>
 <circle cx="210" cy="128" r="3" opacity="1" fill="#00FF00" stroke="none" stroke-width="1"/>
 <circle cx="232" cy="117" r="3" opacity="1" fill="#00FF00" stroke="none" stroke-width="1"/>
-<circle cx="253" cy="108" r="3" opacity="1" fill="#00FF00" stroke="none" stroke-width="1"/>
+<circle cx="253" cy="107" r="3" opacity="1" fill="#00FF00" stroke="none" stroke-width="1"/>
 <circle cx="275" cy="98" r="3" opacity="1" fill="#00FF00" stroke="none" stroke-width="1"/>
-<circle cx="296" cy="89" r="3" opacity="1" fill="#00FF00" stroke="none" stroke-width="1"/>
+<circle cx="296" cy="90" r="3" opacity="1" fill="#00FF00" stroke="none" stroke-width="1"/>
 <circle cx="318" cy="81" r="3" opacity="1" fill="#00FF00" stroke="none" stroke-width="1"/>
-<circle cx="339" cy="73" r="3" opacity="1" fill="#00FF00" stroke="none" stroke-width="1"/>
+<circle cx="339" cy="74" r="3" opacity="1" fill="#00FF00" stroke="none" stroke-width="1"/>
 <circle cx="361" cy="66" r="3" opacity="1" fill="#00FF00" stroke="none" stroke-width="1"/>
 <circle cx="382" cy="59" r="3" opacity="1" fill="#00FF00" stroke="none" stroke-width="1"/>
 <circle cx="404" cy="52" r="3" opacity="1" fill="#00FF00" stroke="none" stroke-width="1"/>

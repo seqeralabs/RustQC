@@ -50,6 +50,45 @@ and fragment size.
 - Website: <https://rseqc.sourceforge.net/>
 - Publication: <https://doi.org/10.1093/bioinformatics/bts356>
 
+## preseq
+
+RustQC reimplements library complexity estimation from the
+[preseq](https://github.com/smithlabcode/preseq) package, created by Timothy
+Daley, Andrew Smith, and colleagues. preseq predicts library complexity and
+estimates the expected number of distinct molecules at increasing sequencing depths.
+
+> Daley T, Smith AD. Predicting the molecular complexity of sequencing libraries.
+> *Nature Methods*. 2013;10(4):325-327.
+
+- GitHub: <https://github.com/smithlabcode/preseq>
+- Publication: <https://doi.org/10.1038/nmeth.2375>
+
+## samtools
+
+RustQC produces output compatible with
+[samtools](http://www.htslib.org/) flagstat, idxstats, and stats (SN section),
+created by Heng Li and the HTSlib project. These formats are widely used by
+downstream QC tools including MultiQC.
+
+> Danecek P, Bonfield JK, Liddle J, et al. Twelve years of SAMtools and BCFtools.
+> *GigaScience*. 2021;10(2):giab008.
+
+- Website: <http://www.htslib.org/>
+- Publication: <https://doi.org/10.1093/gigascience/giab008>
+
+## Qualimap
+
+RustQC produces gene body coverage output compatible with
+[Qualimap](http://qualimap.conesalab.org/) rnaseq, created by Fernando
+Garcia-Alcalde and colleagues. The output is parseable by MultiQC as a
+Qualimap rnaseq report.
+
+> Garcia-Alcalde F, Okonechnikov K, Carbonell J, et al. Qualimap: evaluating
+> next-generation sequencing alignment data. *Bioinformatics*. 2012;28(20):2678-2679.
+
+- Website: <http://qualimap.conesalab.org/>
+- Publication: <https://doi.org/10.1093/bioinformatics/bts503>
+
 ## Key dependencies
 
 RustQC is built with the following open-source Rust libraries:

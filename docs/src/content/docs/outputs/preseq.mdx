@@ -1,0 +1,144 @@
+---
+title: Preseq Outputs
+description: Output files produced by RustQC's preseq-compatible library complexity extrapolation.
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+
+## What is preseq?
+
+[Preseq](http://smithlabresearch.org/software/preseq/) estimates library complexity
+by extrapolating the expected number of distinct molecules at increasing sequencing
+depths. This helps answer a fundamental question: **if I sequence more, will I discover
+new molecules?**
+
+RustQC reimplements the `preseq lc_extrap` command, matching the behavior of
+preseq v3.2.0 (the version used by [nf-core/rnaseq](https://nf-co.re/rnaseq)).
+The analysis runs automatically as part of `rustqc rna` at zero additional BAM
+reading cost -- fragment counting happens in the same single-pass BAM scan as all
+other analyses.
+
+### Why it matters
+
+Library complexity estimation helps answer critical questions:
+
+- **Is my library saturated?** If the complexity curve plateaus, additional
+  sequencing will mostly produce duplicate molecules.
+- **How many unique molecules can I expect?** The extrapolation predicts distinct
+  molecule counts at depths beyond what was actually sequenced.
+- **Should I sequence more?** If the curve is still rising steeply at the current
+  depth, additional sequencing will yield diminishing but still significant returns.
+
+### The Good-Toulmin method
+
+Preseq uses the Good-Toulmin rational function extrapolation to predict library
+complexity from the observed frequency-of-frequencies histogram (how many
+fragments were seen exactly 1 time, 2 times, etc.). Bootstrap resampling provides
+confidence intervals around the extrapolation.
+
+## Output files
+
+All preseq output files use the BAM file stem as a prefix and are written to a
+`preseq/` subdirectory under the output directory. Use `--flat-output` to write
+all files directly to the output directory instead.
+
+<FileTree>
+- preseq/
+  - sample.lc_extrap.txt Library complexity extrapolation curve
+</FileTree>
+
+### Complexity curve
+
+**File:** `<sample>.lc_extrap.txt`
+
+A tab-separated file with one row per extrapolation point. The first data row is
+always zeros (representing zero sequencing depth). Columns:
+
+| Column | Description |
+|--------|-------------|
+| `TOTAL_READS` | Sequencing depth (number of fragments) |
+| `EXPECTED_DISTINCT` | Predicted number of distinct molecules at this depth |
+| `LOWER_0.95CI` | Lower bound of the 95% confidence interval |
+| `UPPER_0.95CI` | Upper bound of the 95% confidence interval |
+
+The confidence level (default 95%) is configurable. Values are formatted to 1
+decimal place. Confidence interval values may be `-` when the bootstrap
+produces undefined results (typically at very high extrapolation depths).
+
+Example:
+
+```
+TOTAL_READS	EXPECTED_DISTINCT	LOWER_0.95CI	UPPER_0.95CI
+0.0	0.0	0.0	0.0
+1000000.0	897331.6	895859.5	899559.9
+2000000.0	1704183.8	1701496.5	1708487.0
+3000000.0	2450443.8	2446703.6	2456603.0
+```
+
+This file is directly compatible with MultiQC's preseq module for visualization
+in multi-sample QC reports.
+
+## Interpreting results
+
+### Complexity curve shape
+
+- **Steep initial rise:** Most fragments are unique at low depths -- good complexity.
+- **Gradual plateau:** Library is approaching saturation -- additional sequencing
+  yields diminishing returns.
+- **Sharp early plateau:** Low complexity library -- many duplicates even at
+  modest depths.
+- **Still rising at current depth:** Library has remaining complexity to capture
+  with additional sequencing.
+
+### Confidence intervals
+
+Wide confidence intervals at high extrapolation depths are normal. The
+extrapolation becomes increasingly uncertain further from the observed data.
+Narrow intervals near the observed depth and widening intervals at high depths
+indicate a well-behaved estimate.
+
+## Configuration
+
+### CLI flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--skip-preseq` | `false` | Skip the preseq analysis entirely |
+| `--preseq-max-extrap <N>` | `1e10` | Maximum extrapolation depth (total fragments) |
+| `--preseq-step-size <N>` | `1e6` | Step size between extrapolation points |
+| `--preseq-n-bootstraps <N>` | `100` | Number of bootstrap replicates for confidence intervals |
+
+### YAML configuration
+
+```yaml
+preseq:
+  enabled: true          # Whether to run the analysis
+  max_extrap: 1.0e10     # Maximum extrapolation depth
+  step_size: 1.0e6       # Step size between points
+  n_bootstraps: 100      # Bootstrap replicates
+  confidence_level: 0.95 # CI confidence level (e.g. 0.95 for 95%)
+  seed: 1                # Random seed for reproducibility
+  max_terms: 100         # Maximum terms in power series
+  defects: false         # Use defects model for problematic histograms
+```
+
+## Compatibility with preseq
+
+The output file format is identical to `preseq lc_extrap` output and is
+compatible with downstream tools that parse preseq output, including
+[MultiQC](https://multiqc.info/).
+
+RustQC's implementation matches preseq v3.2.0's PE BAM counting behavior:
+fragment keys use `(chromosome, fragment_start, fragment_end)` derived from
+CIGAR alignment coordinates. The Good-Toulmin extrapolation, continued fraction
+evaluation, and bootstrap resampling all follow the preseq v3.2.0 algorithm.
+
+Typical differences from the preseq reference are less than 0.1% across the
+entire extrapolation range, attributable to stochastic variation in the bootstrap
+resampling.
+
+## References
+
+- **preseq:** Daley T, Smith AD. Predicting the molecular complexity of
+  sequencing libraries. *Nature Methods*. 2013;10(4):325-327.
+  [preseq website](http://smithlabresearch.org/software/preseq/)

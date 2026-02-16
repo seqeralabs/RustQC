@@ -1,0 +1,26 @@
+>>>>>>> Input
+
+     bam file = test
+
+>>>>>>> Reads alignment
+
+     reads aligned = 49,573
+     total alignments = 52,839
+     secondary alignments = 3,266
+     non-unique alignments = 3,266
+     aligned to genes = 22,788
+     ambiguous alignments = 2,392
+     no feature assigned = 1,225
+
+>>>>>>> Reads genomic origin
+
+     exonic = 3,004,919 (90.08%)
+     intronic = 161,566 (4.84%)
+     intergenic = 169,326 (5.08%)
+     overlapping exon = 10,938 (48.00%)
+
+>>>>>>> Transcript coverage profile
+
+     5' bias = 0.75
+     3' bias = 0.61
+     5'-3' bias = 1.14

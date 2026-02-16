@@ -12,7 +12,7 @@
 
 **RustQC** is a growing suite of fast QC tools for sequencing data, compiled to a single static binary with no runtime dependencies. It currently includes:
 
-- **`rustqc rna`** -- A single-command RNA-Seq QC pipeline that runs all analyses in one pass: [dupRadar](https://github.com/ssayols/dupRadar) duplicate rate analysis, [featureCounts](http://subread.sourceforge.net/)-compatible read counting with biotype summaries, and 7 [RSeQC](https://rseqc.sourceforge.net/) quality control tools (bam_stat, infer_experiment, read_duplication, read_distribution, junction_annotation, junction_saturation, inner_distance).
+- **`rustqc rna`** -- A single-command RNA-Seq QC pipeline that runs all analyses in one pass: [dupRadar](https://github.com/ssayols/dupRadar) duplicate rate analysis, [featureCounts](http://subread.sourceforge.net/)-compatible read counting with biotype summaries, 7 [RSeQC](https://rseqc.sourceforge.net/) quality control tools (bam_stat, infer_experiment, read_duplication, read_distribution, junction_annotation, junction_saturation, inner_distance), [preseq](http://smithlabresearch.org/software/preseq/) library complexity estimation, [TIN](https://rseqc.sourceforge.net/#tin-py) transcript integrity analysis, gene body coverage profiling, and [samtools](http://www.htslib.org/)-compatible flagstat/idxstats/stats output.
 
 All tools accept SAM/BAM/CRAM input and support processing multiple files in a single command. Annotation files (GTF and BED) can be provided plain or gzip-compressed (`.gz`).
 
@@ -29,7 +29,7 @@ All tools accept SAM/BAM/CRAM input and support processing multiple files in a s
 
 ### `rustqc rna` -- RNA-Seq quality control
 
-Performs dupRadar-equivalent duplicate rate analysis, featureCounts-compatible read counting, and 7 RSeQC-equivalent QC analyses in a single pass. Given a duplicate-marked BAM and either a GTF annotation or a BED12 gene model, it computes per-gene duplication rates, fits a logistic regression model, generates diagnostic plots, produces gene-level count files with biotype summaries, and runs comprehensive QC metrics (bam_stat, infer_experiment, read_duplication, read_distribution, junction_annotation, junction_saturation, inner_distance).
+Performs dupRadar-equivalent duplicate rate analysis, featureCounts-compatible read counting, 7 RSeQC-equivalent QC analyses, preseq library complexity estimation, TIN transcript integrity analysis, gene body coverage profiling, and samtools-compatible summary statistics -- all in a single pass. Given a duplicate-marked BAM and either a GTF annotation or a BED12 gene model, it computes per-gene duplication rates, fits a logistic regression model, generates diagnostic plots, produces gene-level count files with biotype summaries, extrapolates library complexity, and runs comprehensive QC metrics.
 
 | Feature | dupRadar (R) | RustQC |
 |---------|-------------|--------|
@@ -56,7 +56,18 @@ The `rustqc rna` command also includes reimplementations of 7 popular [RSeQC](ht
 | junction_saturation | `junction_saturation.py` | Saturation analysis of detected splice junctions |
 | inner_distance | `inner_distance.py` | Inner distance distribution for paired-end reads |
 
-All RSeQC tools run by default when annotation is provided via `--gtf` or `--bed`. With a GTF file, all 7 tools run alongside dupRadar and featureCounts. With a BED file only, all 7 RSeQC tools run but dupRadar and featureCounts are skipped (they require a GTF). Individual tools can be disabled via the [configuration file](#configuration).
+All RSeQC tools run by default when annotation is provided via `--gtf` or `--bed`. With a GTF file, all tools run alongside dupRadar and featureCounts. With a BED file only, the RSeQC tools, TIN, and preseq run but dupRadar, featureCounts, and gene body coverage are skipped (they require a GTF). Individual tools can be disabled via the [configuration file](#configuration).
+
+### Additional tools (integrated)
+
+| Tool | Upstream equivalent | Description |
+|------|-------------------|-------------|
+| preseq | [`preseq lc_extrap`](http://smithlabresearch.org/software/preseq/) | Library complexity extrapolation -- estimates distinct molecules at increasing sequencing depths |
+| TIN | [`tin.py`](https://rseqc.sourceforge.net/#tin-py) | Transcript Integrity Number -- measures transcript degradation via coverage uniformity |
+| Gene body coverage | [Qualimap](http://qualimap.conesalab.org/) rnaseq | Coverage profile along gene bodies (5'→3'), Qualimap-compatible output for MultiQC |
+| flagstat | [`samtools flagstat`](http://www.htslib.org/) | Alignment flag summary statistics, identical format to samtools |
+| idxstats | [`samtools idxstats`](http://www.htslib.org/) | Per-chromosome read counts, identical format to samtools |
+| stats | [`samtools stats`](http://www.htslib.org/) | Summary Numbers (SN) section, MultiQC-compatible format |
 
 ## Density scatter plots
 
@@ -331,6 +342,28 @@ RSeQC outputs are organized into per-tool subdirectories under `rseqc/`.
 | junction_annotation | `rseqc/junction_annotation/sample.junction.xls`, `...junction.bed`, `...splice_events.{png,svg}`, `...splice_junction.{png,svg}`, `...junction_plot.r`, `...junction_annotation.txt` | Junction classifications, pie charts, and summary |
 | junction_saturation | `rseqc/junction_saturation/sample.junctionSaturation_plot.{png,svg}`, `...junctionSaturation_plot.r`, `...junctionSaturation_summary.txt` | Saturation curve plot and data |
 | inner_distance | `rseqc/inner_distance/sample.inner_distance.txt`, `...inner_distance_freq.txt`, `...inner_distance_plot.{png,svg}`, `...inner_distance_plot.r`, `...inner_distance_summary.txt` | Per-pair distances, histogram plot, and summary |
+| TIN | `rseqc/tin/sample.tin.xls`, `...summary.txt` | Transcript Integrity Number per gene and summary statistics |
+
+### preseq outputs (`preseq/`)
+
+| File | Description |
+|------|-------------|
+| `preseq/sample.lc_extrap.txt` | Library complexity extrapolation curve (TSV: TOTAL_READS, EXPECTED_DISTINCT, LOWER_CI, UPPER_CI) |
+
+### samtools outputs (`samtools/`)
+
+| File | Description |
+|------|-------------|
+| `samtools/sample.flagstat` | samtools flagstat-compatible alignment flag summary |
+| `samtools/sample.idxstats` | samtools idxstats-compatible per-chromosome read counts |
+| `samtools/sample.stats` | samtools stats SN-section compatible summary numbers (MultiQC-parseable) |
+
+### Gene body coverage outputs (`qualimap/`)
+
+| File | Description |
+|------|-------------|
+| `qualimap/coverage_profile_along_genes_(total).txt` | Gene body coverage profile (100 percentile bins, 5'→3') |
+| `qualimap/rnaseq_qc_results.txt` | Qualimap rnaseq-compatible QC results (MultiQC-parseable) |
 
 ### Duplication matrix columns
 

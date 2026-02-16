@@ -76,6 +76,35 @@ inner_distance:
   lower_bound: -250
   upper_bound: 250
   step: 5
+
+# TIN (Transcript Integrity Number)
+tin:
+  enabled: true
+  sample_size: 100
+  min_coverage: 10
+
+# Gene body coverage / Qualimap
+genebody_coverage:
+  enabled: true
+
+# Library complexity (preseq lc_extrap)
+preseq:
+  enabled: true
+  max_extrap: 10000000000
+  step_size: 1000000
+  n_bootstraps: 100
+  confidence_level: 0.95
+  seed: 1
+  max_terms: 100
+  defects: false
+
+# Samtools-compatible outputs
+flagstat:
+  enabled: true
+idxstats:
+  enabled: true
+samtools_stats:
+  enabled: true
 ```
 
 ## Chromosome name mapping
@@ -259,3 +288,58 @@ inner_distance:
 Requires annotation (`--gtf` or `--bed`). These parameters can also be set via CLI flags:
 `--inner-distance-sample-size`, `--inner-distance-lower-bound`,
 `--inner-distance-upper-bound`, `--inner-distance-step`.
+
+### tin
+
+```yaml
+tin:
+  enabled: true
+  sample_size: 100     # Equally-spaced positions to sample per transcript (default: 100)
+  min_coverage: 10     # Minimum read-start count to compute TIN (default: 10)
+```
+
+Requires annotation (`--gtf` or `--bed`). The TIN (Transcript Integrity Number)
+measures transcript integrity via Shannon entropy of read coverage uniformity.
+
+### genebody_coverage
+
+```yaml
+genebody_coverage:
+  enabled: true    # Set to false to skip gene body coverage
+```
+
+Requires annotation (`--gtf` only). Computes coverage profiles along transcript
+bodies (100 percentile bins, 5'->3') and produces Qualimap-compatible output.
+
+### preseq
+
+```yaml
+preseq:
+  enabled: true
+  max_extrap: 10000000000  # Maximum extrapolation depth (default: 1e10)
+  step_size: 1000000       # Step size between extrapolation points (default: 1e6)
+  n_bootstraps: 100        # Bootstrap replicates for confidence intervals (default: 100)
+  confidence_level: 0.95   # CI confidence level (default: 0.95)
+  seed: 1                  # Random seed for reproducibility (default: 1)
+  max_terms: 100           # Maximum terms in power series (default: 100)
+  defects: false           # Use defects model for problematic histograms (default: false)
+```
+
+Runs in both GTF and BED modes (only needs BAM fragment info). The `max_extrap`,
+`step_size`, and `n_bootstraps` can also be set via CLI flags (`--preseq-max-extrap`,
+`--preseq-step-size`, `--preseq-n-bootstraps`). Use `--skip-preseq` to disable entirely.
+
+### flagstat / idxstats / samtools_stats
+
+```yaml
+flagstat:
+  enabled: true        # samtools flagstat-compatible output
+idxstats:
+  enabled: true        # samtools idxstats-compatible output
+samtools_stats:
+  enabled: true        # samtools stats SN-section compatible output
+```
+
+These produce samtools-compatible output files in the `samtools/` subdirectory.
+They share the same BAM statistics accumulator as `bam_stat` -- enabling any of
+them ensures the statistics are collected.

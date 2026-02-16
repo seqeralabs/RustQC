@@ -141,17 +141,17 @@ export const base = import.meta.env.BASE_URL;
 <CardGrid stagger>
   <Card title="Identical Results" icon="approve-check">
     Produces bit-for-bit identical output to R's dupRadar and featureCounts,
-    plus faithful reimplementations of 7 RSeQC tools.
+    plus faithful reimplementations of 7 RSeQC tools, preseq, TIN, and samtools.
     Over 800,000 values compared with zero mismatches.
   </Card>
   <Card title="Up to 21x Faster" icon="rocket">
-    Processes a 10 GB BAM file in under 4 minutes vs ~1h 25m for the
+    Processes a 10 GB BAM file in under 6 minutes vs ~1h 25m for the
     equivalent tools — saving over 80 minutes per sample for the same results.
   </Card>
   <Card title="All-in-One" icon="puzzle">
-    Combines dupRadar analysis, featureCounts-compatible output, biotype
-    counting, and 7 RSeQC metrics in a single pass — no need to run
-    featureCounts or RSeQC separately.
+    Combines dupRadar, featureCounts, biotype counting, 7 RSeQC metrics,
+    preseq library complexity, TIN, gene body coverage, and samtools stats
+    in a single pass — replacing 14+ separate tool invocations.
   </Card>
   <Card title="SAM / BAM / CRAM" icon="document">
     Accepts SAM, BAM, and CRAM alignment files. Process multiple files in
@@ -164,7 +164,10 @@ export const base = import.meta.env.BASE_URL;
 RustQC is a reimplementation of the excellent [dupRadar](https://bioconductor.org/packages/dupRadar/)
 Bioconductor package by Sergi Sayols, uses the same counting approach as
 [Subread featureCounts](https://subread.sourceforge.net/) by Yang Liao and Wei Shi,
-and includes reimplementations of 7 tools from [RSeQC](https://rseqc.sourceforge.net/)
-by Liguo Wang and colleagues.
+includes reimplementations of 7 tools from [RSeQC](https://rseqc.sourceforge.net/)
+by Liguo Wang and colleagues, library complexity estimation from
+[preseq](http://smithlabresearch.org/software/preseq/) by Timothy Daley and Andrew Smith,
+and produces outputs compatible with [samtools](http://www.htslib.org/) and
+[Qualimap](http://qualimap.conesalab.org/).
 
 **If you use RustQC, please cite the original tools** — see the [Credits & Citation](about/credits/) page.
