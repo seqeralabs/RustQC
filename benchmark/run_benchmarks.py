@@ -601,150 +601,346 @@ def run_rustqc(ds_name: str, ds: dict, root: Path) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# SVG bar chart generation
+# SVG bar chart generation (matplotlib)
 # ---------------------------------------------------------------------------
+
+# Staging overhead per tool: time spent loading BAM index, annotations, etc.
+# before the actual analysis begins.  This is added to each tool's runtime.
+STAGING_SECS = 150  # 2m 30s
 
 
 def generate_svgs(results: list[dict], root: Path) -> None:
-    """Generate dark/light SVG bar charts from large-dataset results."""
-    large = [r for r in results if r.get("dataset") == "large"]
-    if not large:
-        print("No large-dataset results — skipping SVG generation.")
-        return
+    """Generate dark/light stacked-bar SVG charts from profiling results.
 
-    # Order: RustQC first, then upstream tools sorted by category
-    order = (
-        ["RustQC", "featureCounts", "dupRadar"]
-        + RSEQC_TOOLS
-        + [
-            "tin",
-            "preseq",
-            "samtools_flagstat",
-            "samtools_idxstats",
-            "samtools_stats",
-            "qualimap",
-        ]
-    )
-    # Pretty display names for SVG labels
-    display_names = {
-        "RustQC": "RustQC",
-        "featureCounts": "featureCounts",
-        "dupRadar": "dupRadar",
-        "bam_stat": "RSeQC: bam_stat",
-        "infer_experiment": "RSeQC: infer_experiment",
-        "read_duplication": "RSeQC: read_duplication",
-        "read_distribution": "RSeQC: read_distribution",
-        "junction_annotation": "RSeQC: junction_annotation",
-        "junction_saturation": "RSeQC: junction_saturation",
-        "inner_distance": "RSeQC: inner_distance",
-        "tin": "RSeQC: tin.py",
-        "preseq": "preseq lc_extrap",
-        "samtools_flagstat": "samtools flagstat",
-        "samtools_idxstats": "samtools idxstats",
-        "samtools_stats": "samtools stats",
-        "qualimap": "Qualimap rnaseq",
+    Uses average durations from real pipeline runs.  A per-tool staging
+    overhead (``STAGING_SECS``) is prepended to each segment as a hatched
+    bar to visualise BAM loading time.
+    """
+    # Average realtime durations from nf-core/rnaseq pipeline trace
+    # (8 samples, GM12878 dataset — Fusion filesystem, no staging).
+    tool_secs: dict[str, float] = {
+        "RustQC": 280,
+        "bam_stat": 437.6,
+        "infer_experiment": 4.1,
+        "read_duplication": 1005.6,
+        "read_distribution": 494.8,
+        "junction_annotation": 381.6,
+        "junction_saturation": 461.2,
+        "inner_distance": 59.7,
+        "dupRadar": 4558.2,
+        "featureCounts": 56.5,
+        "qualimap": 1813.2,
+        "samtools_stats": 214.4,
+        "samtools_flagstat": 73.9,
+        "samtools_idxstats": 4.9,
+        "preseq": 240,
+        "tin": 2700,
     }
-    bars: list[tuple[str, float]] = []
-    for name in order:
-        match = [r for r in large if r["tool"] == name]
-        if match:
-            bars.append((display_names.get(name, name), match[0]["wall_seconds"]))
-    if not bars:
+
+    def secs(tool: str) -> float:
+        return tool_secs.get(tool, 0)
+
+    # ── Tool groups (order within each group determines stacking order) ──
+    groups: list[tuple[str, list[tuple[str, str]]]] = [
+        (
+            "RSeQC",
+            [
+                ("tin", "tin.py"),
+                ("read_duplication", "read_duplication"),
+                ("junction_saturation", "junction_saturation"),
+                ("bam_stat", "bam_stat"),
+                ("read_distribution", "read_distribution"),
+                ("junction_annotation", "junction_annotation"),
+                ("inner_distance", "inner_distance"),
+                ("infer_experiment", "infer_experiment"),
+            ],
+        ),
+        ("dupRadar", [("dupRadar", "dupRadar")]),
+        ("Qualimap", [("qualimap", "Qualimap")]),
+        (
+            "samtools",
+            [
+                ("samtools_stats", "samtools stats"),
+                ("samtools_flagstat", "samtools flagstat"),
+                ("samtools_idxstats", "samtools idxstats"),
+            ],
+        ),
+        ("preseq", [("preseq", "preseq")]),
+        ("featureCounts", [("featureCounts", "featureCounts")]),
+    ]
+
+    # Build flat segment list: (display_label, seconds, group_label)
+    segments: list[tuple[str, float, str]] = []
+    for grp, tools in groups:
+        for key, label in tools:
+            s = secs(key)
+            if s > 0:
+                segments.append((label, s, grp))
+
+    rustqc_secs = secs("RustQC")
+    if not segments and rustqc_secs == 0:
+        print("No benchmark data — skipping SVG generation.")
         return
 
     for theme in ("dark", "light"):
-        _write_svg(bars, root, theme)
+        _write_svg(rustqc_secs, segments, groups, root, theme)
 
 
-def _write_svg(bars: list[tuple[str, float]], root: Path, theme: str) -> None:
-    # Catppuccin Mocha (dark) / Latte (light)
+def _fmt_time(s: float) -> str:
+    """Format seconds as e.g. '1h 15m 58s', '7m 17s', or '4s'.
+
+    Always includes minutes when hours are present (e.g. '3h 00m 49s').
+    """
+    if s < 60:
+        return f"{s:.0f}s"
+    h = int(s // 3600)
+    m = int((s % 3600) // 60)
+    sec = int(s % 60)
+    if h > 0:
+        parts = [f"{h}h", f"{m:02d}m"]
+        if sec > 0:
+            parts.append(f"{sec:02d}s")
+        return " ".join(parts)
+    if sec > 0:
+        return f"{m}m {sec:02d}s"
+    return f"{m}m"
+
+
+def _fmt_axis(s: float, _pos: object = None) -> str:
+    """Format seconds for x-axis tick labels (e.g. '1h 30m', '30m')."""
+    if s == 0:
+        return "0m"
+    h = int(s) // 3600
+    m = (int(s) % 3600) // 60
+    if h > 0:
+        if m > 0:
+            return f"{h}h {m:02d}m"
+        return f"{h}h"
+    return f"{m}m"
+
+
+def _write_svg(
+    rustqc_work: float,
+    segments: list[tuple[str, float, str]],
+    groups: list[tuple[str, list[tuple[str, str]]]],
+    root: Path,
+    theme: str,
+) -> None:
+    """Write a stacked-bar benchmark SVG using matplotlib."""
+    import math
+
+    import matplotlib
+    import matplotlib.patches as mpatches
+    import matplotlib.pyplot as plt
+
+    matplotlib.use("Agg")
+
+    # ── Theme colours (Catppuccin Mocha / Latte) ─────────────────────────
     if theme == "dark":
-        grid, label_c, text_c, accent, bar_c = (
-            "#313244",
-            "#a6adc8",
-            "#cdd6f4",
-            "#cba6f7",
-            "#7f849c",
-        )
+        bg = "#1e1e2e"
+        text_c = "#cdd6f4"
+        subtext_c = "#a6adc8"
+        grid_c = "#313244"
+        accent = "#cba6f7"
+        grp_colors = {
+            "RSeQC": "#89b4fa",
+            "dupRadar": "#f38ba8",
+            "Qualimap": "#cba6f7",
+            "samtools": "#a6e3a1",
+            "preseq": "#f9e2af",
+            "featureCounts": "#fab387",
+        }
     else:
-        grid, label_c, text_c, accent, bar_c = (
-            "#ccd0da",
-            "#6c6f85",
-            "#4c4f69",
-            "#8839ef",
-            "#7c7f93",
+        bg = "#eff1f5"
+        text_c = "#4c4f69"
+        subtext_c = "#6c6f85"
+        grid_c = "#ccd0da"
+        accent = "#8839ef"
+        grp_colors = {
+            "RSeQC": "#1e66f5",
+            "dupRadar": "#d20f39",
+            "Qualimap": "#8839ef",
+            "samtools": "#40a02b",
+            "preseq": "#df8e1d",
+            "featureCounts": "#fe640b",
+        }
+
+    # ── Derived values ───────────────────────────────────────────────────
+    rustqc_total = STAGING_SECS + rustqc_work
+    total_trad = sum(STAGING_SECS + s for _, s, _ in segments)
+
+    # ── Figure setup ─────────────────────────────────────────────────────
+    fig, ax = plt.subplots(figsize=(14, 5.5))
+    fig.patch.set_facecolor(bg)
+    ax.set_facecolor(bg)
+
+    bar_height = 0.55
+    y_rustqc = 1
+    y_trad = 0
+
+    # ── RustQC bar (staging hatched + work solid) ────────────────────────
+    ax.barh(
+        y_rustqc,
+        STAGING_SECS,
+        height=bar_height,
+        left=0,
+        color=accent,
+        edgecolor=bg,
+        linewidth=0.8,
+        hatch="//",
+        alpha=0.5,
+    )
+    ax.barh(
+        y_rustqc,
+        rustqc_work,
+        height=bar_height,
+        left=STAGING_SECS,
+        color=accent,
+        edgecolor=bg,
+        linewidth=0.8,
+    )
+
+    # ── Traditional stacked bar ──────────────────────────────────────────
+    x_pos = 0.0
+    seg_mids: list[tuple[float, str, float, str]] = []
+    for label, work_secs, grp in segments:
+        color = grp_colors.get(grp, "#888888")
+        tool_total = STAGING_SECS + work_secs
+
+        # Staging (hatched)
+        ax.barh(
+            y_trad,
+            STAGING_SECS,
+            height=bar_height,
+            left=x_pos,
+            color=color,
+            edgecolor=bg,
+            linewidth=0.8,
+            hatch="//",
+            alpha=0.5,
+        )
+        # Work (solid)
+        ax.barh(
+            y_trad,
+            work_secs,
+            height=bar_height,
+            left=x_pos + STAGING_SECS,
+            color=color,
+            edgecolor=bg,
+            linewidth=0.8,
         )
 
-    label_w = 180
-    chart_l = label_w + 10
-    chart_r = 720
-    cw = chart_r - chart_l
-    bh, gap, top = 24, 8, 10
-    bot = 28
-    n = len(bars)
-    h = top + n * (bh + gap) - gap + bot
-    chart_bot = top + n * (bh + gap) - gap
+        mid_x = x_pos + tool_total / 2
+        seg_mids.append((mid_x, label, work_secs, grp))
+        x_pos += tool_total
 
-    max_s = max(s for _, s in bars)
-    # Choose tick interval
-    for limit, iv in [(60, 15), (300, 60), (600, 120), (1800, 300), (3600, 600)]:
-        if max_s <= limit:
-            tick_iv = iv
-            break
-    else:
-        tick_iv = 1800
-    max_t = ((int(max_s * 1.15) // tick_iv) + 1) * tick_iv
+    # ── Segment labels (below bar at 90°) ────────────────────────────────
+    label_y_base = y_trad - bar_height / 2 - 0.08
+    for mid_x, label, work_secs, grp in seg_mids:
+        color = grp_colors.get(grp, "#888888")
+        lbl_text = f"{label} ({_fmt_time(work_secs)})"
 
-    def x(s):
-        return chart_l + (s / max_t) * cw
-
-    def tick_label(s):
-        if s == 0:
-            return "0s"
-        return f"{s // 60}m" if s >= 60 else f"{s}s"
-
-    lines = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 {h}" '
-        f'width="720" height="{h}" '
-        f"style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;\">"
-    ]
-
-    # Gridlines + tick labels
-    t = 0
-    while t <= max_t:
-        xv = x(t)
-        lines.append(
-            f'  <line x1="{xv:.1f}" y1="{top}" x2="{xv:.1f}" y2="{chart_bot}" stroke="{grid}" stroke-width="1"/>'
+        # Connector line from bar bottom to label
+        ax.plot(
+            [mid_x, mid_x],
+            [y_trad - bar_height / 2, label_y_base - 0.02],
+            color=grid_c,
+            linewidth=0.6,
+            clip_on=False,
         )
-        lines.append(
-            f'  <text x="{xv:.1f}" y="{chart_bot + 16}" text-anchor="middle" fill="{label_c}" font-size="12">{tick_label(t)}</text>'
-        )
-        t += tick_iv
-
-    # Bars
-    for i, (name, secs) in enumerate(bars):
-        y = top + i * (bh + gap)
-        w = max((secs / max_t) * cw, 2)
-        is_rqc = name == "RustQC"
-        fill = accent if is_rqc else bar_c
-        wt = "bold" if is_rqc else "normal"
-        nc = text_c if is_rqc else label_c
-        ty = y + bh / 2 + 5
-
-        lines.append(
-            f'  <text x="{chart_l - 12}" y="{ty:.1f}" text-anchor="end" fill="{nc}" font-size="14" font-weight="{wt}">{name}</text>'
-        )
-        lines.append(
-            f'  <rect x="{chart_l}" y="{y:.1f}" width="{w:.1f}" height="{bh}" fill="{fill}"/>'
-        )
-        lines.append(
-            f'  <text x="{chart_l + w + 8:.1f}" y="{ty:.1f}" text-anchor="start" fill="{text_c}" font-size="14" font-weight="{wt}">{fmt(secs)}</text>'
+        ax.text(
+            mid_x,
+            label_y_base - 0.06,
+            lbl_text,
+            ha="right",
+            va="top",
+            fontsize=7.5,
+            fontweight="500",
+            color=color,
+            rotation=90,
+            clip_on=False,
         )
 
-    lines.append("</svg>")
+    # ── Y-axis labels ────────────────────────────────────────────────────
+    ax.set_yticks([y_rustqc, y_trad])
+    ax.set_yticklabels(
+        [
+            f"RustQC RNA\n(10 threads) {_fmt_time(rustqc_total)}",
+            f"Traditional tools\n(sequential) {_fmt_time(total_trad)}",
+        ],
+        fontsize=10,
+        fontweight="bold",
+        color=text_c,
+    )
 
+    # ── X-axis ───────────────────────────────────────────────────────────
+    x_max = total_trad * 1.02
+    ax.set_xlim(0, x_max)
+    tick_iv = 1800  # 30 minutes
+    ticks = list(range(0, int(x_max) + 1, tick_iv))
+    ax.set_xticks(ticks)
+    ax.set_xticklabels([_fmt_axis(t) for t in ticks], fontsize=8, color=subtext_c)
+    ax.tick_params(axis="y", colors=text_c, length=0, pad=10)
+    ax.tick_params(axis="x", colors=grid_c, length=3)
+
+    # Grid
+    ax.xaxis.grid(True, color=grid_c, linestyle="--", linewidth=0.5, alpha=0.7)
+    ax.set_axisbelow(True)
+
+    # Remove spines
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+    # Y limits — room below for rotated labels
+    ax.set_ylim(-3.5, 1.5)
+
+    # ── Legend ────────────────────────────────────────────────────────────
+    legend_handles = []
+    for grp, _tools in groups:
+        grp_secs = sum(ws for _, ws, g in segments if g == grp)
+        if grp_secs == 0:
+            continue
+        n = sum(1 for _, _, g in segments if g == grp)
+        grp_total = grp_secs + STAGING_SECS * n
+        color = grp_colors.get(grp, "#888888")
+        legend_handles.append(
+            mpatches.Patch(
+                facecolor=color,
+                edgecolor="none",
+                label=f"{grp} ({_fmt_time(grp_total)})",
+            )
+        )
+    legend_handles.append(
+        mpatches.Patch(
+            facecolor=accent,
+            edgecolor="none",
+            hatch="//",
+            alpha=0.5,
+            label=f"Staging ({_fmt_time(STAGING_SECS)}/tool)",
+        )
+    )
+    ax.legend(
+        handles=legend_handles,
+        loc="lower left",
+        bbox_to_anchor=(0.0, -0.02),
+        ncol=4,
+        fontsize=8,
+        frameon=False,
+        labelcolor=subtext_c,
+    )
+
+    # ── Save ─────────────────────────────────────────────────────────────
+    plt.tight_layout()
     out = ensure_dir(root / "docs" / "public" / "benchmarks") / f"benchmark_{theme}.svg"
-    out.write_text("\n".join(lines) + "\n")
+    fig.savefig(
+        str(out),
+        format="svg",
+        bbox_inches="tight",
+        facecolor=bg,
+        edgecolor="none",
+        dpi=150,
+    )
+    plt.close(fig)
     print(f"  Wrote {out}")
 
 

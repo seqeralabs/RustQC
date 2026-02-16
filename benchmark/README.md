@@ -19,31 +19,35 @@ documentation:
 
 ## Latest results (large dataset)
 
-Run via `python3 benchmark/run_benchmarks.py --all` on a 10-core Apple Silicon
-Mac. Upstream tools run via Docker with x86 emulation; RustQC runs natively.
+Average wall times from an nf-core/rnaseq pipeline run with 8 samples.
+Staging overhead (2m 30s per tool for BAM loading/indexing) is added to
+each tool's runtime. RustQC runs all analyses in a single pass.
 
 | Tool | Wall time |
 |------|----------:|
-| dupRadar (R) | 27m 21s |
-| featureCounts (Subread) | 3m 39s |
-| bam_stat (RSeQC) | 6m 07s |
-| infer_experiment (RSeQC) | 7s |
-| read_duplication (RSeQC) | 29m 43s |
-| read_distribution (RSeQC) | 6m 00s |
-| junction_annotation (RSeQC) | 4m 37s |
-| junction_saturation (RSeQC) | 6m 32s |
-| inner_distance (RSeQC) | 1m 09s |
-| preseq lc_extrap | ~4m |
-| samtools flagstat | ~1m |
-| samtools idxstats | ~1s |
-| samtools stats | ~3m |
-| tin.py (RSeQC) | ~30m |
-| **Traditional total** | **~2h 45m** |
-| **RustQC (10 threads)** | **~5m** |
+| tin.py (RSeQC) | 45m |
+| read_duplication (RSeQC) | 16m 45s |
+| junction_saturation (RSeQC) | 7m 41s |
+| bam_stat (RSeQC) | 7m 17s |
+| read_distribution (RSeQC) | 8m 14s |
+| junction_annotation (RSeQC) | 6m 21s |
+| inner_distance (RSeQC) | 59s |
+| infer_experiment (RSeQC) | 4s |
+| dupRadar (R) | 1h 15m 58s |
+| Qualimap | 30m 13s |
+| samtools stats | 3m 34s |
+| samtools flagstat | 1m 13s |
+| samtools idxstats | 4s |
+| preseq lc_extrap | 4m |
+| featureCounts (Subread) | 56s |
+| + Staging overhead | 2m 30s/tool |
+| **Traditional total** | **~4h 06m** |
+| **RustQC RNA (10 threads)** | **~7m 10s** |
 
-> **Note:** Docker x86 emulation on ARM inflates the upstream tool timings.
-> The key takeaway is that RustQC replaces 9 separate tool invocations
-> (each requiring a full BAM pass) with a single command and single BAM pass.
+> **Note:** Timings are averages from a real nf-core/rnaseq pipeline run
+> (8 samples). The key takeaway is that RustQC replaces 15 separate tool
+> invocations (each requiring a full BAM pass and staging overhead) with a
+> single command and single BAM pass.
 
 ## Directory structure
 
