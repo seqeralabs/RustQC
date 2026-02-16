@@ -30,7 +30,7 @@ benchmark/input/**/*.bed.gz
 *.inner_distance.txt
 *.junction.bed
 *.junction.xls
-benchmark/RSeQC/**/junction_annotation.junction.Interact.bed
+benchmark/rseqc/**/junction_annotation.junction.Interact.bed
 
 # Large TIN reference outputs
 benchmark/rseqc/**/tin.xls

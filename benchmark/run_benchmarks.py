@@ -333,36 +333,24 @@ def run_rseqc_plots(tool: str, outdir: Path) -> None:
 
 
 def run_rseqc(ds_name: str, ds: dict, root: Path) -> list[dict]:
-    """Run all 7 RSeQC tools via Docker, one at a time."""
+    """Run all 7 RSeQC tools via Docker, one at a time.
+
+    Each tool's output is written to its own subdirectory under
+    ``benchmark/rseqc/{ds_name}/{tool}/``.
+    """
     print(f"\n{'=' * 60}")
     print(f"RSeQC (Python) — {ds_name}")
     print(f"{'=' * 60}")
     docker_pull(RSEQC_IMG)
 
-    outdir = ensure_dir(root / "benchmark" / "RSeQC" / ds_name)
+    rseqc_root = root / "benchmark" / "rseqc" / ds_name
     bam = (root / ds["bam"]).resolve()
     bai = (root / (ds["bam"] + ".bai")).resolve()
     bed = (root / ds["bed"]).resolve()
 
-    docker_base = [
-        "docker",
-        "run",
-        "--rm",
-        "--platform",
-        DOCKER_PLATFORM,
-        "-v",
-        f"{bam}:/data/input.bam:ro",
-        "-v",
-        f"{bai}:/data/input.bam.bai:ro",
-        "-v",
-        f"{bed}:/data/input.bed:ro",
-        "-v",
-        f"{outdir}:/data/output",
-        RSEQC_IMG,
-    ]
-
     # Tool commands. Some write to stdout, some to stderr, some to files.
-    # Wrap in bash to capture everything.
+    # Wrap in bash to capture everything.  Output prefix is just the tool
+    # name since each tool gets its own mounted directory.
     tool_cmds = {
         "bam_stat": "bam_stat.py -i /data/input.bam > /data/output/bam_stat.txt 2>&1",
         "infer_experiment": "infer_experiment.py -i /data/input.bam -r /data/input.bed > /data/output/infer_experiment.txt 2>&1",
@@ -376,9 +364,28 @@ def run_rseqc(ds_name: str, ds: dict, root: Path) -> list[dict]:
     results = []
     for tool in RSEQC_TOOLS:
         print(f"\n--- {tool} ---")
-        cmd = docker_base + ["bash", "-c", tool_cmds[tool]]
+        tool_outdir = ensure_dir(rseqc_root / tool)
+        docker_cmd = [
+            "docker",
+            "run",
+            "--rm",
+            "--platform",
+            DOCKER_PLATFORM,
+            "-v",
+            f"{bam}:/data/input.bam:ro",
+            "-v",
+            f"{bai}:/data/input.bam.bai:ro",
+            "-v",
+            f"{bed}:/data/input.bed:ro",
+            "-v",
+            f"{tool_outdir}:/data/output",
+            RSEQC_IMG,
+            "bash",
+            "-c",
+            tool_cmds[tool],
+        ]
         r = run_profiled(
-            cmd,
+            docker_cmd,
             root / "benchmark" / "profiling" / "rseqc" / tool / ds_name,
             tool,
         )
@@ -387,7 +394,7 @@ def run_rseqc(ds_name: str, ds: dict, root: Path) -> list[dict]:
 
         # Run any R plot scripts this tool generated
         if tool in RSEQC_PLOT_SCRIPTS:
-            run_rseqc_plots(tool, outdir)
+            run_rseqc_plots(tool, tool_outdir)
 
     return results
 
@@ -481,7 +488,7 @@ def run_tin(ds_name: str, ds: dict, root: Path) -> dict:
     print(f"{'=' * 60}")
     docker_pull(RSEQC_IMG)
 
-    outdir = ensure_dir(root / "benchmark" / "tin" / ds_name)
+    outdir = ensure_dir(root / "benchmark" / "rseqc" / ds_name / "tin")
     bam = (root / ds["bam"]).resolve()
     bai = (root / (ds["bam"] + ".bai")).resolve()
     bed = (root / ds["bed"]).resolve()

@@ -226,32 +226,32 @@ RSEQC_IMG="wave.seqera.io/wt/ea3e9f972b6e/wave/build:rseqc-5.0.4--14c99cde3bff8d
 
 # bam_stat
 docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data \
-  $RSEQC_IMG bam_stat.py -i /data/test.bam > benchmark/RSeQC/small/bam_stat.txt 2>&1
+  $RSEQC_IMG bam_stat.py -i /data/test.bam > benchmark/rseqc/small/bam_stat/bam_stat.txt 2>&1
 
 # infer_experiment
 docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data \
   $RSEQC_IMG infer_experiment.py -i /data/test.bam -r /data/chr6.bed \
-  > benchmark/RSeQC/small/infer_experiment.txt 2>&1
+  > benchmark/rseqc/small/infer_experiment/infer_experiment.txt 2>&1
 
 # read_duplication
-docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data -v $(pwd)/benchmark/RSeQC/small:/out \
+docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data -v $(pwd)/benchmark/rseqc/small/read_duplication:/out \
   $RSEQC_IMG read_duplication.py -i /data/test.bam -o /out/read_duplication
 
 # read_distribution
 docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data \
   $RSEQC_IMG read_distribution.py -i /data/test.bam -r /data/chr6.bed \
-  > benchmark/RSeQC/small/read_distribution.txt 2>&1
+  > benchmark/rseqc/small/read_distribution/read_distribution.txt 2>&1
 
 # junction_annotation
-docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data -v $(pwd)/benchmark/RSeQC/small:/out \
+docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data -v $(pwd)/benchmark/rseqc/small/junction_annotation:/out \
   $RSEQC_IMG junction_annotation.py -i /data/test.bam -r /data/chr6.bed -o /out/junction_annotation
 
 # junction_saturation
-docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data -v $(pwd)/benchmark/RSeQC/small:/out \
+docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data -v $(pwd)/benchmark/rseqc/small/junction_saturation:/out \
   $RSEQC_IMG junction_saturation.py -i /data/test.bam -r /data/chr6.bed -o /out/junction_saturation
 
 # inner_distance
-docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data -v $(pwd)/benchmark/RSeQC/small:/out \
+docker run --rm --platform linux/amd64 -v $(pwd)/benchmark/input/small:/data -v $(pwd)/benchmark/rseqc/small/inner_distance:/out \
   $RSEQC_IMG inner_distance.py -i /data/test.bam -r /data/chr6.bed -o /out/inner_distance
 ```
 
