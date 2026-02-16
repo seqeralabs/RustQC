@@ -112,6 +112,10 @@ pub struct Config {
     /// preseq lc_extrap library complexity extrapolation configuration.
     #[serde(default)]
     pub preseq: PreseqConfig,
+
+    /// Qualimap RNA-Seq QC configuration.
+    #[serde(default)]
+    pub qualimap: QualimapConfig,
 }
 
 // ============================================================================
@@ -524,6 +528,31 @@ pub struct GenebodyCoverageConfig {
 }
 
 impl Default for GenebodyCoverageConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+/// Configuration for Qualimap RNA-Seq QC.
+///
+/// When enabled, produces Qualimap-compatible output files including
+/// `rnaseq_qc_results.txt`, coverage profiles (total/high/low), plots,
+/// and an HTML report. Uses Qualimap-compatible counting logic:
+/// enclosure-based gene assignment with M-only CIGAR parsing.
+///
+/// Example:
+/// ```yaml
+/// qualimap:
+///   enabled: true
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct QualimapConfig {
+    /// Whether to produce Qualimap RNA-Seq QC output. Defaults to true.
+    pub enabled: bool,
+}
+
+impl Default for QualimapConfig {
     fn default() -> Self {
         Self { enabled: true }
     }

@@ -650,6 +650,13 @@ fn process_single_bam(
         None
     };
 
+    // === Build Qualimap exon index (if enabled, GTF-only) ===
+    let qualimap_index = if params.config.qualimap.enabled {
+        genes.map(rna::qualimap::QualimapIndex::from_genes)
+    } else {
+        None
+    };
+
     // === dupRadar counting (requires GTF) ===
     let mut count_result = if let Some(genes) = genes {
         info!(
@@ -678,6 +685,7 @@ fn process_single_bam(
                 None
             },
             genebody_position_map.as_ref(),
+            qualimap_index.as_ref(),
         )?;
         info!(
             "[{}] Counting complete in {:.2}s",
