@@ -1,0 +1,2 @@
+Bam_file	TIN(mean)	TIN(median)	TIN(stdev)
+GM12878_REP1.markdup.sorted.bam	49.15	62.02	37.96
