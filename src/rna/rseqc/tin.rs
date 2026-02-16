@@ -53,7 +53,7 @@ pub struct TinIndex {
     pub transcripts: Vec<TranscriptSampling>,
     /// Per-chromosome sorted position entries for binary search.
     /// Each entry: (genomic_position, transcript_index, slot_index).
-    pub chrom_positions: HashMap<String, Vec<(u64, u32, u16)>>,
+    pub chrom_positions: HashMap<String, Vec<(u64, u32, u32)>>,
     /// Per-chromosome transcript spans for overlap pre-filtering.
     /// Each entry: (tx_start, tx_end, transcript_index), sorted by tx_start.
     pub chrom_spans: HashMap<String, Vec<(u64, u64, u32)>>,
@@ -240,7 +240,7 @@ impl TinIndex {
             self.chrom_positions
                 .entry(chrom_upper.clone())
                 .or_default()
-                .push((pos, tx_idx, slot_idx as u16));
+                .push((pos, tx_idx, slot_idx as u32));
         }
 
         // Add transcript span
@@ -325,7 +325,7 @@ pub struct TinAccum {
     pub read_starts: Vec<u32>,
     /// Number of sampled slots per transcript.
     #[allow(dead_code)]
-    pub n_samples: Vec<u16>,
+    pub n_samples: Vec<u32>,
     /// Minimum MAPQ threshold.
     pub mapq_cut: u8,
     /// Minimum coverage threshold.
@@ -342,7 +342,7 @@ impl TinAccum {
         for tx in &index.transcripts {
             let n = tx.sampled_positions.len();
             coverage.push(vec![0u32; n]);
-            n_samples.push(n as u16);
+            n_samples.push(n as u32);
         }
 
         TinAccum {
@@ -578,13 +578,7 @@ pub fn write_tin_summary(results: &TinResults, bam_name: &str, output_path: &Pat
         let n = scores.len() as f64;
         let mean = scores.iter().sum::<f64>() / n;
 
-        let mut sorted = scores.clone();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        let median = if sorted.len().is_multiple_of(2) {
-            (sorted[sorted.len() / 2 - 1] + sorted[sorted.len() / 2]) / 2.0
-        } else {
-            sorted[sorted.len() / 2]
-        };
+        let median = crate::io::median(&scores);
 
         let variance = scores.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n;
         let stdev = variance.sqrt();

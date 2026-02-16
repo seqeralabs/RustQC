@@ -280,6 +280,11 @@ impl BamStatAccum {
         }
         if is_mapped {
             self.mapped += 1;
+            // samtools stats: reads MQ0 counts all mapped reads (including
+            // secondary/supplementary) with MAPQ=0
+            if record.mapq() == 0 {
+                self.reads_mq0 += 1;
+            }
         }
         // samtools stats: "1st fragments" / "last fragments" count primary reads only
         // For paired reads: read2 flag -> last, everything else -> 1st
@@ -373,10 +378,6 @@ impl BamStatAccum {
             if is_mapped {
                 self.primary_mapped += 1;
                 self.bases_mapped += seq_len;
-                // Count primary mapped reads with MAPQ=0
-                if record.mapq() == 0 {
-                    self.reads_mq0 += 1;
-                }
 
                 // CIGAR-based mapped bases (M/=/X operations)
                 use rust_htslib::bam::record::Cigar as C;
@@ -420,7 +421,7 @@ impl BamStatAccum {
                     let mtid = record.mtid();
                     if tid == mtid {
                         let tlen = record.insert_size();
-                        if tlen > 0 {
+                        if tlen > 0 && tlen <= 65536 {
                             let abs_tlen = tlen as f64;
                             self.insert_size_sum += abs_tlen;
                             self.insert_size_sq_sum += abs_tlen * abs_tlen;

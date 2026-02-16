@@ -1,7 +1,8 @@
-//! Shared I/O utilities for reading plain-text and gzip-compressed files.
+//! Shared I/O and numeric utilities.
 //!
 //! Provides [`open_reader`] which returns a buffered reader that transparently
 //! handles `.gz` (gzip) compressed files by detecting the gzip magic bytes.
+//! Also provides [`median`] for computing the median of an `f64` slice.
 
 use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
@@ -66,6 +67,31 @@ pub fn read_to_string<P: AsRef<Path>>(path: P) -> Result<String> {
         .read_to_string(&mut contents)
         .with_context(|| format!("Failed to read file: {}", path.display()))?;
     Ok(contents)
+}
+
+// ============================================================
+// Numeric helpers
+// ============================================================
+
+/// Compute the median of an `f64` slice.
+///
+/// Returns `0.0` for an empty slice.  A sorted copy is made internally so
+/// the input is not modified.
+///
+/// # Arguments
+/// * `values` - Slice of `f64` values.
+pub fn median(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    let mut sorted: Vec<f64> = values.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let n = sorted.len();
+    if n.is_multiple_of(2) {
+        (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0
+    } else {
+        sorted[n / 2]
+    }
 }
 
 #[cfg(test)]

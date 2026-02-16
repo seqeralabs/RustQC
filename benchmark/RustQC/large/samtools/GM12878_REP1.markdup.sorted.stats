@@ -12,7 +12,7 @@ SN	reads unmapped:	0
 SN	reads properly paired:	174840354	# proper-pair bit set
 SN	reads paired:	175097721	# paired-end technology bit set
 SN	reads duplicated:	133912519	# PCR or optical duplicate bit set
-SN	reads MQ0:	345072	# mapped and MQ=0
+SN	reads MQ0:	2331404	# mapped and MQ=0
 SN	reads QC failed:	0
 SN	non-primary alignments:	10620822
 SN	supplementary alignments:	0
@@ -32,8 +32,8 @@ SN	maximum length:	101
 SN	maximum first fragment length:	101
 SN	maximum last fragment length:	101
 SN	average quality:	36.3
-SN	insert size average:	3084.6
-SN	insert size standard deviation:	15028.6
+SN	insert size average:	2131.5
+SN	insert size standard deviation:	5238.6
 SN	inward oriented pairs:	87397973
 SN	outward oriented pairs:	22204
 SN	pairs with other orientation:	0

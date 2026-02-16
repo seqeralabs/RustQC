@@ -1040,13 +1040,14 @@ fn process_single_bam(
             );
 
             let qualimap_path = gb_dir.join("rnaseq_qc_results.txt");
-            // Get actual secondary + supplementary counts from the bam_stat accumulator
-            let total_alignments = count_result.stat_total_reads;
-            let secondary = rseqc_accums
+            // Get total_records and secondary+supplementary from the bam_stat accumulator.
+            // bam_stat.total_records counts every BAM record (unfiltered), matching Qualimap's
+            // "total alignments". Fall back to dupRadar's stat_total_reads if bam_stat is disabled.
+            let (total_alignments, secondary) = rseqc_accums
                 .as_ref()
                 .and_then(|a| a.bam_stat.as_ref())
-                .map(|bs| bs.secondary + bs.supplementary)
-                .unwrap_or(0);
+                .map(|bs| (bs.total_records, bs.secondary + bs.supplementary))
+                .unwrap_or((count_result.stat_total_reads, 0));
             rna::genebody::write_qualimap_results(
                 gb_result,
                 bam_stem,

@@ -200,18 +200,45 @@ impl GenebodyCoverageAccum {
                 let tx_start = gene_map.cumulative_starts[i] + (overlap_start - exon_start);
                 let tx_end = gene_map.cumulative_starts[i] + (overlap_end - exon_start);
 
-                // Convert to percentile bins
-                for tx_pos in tx_start..tx_end {
-                    let pct = if gene_map.strand == '-' {
-                        // Reverse strand: 3'→5' mapping, flip to 5'→3'
-                        (gene_map.total_exonic_length - 1 - tx_pos) as f64
-                            / gene_map.total_exonic_length as f64
-                    } else {
-                        tx_pos as f64 / gene_map.total_exonic_length as f64
-                    };
+                // Convert to percentile bins using range-based approach
+                // instead of iterating per-base (O(bins_spanned) vs O(overlap_len))
+                let total_len = gene_map.total_exonic_length as f64;
+                let (range_start, range_end) = if gene_map.strand == '-' {
+                    // Reverse strand: flip to 5'→3'
+                    let rs = gene_map.total_exonic_length - tx_end;
+                    let re = gene_map.total_exonic_length - tx_start;
+                    (rs, re)
+                } else {
+                    (tx_start, tx_end)
+                };
 
-                    let bin = (pct * NUM_BINS as f64).min((NUM_BINS - 1) as f64) as usize;
-                    self.coverage_bins[bin] += 1.0;
+                // Compute start/end bins (clamped to valid range)
+                let start_bin = ((range_start as f64 / total_len) * NUM_BINS as f64) as usize;
+                let start_bin = start_bin.min(NUM_BINS - 1);
+                let end_bin = (((range_end - 1) as f64 / total_len) * NUM_BINS as f64) as usize;
+                let end_bin = end_bin.min(NUM_BINS - 1);
+
+                if start_bin == end_bin {
+                    // All bases fall in the same bin
+                    self.coverage_bins[start_bin] += (range_end - range_start) as f64;
+                } else {
+                    // Bases span multiple bins -- compute exact counts per bin
+                    let bin_width = total_len / NUM_BINS as f64;
+                    // First bin: bases from range_start to the end of start_bin
+                    let first_bin_end = ((start_bin + 1) as f64 * bin_width).ceil() as u64;
+                    self.coverage_bins[start_bin] +=
+                        (first_bin_end.min(range_end) - range_start) as f64;
+                    // Middle bins: each gets a full bin_width of bases
+                    for bin in (start_bin + 1)..end_bin {
+                        let bin_start = (bin as f64 * bin_width).ceil() as u64;
+                        let bin_end = ((bin + 1) as f64 * bin_width).ceil() as u64;
+                        self.coverage_bins[bin] +=
+                            (bin_end.min(range_end) - bin_start.max(range_start)) as f64;
+                    }
+                    // Last bin: bases from the start of end_bin to range_end
+                    let last_bin_start = (end_bin as f64 * bin_width).ceil() as u64;
+                    self.coverage_bins[end_bin] +=
+                        (range_end - last_bin_start.max(range_start)) as f64;
                 }
             }
 
@@ -310,8 +337,8 @@ impl GenebodyCoverageAccum {
         };
 
         // 5'-3' bias: median of first 20 bins / median of last 20 bins
-        let median_first20 = median_of_slice(&self.coverage_bins[..20]);
-        let median_last20 = median_of_slice(&self.coverage_bins[80..]);
+        let median_first20 = crate::io::median(&self.coverage_bins[..20]);
+        let median_last20 = crate::io::median(&self.coverage_bins[80..]);
         let bias_5_to_3 = if median_last20 > 0.0 {
             median_first20 / median_last20
         } else {
@@ -331,21 +358,6 @@ impl GenebodyCoverageAccum {
             bias_3prime,
             bias_5_to_3,
         }
-    }
-}
-
-/// Compute median of a slice of f64 values.
-fn median_of_slice(slice: &[f64]) -> f64 {
-    if slice.is_empty() {
-        return 0.0;
-    }
-    let mut sorted: Vec<f64> = slice.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let mid = sorted.len() / 2;
-    if sorted.len().is_multiple_of(2) {
-        (sorted[mid - 1] + sorted[mid]) / 2.0
-    } else {
-        sorted[mid]
     }
 }
 
@@ -500,10 +512,10 @@ mod tests {
     }
 
     #[test]
-    fn test_median_of_slice() {
-        assert!((median_of_slice(&[1.0, 2.0, 3.0]) - 2.0).abs() < 1e-10);
-        assert!((median_of_slice(&[1.0, 2.0, 3.0, 4.0]) - 2.5).abs() < 1e-10);
-        assert!((median_of_slice(&[]) - 0.0).abs() < 1e-10);
+    fn test_median() {
+        assert!((crate::io::median(&[1.0, 2.0, 3.0]) - 2.0).abs() < 1e-10);
+        assert!((crate::io::median(&[1.0, 2.0, 3.0, 4.0]) - 2.5).abs() < 1e-10);
+        assert!((crate::io::median(&[]) - 0.0).abs() < 1e-10);
     }
 
     #[test]
