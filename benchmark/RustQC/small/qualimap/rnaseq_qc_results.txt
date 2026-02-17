@@ -18,19 +18,19 @@ RNA-Seq QC report
     total alignments = 52,839
     secondary alignments = 3,266
     non-unique alignments = 5,496
-    aligned to genes  = 30,924
+    aligned to genes  = 31,136
     ambiguous alignments = 1,754
-    no feature assigned = 14,665
+    no feature assigned = 14,453
     not aligned = 0
     SSP estimation (fwd/rev) = 0.01 / 0.99
 
 
 >>>>>>> Reads genomic origin
 
-    exonic =  30,924 (67.83%)
-    intronic = 13,749 (30.16%)
+    exonic =  31,136 (68.3%)
+    intronic = 13,537 (29.69%)
     intergenic = 916 (2.01%)
-    overlapping exon = 6,133 (13.45%)
+    overlapping exon = 6,027 (13.22%)
 
 
 >>>>>>> Transcript coverage profile

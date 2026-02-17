@@ -118,6 +118,9 @@ struct TranscriptCoverageEntry {
     strand: char,
     /// Gene index for best-per-gene selection.
     gene_idx: u32,
+    /// Flat transcript index (for diagnostics).
+    #[allow(dead_code)]
+    flat_idx: u32,
 }
 
 /// Compute coverage profiles using Qualimap's GenericHistogram algorithm.
@@ -250,16 +253,45 @@ fn compute_bias(entries: &[TranscriptCoverageEntry]) -> (f64, f64, f64) {
         }
     }
 
-    if !five_prime_biases.is_empty() {
-        let n = five_prime_biases.len().min(5);
-        let _sample_5: Vec<String> = five_prime_biases[..n]
-            .iter()
-            .map(|v| format!("{:.4}", v))
-            .collect();
-        let _sample_3: Vec<String> = three_prime_biases[..n]
-            .iter()
-            .map(|v| format!("{:.4}", v))
-            .collect();
+    // Diagnostic logging for bias analysis
+    let zero_five = five_prime_biases.iter().filter(|&&v| v == 0.0).count();
+    let zero_three = three_prime_biases.iter().filter(|&&v| v == 0.0).count();
+    log::debug!(
+        "QM_BIAS qualifying={} zero_5'={} zero_3'={} total_entries={}",
+        qualifying.len(),
+        zero_five,
+        zero_three,
+        entries.len()
+    );
+    // Print details of first 5 zero-5' transcripts
+    let mut zero_five_count = 0;
+    for (mean, entry) in &qualifying {
+        let cov = &entry.coverage;
+        let len = cov.len();
+        if len < NUM_PRIME_BASES {
+            continue;
+        }
+        let first_100: f64 = if entry.strand == '-' {
+            cov[len - NUM_PRIME_BASES..].iter().map(|&v| v as f64).sum()
+        } else {
+            cov[..NUM_PRIME_BASES].iter().map(|&v| v as f64).sum()
+        };
+        if first_100 == 0.0 && zero_five_count < 5 {
+            let first_nonzero = cov.iter().position(|&v| v > 0).unwrap_or(len);
+            let last_nonzero = cov.iter().rposition(|&v| v > 0).unwrap_or(0);
+            log::debug!(
+                "QM_BIAS_ZERO_5 gene_idx={} strand={} len={} mean={:.2} first_nonzero={} last_nonzero={} first_5cov=[{},{},{},{},{}] last_5cov=[{},{},{},{},{}]",
+                entry.gene_idx,
+                entry.strand,
+                len,
+                mean,
+                first_nonzero,
+                last_nonzero,
+                cov[0], cov[1], cov[2], cov[3], cov[4],
+                cov[len-5], cov[len-4], cov[len-3], cov[len-2], cov[len-1],
+            );
+            zero_five_count += 1;
+        }
     }
 
     let five = median(&mut five_prime_biases);
@@ -610,6 +642,7 @@ fn build_transcript_entries(
                     mean_coverage: mean,
                     strand: tx_info.strand,
                     gene_idx: tx_info.gene_idx,
+                    flat_idx,
                 });
             }
             None => {
@@ -619,6 +652,7 @@ fn build_transcript_entries(
                     mean_coverage: 0.0,
                     strand: tx_info.strand,
                     gene_idx: tx_info.gene_idx,
+                    flat_idx,
                 });
             }
         }
@@ -675,6 +709,7 @@ mod tests {
             mean_coverage: 10.0,
             strand: '+',
             gene_idx: 0,
+            flat_idx: 0,
         };
         let entries: Vec<&TranscriptCoverageEntry> = vec![&entry];
         let profile = compute_coverage_profile(&entries);

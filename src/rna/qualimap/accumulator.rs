@@ -278,13 +278,17 @@ impl QualimapAccum {
         // (Qualimap: readCount counts all non-secondary, non-supplementary reads)
         self.counters.read_count += 1;
 
-        // Extract M-only CIGAR blocks (needed for both coverage and gene assignment)
+        // Extract M-only CIGAR blocks (replicating Qualimap's CIGAR bug where
+        // offset += length for ALL operations, including I/S/H/P).
         let m_blocks = extract_m_blocks(record);
 
         // --- Per-block coverage (Qualimap adds coverage per-block independently) ---
         // This must run BEFORE the multi-mapper skip so that multi-mapped reads
         // contribute to coverage (matching Qualimap behavior where addCoverage is
         // called for every primary alignment block that overlaps a gene).
+        // We use the per-transcript exon tree to find overlapping genes — each
+        // block that overlaps ANY exon from ANY transcript of a gene triggers
+        // coverage for all of that gene's transcripts.
         if !m_blocks.is_empty() {
             if let Some(chrom_tree) = index.exon_trees.get(chrom) {
                 for &(block_start, block_end) in &m_blocks {
@@ -307,7 +311,10 @@ impl QualimapAccum {
             }
         }
 
-        // Skip multi-mappers from gene assignment (already counted above)
+        // Skip multi-mappers from gene assignment and junction counting.
+        // In Qualimap Java, computeReadWeight() (NH>1 → skip) runs before
+        // getReadIntervals()/collectJunctionInfo(), so multi-mapped reads
+        // do not contribute to junction counts.
         if is_multi_mapped {
             return;
         }
@@ -315,7 +322,8 @@ impl QualimapAccum {
             return;
         }
 
-        // Extract junction motifs from N-operations in CIGAR
+        // Extract junction motifs from N-operations in CIGAR.
+        // Only uniquely-mapped primary reads contribute junctions.
         let motifs = extract_junction_motifs(record);
         if !motifs.is_empty() {
             // Qualimap counts per-junction (per N operation), not per-read
@@ -585,11 +593,12 @@ impl QualimapAccum {
         num_reads: u64,
     ) {
         // Check if any M-block overlaps an exon region (for overlapping_exon count).
-        // Qualimap counts this once per read/fragment via readOverlaps flag.
-        if let Some(exon_tree) = index.exon_tree(chrom) {
+        // Qualimap Java uses its merged interval tree (same one used for enclosure)
+        // for this overlap check. We use merged_exon_tree to match.
+        if let Some(merged_tree) = index.merged_exon_tree(chrom) {
             let mut overlaps_exon = false;
             for &(start, end) in m_blocks {
-                exon_tree.query(start, end, |_iv| {
+                merged_tree.query(start, end, |_iv| {
                     overlaps_exon = true;
                 });
                 if overlaps_exon {
@@ -629,7 +638,10 @@ impl QualimapAccum {
         chrom: &str,
         index: &QualimapIndex,
     ) -> bool {
-        if let Some(tree) = index.exon_tree(chrom) {
+        // Use the merged exon tree for consistency with find_enclosing_genes().
+        // Qualimap Java uses its merged IntervalTree for all enclosure checks,
+        // including the per-block SSP determination.
+        if let Some(tree) = index.merged_exon_tree(chrom) {
             let mut enclosed = false;
             tree.query(block_start, block_end, |iv| {
                 if iv.metadata.gene_idx == gene_idx
@@ -804,6 +816,10 @@ fn get_nh_tag(record: &bam::Record) -> Option<u32> {
 /// Returns a vector of (start, end) in 0-based half-open coordinates.
 /// Only `M` (alignment match) operations are included.
 ///
+/// Extract correct alignment blocks from a BAM record's CIGAR string.
+///
+/// Unlike [`extract_m_blocks`], this function uses **correct** CIGAR semantics:
+/// only M/D/N/=/X operations advance the reference position, while I/S/H/P
 /// **Qualimap compatibility note:** Qualimap's Java code advances the reference
 /// offset for **all** CIGAR operations, including insertions and soft-clips.
 /// This is technically incorrect (I/S consume only query, not reference), but
@@ -917,18 +933,19 @@ fn decode_base(encoded: u8) -> u8 {
     }
 }
 
-/// Find genes whose exons enclose ALL M-blocks of a read.
+/// Find genes whose merged exons enclose ALL M-blocks of a read.
 ///
-/// Qualimap's enclosure check: for each M-block, find all exon nodes that
-/// fully contain it (block_start >= exon_start AND block_end <= exon_end).
-/// A gene "encloses" a read if EVERY M-block is enclosed by at least one exon
-/// of that gene.
+/// Qualimap Java merges overlapping/abutting exons per gene before building
+/// its interval tree. A gene "encloses" a read if EVERY M-block is enclosed
+/// by at least one merged exon interval of that gene. This matches Qualimap's
+/// `processAlignmentIntervals()` → `findIntersectingFeatures()` → BitSet
+/// cardinality check.
 fn find_enclosing_genes(
     m_blocks: &[(i32, i32)],
     chrom: &str,
     index: &QualimapIndex,
 ) -> HashSet<u32> {
-    let tree = match index.exon_tree(chrom) {
+    let tree = match index.merged_exon_tree(chrom) {
         Some(t) => t,
         None => return HashSet::new(),
     };
@@ -937,7 +954,7 @@ fn find_enclosing_genes(
         return HashSet::new();
     }
 
-    // For the first M-block, find all genes with an enclosing exon
+    // For the first M-block, find all genes with an enclosing merged exon
     let mut candidate_genes: HashSet<u32> = HashSet::new();
     let (first_start, first_end) = m_blocks[0];
     tree.query(first_start, first_end, |iv| {
