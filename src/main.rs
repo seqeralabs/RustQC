@@ -412,6 +412,7 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         tin_index: tin_index.as_ref(),
         tin_sample_size: config.tin.sample_size.unwrap_or(100) as usize,
         tin_min_coverage: config.tin.min_coverage.unwrap_or(10),
+        gtf_path: args.gtf.as_deref(),
     };
 
     // Step 2: Process all alignment files (in parallel when multiple)
@@ -543,6 +544,8 @@ struct SharedParams<'a> {
     tin_sample_size: usize,
     /// Minimum read-start count per transcript to compute TIN.
     tin_min_coverage: u32,
+    /// Path to GTF file (for Qualimap report output).
+    gtf_path: Option<&'a str>,
 }
 
 // ============================================================================
@@ -1031,41 +1034,25 @@ fn process_single_bam(
                 stats.f_regions_duplication * 100.0
             );
         }
-        // === Gene body coverage output ===
-        if let Some(ref gb_result) = count_result.genebody {
-            let gb_dir = if params.flat_output {
+        // === Qualimap RNA-Seq QC output ===
+        if let (Some(ref qm_result), Some(ref qm_index)) = (&count_result.qualimap, &qualimap_index)
+        {
+            let qm_dir = if params.flat_output {
                 outdir.to_path_buf()
             } else {
                 outdir.join("qualimap")
             };
-            std::fs::create_dir_all(&gb_dir)?;
 
-            let profile_path = gb_dir.join("coverage_profile_along_genes_(total).txt");
-            rna::genebody::write_coverage_profile(gb_result, &profile_path)?;
-            info!(
-                "[{}] Gene body coverage profile written to {:?}",
-                bam_stem, profile_path
-            );
-
-            let qualimap_path = gb_dir.join("rnaseq_qc_results.txt");
-            // Get total_records and secondary+supplementary from the bam_stat accumulator.
-            // bam_stat.total_records counts every BAM record (unfiltered), matching Qualimap's
-            // "total alignments". Fall back to dupRadar's stat_total_reads if bam_stat is disabled.
-            let (total_alignments, secondary) = rseqc_accums
-                .as_ref()
-                .and_then(|a| a.bam_stat.as_ref())
-                .map(|bs| (bs.total_records, bs.secondary + bs.supplementary))
-                .unwrap_or((count_result.stat_total_reads, 0));
-            rna::genebody::write_qualimap_results(
-                gb_result,
-                bam_stem,
-                total_alignments,
-                secondary,
-                &qualimap_path,
+            rna::qualimap::output::write_qualimap_results(
+                qm_result,
+                qm_index,
+                bam_path,
+                params.gtf_path.unwrap_or(""),
+                &qm_dir,
             )?;
             info!(
-                "[{}] Qualimap-compatible results written to {:?}",
-                bam_stem, qualimap_path
+                "[{}] Qualimap RNA-Seq QC results written to {:?}",
+                bam_stem, qm_dir
             );
         }
     } // end if let Some(count_result) — GTF-only outputs

@@ -51,35 +51,52 @@ impl TranscriptCoverage {
     ) {
         for (local_idx, tx_info) in transcripts.iter().enumerate() {
             let flat_idx = tx_flat_offset + local_idx as u32;
-            let tx_len = tx_info.length as usize;
+            let tx_len = tx_info.exonic_length as usize;
             if tx_len == 0 {
                 continue;
             }
 
-            // Get or create the depth array for this transcript
+            // Get or create the depth array for this transcript.
+            // Length = exonic_length (sum of exon lengths), matching Picard's
+            // Gene.Transcript which stores coverage in exonic coordinates.
             let depth = self
                 .coverage
                 .entry(flat_idx)
                 .or_insert_with(|| vec![0i32; tx_len]);
 
-            // Map each M-block to transcript-relative coordinates
-            let tx_start = tx_info.start;
-            let tx_end = tx_info.end;
+            // Map each M-block to exonic coordinates.
+            // For each genomic position in an M-block that falls within an exon,
+            // compute the exonic offset (position within concatenated exons)
+            // and increment the depth at that position.
+            // This matches Picard's Gene.Transcript.addCoverageCounts()
+            // which calls getTranscriptCoordinate() per genomic position.
             for &(block_start, block_end) in m_blocks {
-                // Clip to transcript span
-                let clipped_start = block_start.max(tx_start);
-                let clipped_end = block_end.min(tx_end);
-                if clipped_start >= clipped_end {
-                    continue;
-                }
+                // For each exon, compute overlap with this M-block.
+                // exonic_offset tracks cumulative exonic bases from prior exons.
+                let mut exonic_offset = 0usize;
+                for &(exon_start, exon_end) in &tx_info.exons {
+                    let exon_len = (exon_end - exon_start) as usize;
 
-                // Convert to transcript-relative position
-                let rel_start = (clipped_start - tx_start) as usize;
-                let rel_end = (clipped_end - tx_start) as usize;
-                let rel_end = rel_end.min(tx_len);
+                    // Compute overlap between M-block [block_start, block_end)
+                    // and exon [exon_start, exon_end) (both 0-based half-open)
+                    let overlap_start = block_start.max(exon_start);
+                    let overlap_end = block_end.min(exon_end);
 
-                for d in &mut depth[rel_start..rel_end] {
-                    *d += 1;
+                    if overlap_start < overlap_end {
+                        // This M-block overlaps this exon.
+                        // Map overlap to exonic coordinates:
+                        // rel_start = exonic_offset + (overlap_start - exon_start)
+                        let rel_start = exonic_offset + (overlap_start - exon_start) as usize;
+                        let rel_end =
+                            (exonic_offset + (overlap_end - exon_start) as usize).min(tx_len);
+                        if rel_start < tx_len && rel_start < rel_end {
+                            for d in &mut depth[rel_start..rel_end] {
+                                *d += 1;
+                            }
+                        }
+                    }
+
+                    exonic_offset += exon_len;
                 }
             }
         }

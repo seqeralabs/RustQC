@@ -719,7 +719,7 @@ fn process_chromosome_batch(
         result.genebody = Some(crate::rna::genebody::GenebodyCoverageAccum::new());
     }
     if qualimap_index.is_some() {
-        result.qualimap = Some(crate::rna::qualimap::QualimapAccum::new(paired));
+        result.qualimap = Some(crate::rna::qualimap::QualimapAccum::new());
     }
     let mut rseqc_accums = rseqc_config.map(|cfg| RseqcAccumulators::new(cfg, rseqc_annotations));
 
@@ -1230,7 +1230,7 @@ pub fn count_reads(
         let mut rseqc_accums: Option<RseqcAccumulators> =
             rseqc_config.map(|cfg| RseqcAccumulators::new(cfg, rseqc_annotations));
         let mut qualimap_accum: Option<crate::rna::qualimap::QualimapAccum> =
-            qualimap_index.map(|_| crate::rna::qualimap::QualimapAccum::new(paired));
+            qualimap_index.map(|_| crate::rna::qualimap::QualimapAccum::new());
 
         // Pre-compute resolved chromosome names for RSeQC tools
         // (apply chromosome prefix and mapping, same as parallel path)
@@ -1689,7 +1689,10 @@ pub fn count_reads(
             .genebody
             .map(|a: GenebodyCoverageAccum| a.into_result()),
         qualimap: match (merged.qualimap, qualimap_index) {
-            (Some(a), Some(idx)) => Some(a.into_result(idx)),
+            (Some(mut a), Some(idx)) => {
+                a.flush_unpaired(idx);
+                Some(a.into_result(idx))
+            }
             _ => None,
         },
     })

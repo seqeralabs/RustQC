@@ -6,6 +6,7 @@
 pub mod accumulator;
 pub mod coverage;
 pub mod index;
+pub mod output;
 
 pub use accumulator::QualimapAccum;
 pub use index::QualimapIndex;
@@ -52,10 +53,12 @@ pub struct QualimapResult {
     pub read_count: u64,
     /// Total fragments counted (PE: 1 per paired fragment).
     pub fragment_count: u64,
-    /// Left-of-pair reads that are proper pairs.
+    /// Left-of-pair reads (first-of-pair in paired mode).
     pub left_proper_in_pair: u64,
-    /// Right-of-pair reads that are proper pairs.
+    /// Right-of-pair reads (second-of-pair in paired mode).
     pub right_proper_in_pair: u64,
+    /// Both mates with proper-pair flag (for numberOfMappedPairs = count / 2).
+    pub both_proper_in_pair: u64,
 
     // --- Junction counters ---
     /// Reads containing at least one splice junction (N-op in CIGAR).
@@ -66,4 +69,10 @@ pub struct QualimapResult {
     // --- Per-transcript coverage ---
     /// Per-transcript coverage arrays (transcript_key -> per-base coverage).
     pub transcript_coverage: HashMap<String, Vec<i32>>,
+    /// Forward strand estimation count for SSP
+    #[allow(dead_code)]
+    pub ssp_fwd: u64,
+    /// Reverse strand estimation count for SSP
+    #[allow(dead_code)]
+    pub ssp_rev: u64,
 }

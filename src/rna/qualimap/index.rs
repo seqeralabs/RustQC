@@ -210,6 +210,13 @@ impl QualimapIndex {
         }
 
         // Build COITrees from collected intervals
+        let total_exon_ivs: usize = exon_intervals.values().map(|v| v.len()).sum();
+        eprintln!(
+            "QM_INDEX: {} exon intervals, {} transcripts, {} genes",
+            total_exon_ivs,
+            transcripts.len(),
+            gene_transcript_ranges.len()
+        );
         let exon_trees: HashMap<String, ExonTree> = exon_intervals
             .into_iter()
             .map(|(chrom, intervals)| (chrom, COITree::new(&intervals)))
