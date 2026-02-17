@@ -69,6 +69,20 @@ pub struct QualimapResult {
     // --- Per-transcript coverage ---
     /// Per-transcript coverage arrays (transcript_key -> per-base coverage).
     pub transcript_coverage: HashMap<String, Vec<i32>>,
+
+    /// Raw per-transcript coverage keyed by flat index (for bias computation).
+    /// Retains the internal indexing used during accumulation so that bias
+    /// computation can look up transcript metadata (strand, exonic length)
+    /// efficiently via the `QualimapIndex`.
+    pub transcript_coverage_raw: coverage::TranscriptCoverage,
+
+    // --- Merged gene coverage ---
+    /// Per-gene coverage using merged exon models (gene_idx -> per-base coverage).
+    /// Qualimap's Picard Gene.Transcript merges all exons from all isoforms into
+    /// a single non-redundant exon set per gene. This produces more accurate
+    /// bias and profile values than per-transcript tracking.
+    pub merged_gene_coverage: coverage::MergedGeneCoverage,
+
     /// Forward strand estimation count for SSP
     #[allow(dead_code)]
     pub ssp_fwd: u64,

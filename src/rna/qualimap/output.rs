@@ -3,13 +3,13 @@
 //! Produces `rnaseq_qc_results.txt` and coverage profile TSVs in exact
 //! Qualimap-compatible format, parseable by MultiQC.
 
-use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 
 use anyhow::{Context, Result};
 use log::info;
 
+use super::coverage::TranscriptCoverage;
 use super::index::QualimapIndex;
 use super::QualimapResult;
 
@@ -324,29 +324,17 @@ pub fn write_qualimap_results(
         .with_context(|| format!("Failed to create output dir: {}", output_dir.display()))?;
 
     // --- Build per-transcript coverage entries ---
-    let entries = build_transcript_entries(result, index);
+    let entries = build_transcript_entries(&result.transcript_coverage_raw, index);
 
     // --- Compute coverage profiles ---
-    // Qualimap uses one transcript per gene (the primary/longest), so we pick
-    // the best (highest mean coverage) transcript per gene.
-    let mut best_per_gene_map: HashMap<u32, &TranscriptCoverageEntry> = HashMap::new();
-    for entry in entries.iter().filter(|e| e.mean_coverage > 0.0) {
-        best_per_gene_map
-            .entry(entry.gene_idx)
-            .and_modify(|existing| {
-                if entry.mean_coverage > existing.mean_coverage {
-                    *existing = entry;
-                }
-            })
-            .or_insert(entry);
-    }
-    let total_entries: Vec<&TranscriptCoverageEntry> =
-        best_per_gene_map.values().copied().collect();
-    let total_profile = compute_coverage_profile(&total_entries);
+    // Qualimap uses ALL transcripts with coverage > 0, sorted by mean coverage.
+    // The profile is a SUM of per-transcript length-normalized histograms.
+    let active_entries: Vec<&TranscriptCoverageEntry> =
+        entries.iter().filter(|e| e.mean_coverage > 0.0).collect();
+    let total_profile = compute_coverage_profile(&active_entries);
 
     // Sort by mean coverage for high/low tiers
-    // Use BTreeMap to sort by mean coverage (Qualimap uses TreeMap<Double, int[]>)
-    let mut sorted_by_mean: Vec<&TranscriptCoverageEntry> = total_entries.clone();
+    let mut sorted_by_mean: Vec<&TranscriptCoverageEntry> = active_entries.clone();
     sorted_by_mean.sort_by(|a, b| {
         a.mean_coverage
             .partial_cmp(&b.mean_coverage)
@@ -597,17 +585,19 @@ fn write_results_file(
     Ok(())
 }
 
-/// Build transcript coverage entries from the result and index.
+/// Build transcript coverage entries from the raw per-transcript coverage.
+///
+/// Uses the raw `TranscriptCoverage` (keyed by flat transcript index) to avoid
+/// the overhead and potential collisions of string-keyed lookup.
 fn build_transcript_entries(
-    result: &QualimapResult,
+    coverage: &TranscriptCoverage,
     index: &QualimapIndex,
 ) -> Vec<TranscriptCoverageEntry> {
     let mut entries = Vec::new();
 
-    for tx_info in &index.transcripts {
-        let cov = result.transcript_coverage.get(&tx_info.transcript_id);
-
-        match cov {
+    for (flat_idx, tx_info) in index.transcripts.iter().enumerate() {
+        let flat_idx = flat_idx as u32;
+        match coverage.get(flat_idx) {
             Some(depth) => {
                 let sum: f64 = depth.iter().map(|&v| v as f64).sum();
                 let mean = if depth.is_empty() {
@@ -616,7 +606,7 @@ fn build_transcript_entries(
                     sum / depth.len() as f64
                 };
                 entries.push(TranscriptCoverageEntry {
-                    coverage: depth.clone(),
+                    coverage: depth.to_vec(),
                     mean_coverage: mean,
                     strand: tx_info.strand,
                     gene_idx: tx_info.gene_idx,

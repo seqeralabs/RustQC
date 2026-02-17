@@ -1,12 +1,13 @@
-//! Per-transcript coverage tracking for Qualimap RNA-Seq QC.
+//! Per-transcript and per-gene coverage tracking for Qualimap RNA-Seq QC.
 //!
-//! Maintains per-base coverage arrays for all transcripts of assigned genes.
-//! Qualimap tracks coverage across ALL transcripts (not just the longest),
-//! using genomic coordinates mapped to transcript-relative positions.
+//! Maintains per-base coverage arrays for both individual transcripts and
+//! merged gene models. Qualimap uses Picard's Gene.Transcript model which
+//! merges all exons from all isoforms into a single non-redundant exon set
+//! per gene. Coverage for bias/profile is tracked on this merged model.
 
 use std::collections::HashMap;
 
-use super::index::TranscriptInfo;
+use super::index::{MergedGeneModel, TranscriptInfo};
 
 // ============================================================
 // Per-transcript coverage accumulator
@@ -156,6 +157,124 @@ impl TranscriptCoverage {
 }
 
 // ============================================================
+// Merged gene coverage accumulator
+// ============================================================
+
+/// Per-gene per-base coverage tracker using merged gene models.
+///
+/// Qualimap (via Picard's Gene.Transcript) merges all exons from all transcripts
+/// of a gene into a single non-redundant exon set. Coverage is tracked on this
+/// merged model, which is used for bias calculation and coverage profiles.
+/// This produces more accurate bias values than per-transcript tracking because
+/// coverage from reads mapping to different isoform exons is unified.
+#[derive(Debug, Clone, Default)]
+pub struct MergedGeneCoverage {
+    /// Per-base coverage arrays, keyed by gene index.
+    /// The `Vec<i32>` has length = `MergedGeneModel.exonic_length`.
+    coverage: HashMap<u32, Vec<i32>>,
+}
+
+impl MergedGeneCoverage {
+    /// Create a new empty merged gene coverage tracker.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add coverage for a gene using its merged model.
+    ///
+    /// Maps read M-blocks (genomic coordinates, 0-based half-open) to positions
+    /// in the merged exonic coordinate space and increments the depth array.
+    ///
+    /// # Arguments
+    /// * `gene_idx` - Index of the assigned gene.
+    /// * `m_blocks` - Read's M-only aligned blocks in 0-based half-open genomic coords.
+    /// * `model` - The merged gene model with non-redundant exon intervals.
+    pub fn add_coverage(
+        &mut self,
+        gene_idx: u32,
+        m_blocks: &[(i32, i32)],
+        model: &MergedGeneModel,
+    ) {
+        let total_len = model.exonic_length as usize;
+        if total_len == 0 {
+            return;
+        }
+
+        let depth = self
+            .coverage
+            .entry(gene_idx)
+            .or_insert_with(|| vec![0i32; total_len]);
+
+        // Map each M-block to merged exonic coordinates.
+        for &(block_start, block_end) in m_blocks {
+            let mut exonic_offset = 0usize;
+            for &(exon_start, exon_end) in &model.exons {
+                let exon_len = (exon_end - exon_start) as usize;
+
+                // Compute overlap between M-block and this merged exon
+                let overlap_start = block_start.max(exon_start);
+                let overlap_end = block_end.min(exon_end);
+
+                if overlap_start < overlap_end {
+                    let rel_start = exonic_offset + (overlap_start - exon_start) as usize;
+                    let rel_end =
+                        (exonic_offset + (overlap_end - exon_start) as usize).min(total_len);
+                    if rel_start < total_len && rel_start < rel_end {
+                        for d in &mut depth[rel_start..rel_end] {
+                            *d += 1;
+                        }
+                    }
+                }
+
+                exonic_offset += exon_len;
+            }
+        }
+    }
+
+    /// Merge another `MergedGeneCoverage` into this one.
+    ///
+    /// For genes present in both, adds depth arrays element-wise.
+    /// For genes only in `other`, moves them into `self`.
+    #[allow(dead_code)]
+    pub fn merge(&mut self, other: MergedGeneCoverage) {
+        for (gene_idx, other_depth) in other.coverage {
+            let entry = self.coverage.entry(gene_idx);
+            match entry {
+                std::collections::hash_map::Entry::Occupied(mut e) => {
+                    let self_depth = e.get_mut();
+                    for (i, &val) in other_depth.iter().enumerate() {
+                        if i < self_depth.len() {
+                            self_depth[i] += val;
+                        }
+                    }
+                }
+                std::collections::hash_map::Entry::Vacant(e) => {
+                    e.insert(other_depth);
+                }
+            }
+        }
+    }
+
+    /// Get the depth array for a gene (by gene index).
+    #[allow(dead_code)]
+    pub fn get(&self, gene_idx: u32) -> Option<&[i32]> {
+        self.coverage.get(&gene_idx).map(|v| v.as_slice())
+    }
+
+    /// Iterate over all genes with coverage data.
+    #[allow(dead_code)]
+    pub fn iter(&self) -> impl Iterator<Item = (u32, &[i32])> {
+        self.coverage.iter().map(|(&idx, v)| (idx, v.as_slice()))
+    }
+
+    /// Number of genes that have any coverage recorded.
+    #[allow(dead_code)]
+    pub fn num_genes_with_coverage(&self) -> usize {
+        self.coverage.len()
+    }
+}
+
+// ============================================================
 // Unit tests
 // ============================================================
 
@@ -239,5 +358,101 @@ mod tests {
 
         // Non-existent transcript
         assert!((cov.mean_coverage(99) - 0.0).abs() < 1e-10);
+    }
+
+    // --------------------------------------------------------
+    // MergedGeneCoverage tests
+    // --------------------------------------------------------
+
+    #[test]
+    fn test_merged_gene_single_exon() {
+        let model = MergedGeneModel {
+            gene_idx: 0,
+            strand: '+',
+            exons: vec![(100, 200)],
+            exonic_length: 100,
+        };
+        let mut cov = MergedGeneCoverage::new();
+        cov.add_coverage(0, &[(120, 150)], &model);
+
+        let depth = cov.get(0).unwrap();
+        assert_eq!(depth.len(), 100);
+        assert_eq!(depth[19], 0);
+        assert_eq!(depth[20], 1);
+        assert_eq!(depth[49], 1);
+        assert_eq!(depth[50], 0);
+    }
+
+    #[test]
+    fn test_merged_gene_two_exons() {
+        // Gene with two merged exons: (100,200) and (300,400)
+        // Total exonic length = 200, offset: first exon 0..100, second 100..200
+        let model = MergedGeneModel {
+            gene_idx: 0,
+            strand: '+',
+            exons: vec![(100, 200), (300, 400)],
+            exonic_length: 200,
+        };
+        let mut cov = MergedGeneCoverage::new();
+        // M-block in second exon: 310..330 (genomic) → offset 100 + 10 = 110..130 (exonic)
+        cov.add_coverage(0, &[(310, 330)], &model);
+
+        let depth = cov.get(0).unwrap();
+        assert_eq!(depth.len(), 200);
+        assert_eq!(depth[109], 0);
+        assert_eq!(depth[110], 1);
+        assert_eq!(depth[129], 1);
+        assert_eq!(depth[130], 0);
+    }
+
+    #[test]
+    fn test_merged_gene_overlapping_transcripts() {
+        // Simulates what happens when two transcripts have overlapping exons:
+        // tx1: exons (100,200) and (300,400)
+        // tx2: exons (150,250) and (350,400)
+        // Merged: (100,250) and (300,400) → total 250
+        let model = MergedGeneModel::from_transcripts(
+            0,
+            '+',
+            &[(100, 200), (300, 400), (150, 250), (350, 400)],
+        );
+        assert_eq!(model.exons, vec![(100, 250), (300, 400)]);
+        assert_eq!(model.exonic_length, 250);
+
+        let mut cov = MergedGeneCoverage::new();
+        // M-block spanning the merged first exon: 180..220 → offset 80..120
+        cov.add_coverage(0, &[(180, 220)], &model);
+
+        let depth = cov.get(0).unwrap();
+        assert_eq!(depth.len(), 250);
+        assert_eq!(depth[79], 0);
+        assert_eq!(depth[80], 1);
+        assert_eq!(depth[119], 1);
+        assert_eq!(depth[120], 0);
+    }
+
+    #[test]
+    fn test_merged_gene_merge() {
+        let model = MergedGeneModel {
+            gene_idx: 0,
+            strand: '+',
+            exons: vec![(100, 200)],
+            exonic_length: 100,
+        };
+
+        let mut cov1 = MergedGeneCoverage::new();
+        cov1.add_coverage(0, &[(120, 150)], &model);
+
+        let mut cov2 = MergedGeneCoverage::new();
+        cov2.add_coverage(0, &[(130, 160)], &model);
+
+        cov1.merge(cov2);
+        let depth = cov1.get(0).unwrap();
+        // 120..130 → offset 20..30: depth 1
+        assert_eq!(depth[25], 1);
+        // 130..150 → offset 30..50: depth 2
+        assert_eq!(depth[35], 2);
+        // 150..160 → offset 50..60: depth 1
+        assert_eq!(depth[55], 1);
     }
 }

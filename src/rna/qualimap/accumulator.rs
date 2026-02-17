@@ -13,7 +13,7 @@ use coitrees::IntervalTree;
 use rust_htslib::bam;
 use rust_htslib::bam::record::Cigar;
 
-use super::coverage::TranscriptCoverage;
+use super::coverage::{MergedGeneCoverage, TranscriptCoverage};
 use super::index::QualimapIndex;
 
 // ============================================================
@@ -182,6 +182,8 @@ pub struct QualimapAccum {
     pub counters: QualimapCounters,
     /// Per-transcript per-base coverage.
     pub coverage: TranscriptCoverage,
+    /// Per-gene merged-model coverage.
+    pub merged_gene_coverage: MergedGeneCoverage,
     /// Junction splice motif counts.
     pub junction_motifs: JunctionMotifCounts,
     /// Mate buffer for PE reconciliation.
@@ -194,6 +196,7 @@ impl QualimapAccum {
         Self {
             counters: QualimapCounters::default(),
             coverage: TranscriptCoverage::new(),
+            merged_gene_coverage: MergedGeneCoverage::new(),
             junction_motifs: JunctionMotifCounts::default(),
             mate_buffer: HashMap::new(),
         }
@@ -275,13 +278,39 @@ impl QualimapAccum {
         // (Qualimap: readCount counts all non-secondary, non-supplementary reads)
         self.counters.read_count += 1;
 
+        // Extract M-only CIGAR blocks (needed for both coverage and gene assignment)
+        let m_blocks = extract_m_blocks(record);
+
+        // --- Per-block coverage (Qualimap adds coverage per-block independently) ---
+        // This must run BEFORE the multi-mapper skip so that multi-mapped reads
+        // contribute to coverage (matching Qualimap behavior where addCoverage is
+        // called for every primary alignment block that overlaps a gene).
+        if !m_blocks.is_empty() {
+            if let Some(chrom_tree) = index.exon_trees.get(chrom) {
+                for &(block_start, block_end) in &m_blocks {
+                    let mut block_genes = HashSet::new();
+                    chrom_tree.query(block_start, block_end, |iv| {
+                        block_genes.insert(iv.metadata.gene_idx);
+                    });
+                    for &gidx in &block_genes {
+                        let (tx_start, _) = index.gene_transcript_ranges[gidx as usize];
+                        let transcripts = index.gene_transcripts(gidx);
+                        let single_block = [(block_start, block_end)];
+                        self.coverage
+                            .add_coverage(&single_block, transcripts, tx_start);
+                        if let Some(model) = index.merged_gene_models.get(gidx as usize) {
+                            self.merged_gene_coverage
+                                .add_coverage(gidx, &single_block, model);
+                        }
+                    }
+                }
+            }
+        }
+
         // Skip multi-mappers from gene assignment (already counted above)
         if is_multi_mapped {
             return;
         }
-
-        // Extract M-only CIGAR blocks
-        let m_blocks = extract_m_blocks(record);
         if m_blocks.is_empty() {
             return;
         }
@@ -466,10 +495,8 @@ impl QualimapAccum {
                     }
                 }
 
-                // Add coverage for all transcripts of this gene
-                let transcripts = index.gene_transcripts(gene_idx);
-                self.coverage
-                    .add_coverage(&combined_blocks, transcripts, tx_start);
+                // Coverage is handled per-block in process_read() (matching
+                // Qualimap's per-alignment addCoverage behavior).
             }
             _ => {
                 // Multiple genes — ambiguous
@@ -535,8 +562,8 @@ impl QualimapAccum {
                     }
                 }
 
-                let transcripts = index.gene_transcripts(gene_idx);
-                self.coverage.add_coverage(m_blocks, transcripts, tx_start);
+                // Coverage is handled per-block in process_read() (matching
+                // Qualimap's per-alignment addCoverage behavior).
             }
             _ => {
                 self.counters.ambiguous += 1;
@@ -707,19 +734,6 @@ impl QualimapAccum {
     /// This should be called after all reads have been processed and
     /// `flush_unpaired()` has been called.
     pub fn into_result(self, index: &QualimapIndex) -> super::QualimapResult {
-        // DEBUG: Print counting diagnostics
-        eprintln!("=== QM DEBUG ===");
-        eprintln!("  read_count: {}", self.counters.read_count);
-        eprintln!("  primary: {}", self.counters.primary_alignments);
-        eprintln!("  secondary: {}", self.counters.secondary_alignments);
-        eprintln!("  non-unique: {}", self.counters.alignment_not_unique);
-        eprintln!("  exonic: {}", self.counters.exonic_reads);
-        eprintln!("  ambiguous: {}", self.counters.ambiguous);
-        eprintln!("  no_feature: {}", self.counters.no_feature);
-        eprintln!("  intronic: {}", self.counters.intronic_reads);
-        eprintln!("  intergenic: {}", self.counters.intergenic_reads);
-        eprintln!("  overlapping_exon: {}", self.counters.overlapping_exon);
-        // Convert junction motif byte arrays to readable strings
         // Convert junction motif byte arrays to readable strings
         let mut junction_motifs_str = HashMap::new();
         for ((donor, acceptor), count) in &self.junction_motifs.counts {
@@ -729,6 +743,9 @@ impl QualimapAccum {
             );
             *junction_motifs_str.entry(motif).or_insert(0u64) += count;
         }
+
+        // Clone the raw coverage before converting to string-keyed map
+        let transcript_coverage_raw = self.coverage.clone();
 
         // Convert per-transcript coverage from flat indices to transcript_id strings
         let mut transcript_coverage = HashMap::new();
@@ -757,6 +774,8 @@ impl QualimapAccum {
             reads_at_junctions: self.counters.reads_at_junctions,
             junction_motifs: junction_motifs_str,
             transcript_coverage,
+            transcript_coverage_raw,
+            merged_gene_coverage: self.merged_gene_coverage,
             ssp_fwd: self.counters.ssp_fwd,
             ssp_rev: self.counters.ssp_rev,
         }

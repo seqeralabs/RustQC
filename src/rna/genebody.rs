@@ -289,6 +289,7 @@ impl GenebodyCoverageAccum {
 // ============================================================
 
 /// Gene body coverage results.
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct GenebodyCoverageResult {
     /// Coverage profile bins (100 percentile bins).
@@ -364,6 +365,7 @@ impl GenebodyCoverageAccum {
 /// Write the coverage profile along genes in Qualimap format.
 ///
 /// Format: TSV with columns `position` (0.0–99.0) and `coverage` (cumulative depth).
+#[allow(dead_code)]
 pub fn write_coverage_profile(result: &GenebodyCoverageResult, output_path: &Path) -> Result<()> {
     let mut f = std::fs::File::create(output_path)
         .with_context(|| format!("Failed to create {}", output_path.display()))?;
@@ -377,6 +379,7 @@ pub fn write_coverage_profile(result: &GenebodyCoverageResult, output_path: &Pat
 }
 
 /// Format a number with comma-separated thousands.
+#[allow(dead_code)]
 fn format_with_commas(n: u64) -> String {
     let s = n.to_string();
     let mut result = String::with_capacity(s.len() + s.len() / 3);
@@ -392,6 +395,7 @@ fn format_with_commas(n: u64) -> String {
 /// Write Qualimap rnaseq-compatible results file.
 ///
 /// Format matches `rnaseq_qc_results.txt` expected by MultiQC.
+#[allow(dead_code)]
 pub fn write_qualimap_results(
     result: &GenebodyCoverageResult,
     bam_path: &str,

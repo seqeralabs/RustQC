@@ -1,26 +1,58 @@
+RNA-Seq QC report
+-----------------------------------
+
 >>>>>>> Input
 
-     bam file = test
+    bam file = benchmark/input/small/test.bam
+    gff file = benchmark/input/small/chr6.gtf.gz
+    counting algorithm = uniquely-mapped-reads
+    protocol = non-strand-specific
+    5'-3' bias region size = 100
+    5'-3' bias number of top transcripts = 1000
+
 
 >>>>>>> Reads alignment
 
-     reads aligned = 49,573
-     total alignments = 52,839
-     secondary alignments = 3,266
-     non-unique alignments = 3,266
-     aligned to genes = 22,788
-     ambiguous alignments = 2,392
-     no feature assigned = 1,225
+    reads aligned (left/right) = 24,797 / 24,776
+    read pairs aligned  = 24,773
+    total alignments = 52,839
+    secondary alignments = 3,266
+    non-unique alignments = 5,496
+    aligned to genes  = 30,924
+    ambiguous alignments = 1,754
+    no feature assigned = 14,665
+    not aligned = 0
+    SSP estimation (fwd/rev) = 0.01 / 0.99
+
 
 >>>>>>> Reads genomic origin
 
-     exonic = 3,004,919 (90.08%)
-     intronic = 161,566 (4.84%)
-     intergenic = 169,326 (5.08%)
-     overlapping exon = 10,938 (48.00%)
+    exonic =  30,924 (67.83%)
+    intronic = 13,749 (30.16%)
+    intergenic = 916 (2.01%)
+    overlapping exon = 6,133 (13.45%)
+
 
 >>>>>>> Transcript coverage profile
 
-     5' bias = 0.75
-     3' bias = 0.61
-     5'-3' bias = 1.14
+    5' bias = 0.54
+    3' bias = 0.31
+    5'-3' bias = 0.63
+
+
+>>>>>>> Junction analysis
+
+    reads at junctions = 27,858
+
+    ACCT : 11.04%
+    AGGT : 6.73%
+    ATCT : 4.59%
+    GCCT : 4.26%
+    AGGG : 3.84%
+    AGAA : 2.93%
+    ACCC : 2.59%
+    GGCT : 2.56%
+    TCCT : 2.52%
+    ACCA : 2.21%
+    TGTC : 2.20%
+

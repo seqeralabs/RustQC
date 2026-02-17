@@ -356,6 +356,7 @@ pub struct CountResult {
     /// Accumulated RSeQC tool results, if RSeQC tools were enabled
     pub rseqc: Option<RseqcAccumulators>,
     /// Gene body coverage results (Qualimap-compatible).
+    #[allow(dead_code)]
     pub genebody: Option<crate::rna::genebody::GenebodyCoverageResult>,
     /// Qualimap RNA-Seq QC results (if enabled).
     #[allow(dead_code)]

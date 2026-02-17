@@ -100,12 +100,84 @@ pub struct TranscriptInfo {
 }
 
 // ============================================================
+// Merged gene model — union of all transcript exons per gene
+// ============================================================
+
+/// Merged exon model for a gene: union of all exons across all transcripts.
+///
+/// Qualimap (via Picard's `Gene.Transcript`) merges all exons from all isoforms
+/// into a single non-redundant exon set per gene. Coverage is tracked on this
+/// merged model, which gives the correct bias and coverage profile values.
+#[derive(Debug, Clone)]
+pub struct MergedGeneModel {
+    /// Gene index (position in the IndexMap).
+    #[allow(dead_code)]
+    pub gene_idx: u32,
+    /// Strand ('+', '-', or '.').
+    #[allow(dead_code)]
+    pub strand: char,
+    /// Merged non-overlapping exon intervals in 0-based half-open coordinates, sorted by start.
+    pub exons: Vec<(i32, i32)>,
+    /// Total merged exonic length (sum of merged exon lengths).
+    pub exonic_length: u32,
+}
+
+impl MergedGeneModel {
+    /// Build a merged gene model from all transcripts of a gene.
+    ///
+    /// Takes all exon intervals (0-based half-open) from all transcripts,
+    /// sorts them, and merges overlapping/adjacent intervals into a single
+    /// non-redundant set.
+    pub fn from_transcripts(gene_idx: u32, strand: char, all_exons: &[(i32, i32)]) -> Self {
+        let exons = merge_intervals(all_exons);
+        let exonic_length: u32 = exons.iter().map(|(s, e)| (e - s) as u32).sum();
+        Self {
+            gene_idx,
+            strand,
+            exons,
+            exonic_length,
+        }
+    }
+}
+
+/// Merge overlapping and adjacent intervals into non-redundant sorted intervals.
+///
+/// Input: arbitrary list of (start, end) 0-based half-open intervals.
+/// Output: sorted, non-overlapping intervals where overlapping/touching intervals
+/// have been merged.
+fn merge_intervals(intervals: &[(i32, i32)]) -> Vec<(i32, i32)> {
+    if intervals.is_empty() {
+        return Vec::new();
+    }
+    let mut sorted: Vec<(i32, i32)> = intervals.to_vec();
+    sorted.sort_unstable_by_key(|(s, _)| *s);
+
+    let mut merged = Vec::with_capacity(sorted.len());
+    let (mut cur_start, mut cur_end) = sorted[0];
+
+    for &(start, end) in &sorted[1..] {
+        if start <= cur_end {
+            // Overlapping or adjacent — extend
+            cur_end = cur_end.max(end);
+        } else {
+            // Gap — emit current and start new
+            merged.push((cur_start, cur_end));
+            cur_start = start;
+            cur_end = end;
+        }
+    }
+    merged.push((cur_start, cur_end));
+    merged
+}
+
+// ============================================================
 // QualimapIndex — the main index structure
 // ============================================================
 
 /// Complete Qualimap annotation index built from GTF genes.
 ///
-/// Contains per-chromosome exon and intron trees, plus transcript metadata.
+/// Contains per-chromosome exon and intron trees, plus transcript metadata
+/// and merged gene models for coverage tracking.
 /// This index is *separate* from the existing dupRadar/featureCounts index
 /// because Qualimap uses fundamentally different assignment logic.
 pub struct QualimapIndex {
@@ -119,6 +191,9 @@ pub struct QualimapIndex {
     /// Lookup: gene_idx -> range of transcript indices in `transcripts` vec.
     /// `gene_transcript_ranges[gene_idx] = (start, end)` half-open into `transcripts`.
     pub gene_transcript_ranges: Vec<(u32, u32)>,
+    /// Merged gene models: one per gene, indexed by gene_idx.
+    /// Each merges all exons from all transcripts into non-redundant intervals.
+    pub merged_gene_models: Vec<MergedGeneModel>,
     /// Total number of genes.
     #[allow(dead_code)]
     pub num_genes: u32,
@@ -139,9 +214,14 @@ impl QualimapIndex {
         let mut transcripts = Vec::new();
         let mut gene_transcript_ranges = Vec::with_capacity(genes.len());
 
+        let mut merged_gene_models = Vec::with_capacity(genes.len());
+
         for (gene_idx, gene) in genes.values().enumerate() {
             let gene_idx = gene_idx as u32;
             let tx_start_idx = transcripts.len() as u32;
+
+            // Collect all exons from all transcripts for merged gene model
+            let mut all_gene_exons: Vec<(i32, i32)> = Vec::new();
 
             for (tx_idx, tx) in gene.transcripts.iter().enumerate() {
                 let tx_idx = tx_idx as u16;
@@ -158,6 +238,9 @@ impl QualimapIndex {
 
                 let tx_start = exons_0based.first().map(|(s, _)| *s).unwrap_or(0);
                 let tx_end = exons_0based.last().map(|(_, e)| *e).unwrap_or(0);
+
+                // Collect for merged gene model
+                all_gene_exons.extend_from_slice(&exons_0based);
 
                 // Add exon intervals to the per-chrom collection
                 let chrom_exons = exon_intervals.entry(tx.chrom.clone()).or_default();
@@ -207,6 +290,13 @@ impl QualimapIndex {
 
             let tx_end_idx = transcripts.len() as u32;
             gene_transcript_ranges.push((tx_start_idx, tx_end_idx));
+
+            // Build merged gene model from all exons across all transcripts
+            merged_gene_models.push(MergedGeneModel::from_transcripts(
+                gene_idx,
+                gene.strand,
+                &all_gene_exons,
+            ));
         }
 
         // Build COITrees from collected intervals
@@ -241,6 +331,7 @@ impl QualimapIndex {
             intron_trees,
             transcripts,
             gene_transcript_ranges,
+            merged_gene_models,
             num_genes,
         }
     }
