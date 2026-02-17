@@ -324,11 +324,10 @@ impl QualimapAccum {
 
         // Extract junction motifs from N-operations in CIGAR.
         // Only uniquely-mapped primary reads contribute junctions.
-        let motifs = extract_junction_motifs(record);
-        if !motifs.is_empty() {
-            // Qualimap counts per-junction (per N operation), not per-read
-            self.counters.reads_at_junctions += motifs.len() as u64;
-        }
+        let (n_op_count, motifs) = extract_junction_motifs(record);
+        // Qualimap increments numReadsWithJunction for every N-operation,
+        // even when the motif extraction guard fails. Match that behavior.
+        self.counters.reads_at_junctions += n_op_count as u64;
 
         // Determine enclosing genes for this read's M-blocks
         let enclosing_genes = find_enclosing_genes(&m_blocks, chrom, index);
@@ -868,12 +867,18 @@ fn extract_m_blocks(record: &bam::Record) -> Vec<(i32, i32)> {
 ///
 /// For each N (intron/RefSkip) operation, extracts the 2bp donor and 2bp acceptor
 /// motifs from the read sequence at the junction boundaries.
-fn extract_junction_motifs(record: &bam::Record) -> Vec<JunctionMotif> {
+/// Returns `(n_op_count, motifs)` where `n_op_count` is the total number of
+/// N-operations in the CIGAR (used for `reads_at_junctions`), and `motifs`
+/// contains the successfully extracted junction motifs. Qualimap counts
+/// `numReadsWithJunction` for every N-operation regardless of whether the
+/// motif could be extracted.
+fn extract_junction_motifs(record: &bam::Record) -> (usize, Vec<JunctionMotif>) {
     let cigar = record.cigar();
     let seq = record.seq();
     let seq_len = seq.len();
 
     let mut motifs = Vec::new();
+    let mut n_op_count: usize = 0;
     let mut ref_pos = record.pos() as i32;
     let mut seq_pos: usize = 0;
 
@@ -887,6 +892,9 @@ fn extract_junction_motifs(record: &bam::Record) -> Vec<JunctionMotif> {
             Cigar::RefSkip(len) => {
                 let intron_start = ref_pos;
                 let intron_end = ref_pos + *len as i32;
+                // Qualimap increments numReadsWithJunction for every N-op,
+                // regardless of whether the motif can be extracted.
+                n_op_count += 1;
 
                 // Extract donor motif: 2bp at end of preceding exon in read
                 // Extract acceptor motif: 2bp at start of next exon in read
@@ -918,7 +926,7 @@ fn extract_junction_motifs(record: &bam::Record) -> Vec<JunctionMotif> {
         }
     }
 
-    motifs
+    (n_op_count, motifs)
 }
 
 /// Decode a 4-bit encoded base to ASCII uppercase.
