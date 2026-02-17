@@ -141,24 +141,23 @@ fn compute_coverage_profile(entries: &[&TranscriptCoverageEntry]) -> [f64; NUM_B
             continue;
         }
 
-        // Qualimap's GenericHistogram: normalize=true means divide by data.length
+        // Bin coverage into NUM_BINS (100) bins using step = ceil(len / 100).
+        // Matches Qualimap's GenericHistogram behavior where each bin accumulates
+        // coverage from `step` consecutive positions, normalized by transcript length.
+        let step = len.div_ceil(NUM_BINS).max(1);
         let norm = len as f64;
-        let step = len.div_ceil(NUM_BINS); // ceil division
-
-        let mut bin_coverage = 0.0f64;
-        let mut bin_index = 0usize;
-        let mut count = step; // next boundary
+        let mut bin = 0;
+        let mut bin_sum = 0.0f64;
+        let mut count = 0;
 
         for (i, &val) in data.iter().enumerate() {
-            bin_coverage += val as f64;
-
-            if i + 1 == count || i == len - 1 {
-                if bin_index < NUM_BINS {
-                    hist[bin_index] += bin_coverage / norm;
-                }
-                bin_coverage = 0.0;
-                bin_index += 1;
-                count += step;
+            bin_sum += val as f64;
+            count += 1;
+            if count == step || i == len - 1 {
+                hist[bin] += bin_sum / norm;
+                bin += 1;
+                bin_sum = 0.0;
+                count = 0;
             }
         }
     }
@@ -364,6 +363,12 @@ pub fn write_qualimap_results(
     let active_entries: Vec<&TranscriptCoverageEntry> =
         entries.iter().filter(|e| e.mean_coverage > 0.0).collect();
     let total_profile = compute_coverage_profile(&active_entries);
+
+    log::debug!(
+        "QM_PROFILE: {} total entries, {} active (mean>0)",
+        entries.len(),
+        active_entries.len()
+    );
 
     // Sort by mean coverage for high/low tiers
     let mut sorted_by_mean: Vec<&TranscriptCoverageEntry> = active_entries.clone();
