@@ -198,8 +198,8 @@ fn merge_intervals(intervals: &[(i32, i32)]) -> Vec<(i32, i32)> {
     let (mut cur_start, mut cur_end) = sorted[0];
 
     for &(start, end) in &sorted[1..] {
-        if start <= cur_end {
-            // Overlapping or adjacent — extend
+        if start < cur_end {
+            // Strictly overlapping — extend (abutting exons are kept separate)
             cur_end = cur_end.max(end);
         } else {
             // Gap — emit current and start new

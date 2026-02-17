@@ -706,6 +706,108 @@ mod tests {
         assert!(median(&mut vec![]).is_nan());
     }
 
+    /// Helper: build a single-transcript slice for compute_coverage_profile.
+    fn single_entry(coverage: Vec<i32>) -> TranscriptCoverageEntry {
+        let mean = if coverage.is_empty() {
+            0.0
+        } else {
+            coverage.iter().map(|&v| v as f64).sum::<f64>() / coverage.len() as f64
+        };
+        TranscriptCoverageEntry {
+            coverage,
+            mean_coverage: mean,
+            strand: '+',
+            gene_idx: 0,
+            flat_idx: 0,
+        }
+    }
+
+    // ---- compute_coverage_profile tests matching Qualimap's GenericHistogram ----
+
+    /// Uniform array of length 100: step=1, each bin = 1.0/100 = 0.01.
+    #[test]
+    fn test_coverage_profile_binning_uniform_100() {
+        let entry = single_entry(vec![1; 100]);
+        let profile = compute_coverage_profile(&[&entry]);
+        for (i, &val) in profile.iter().enumerate() {
+            assert!(
+                (val - 0.01).abs() < 1e-10,
+                "bin {i}: expected 0.01, got {val}"
+            );
+        }
+    }
+
+    /// Uniform array of length 200: step=2, each bin = 2.0/200 = 0.01.
+    #[test]
+    fn test_coverage_profile_binning_uniform_200() {
+        let entry = single_entry(vec![1; 200]);
+        let profile = compute_coverage_profile(&[&entry]);
+        for (i, &val) in profile.iter().enumerate() {
+            assert!(
+                (val - 0.01).abs() < 1e-10,
+                "bin {i}: expected 0.01, got {val}"
+            );
+        }
+    }
+
+    /// Uniform array of length 150: step=2, 75 bins filled (each ≈ 0.01333), bins 75-99 = 0.0.
+    #[test]
+    fn test_coverage_profile_binning_uniform_150() {
+        let entry = single_entry(vec![1; 150]);
+        let profile = compute_coverage_profile(&[&entry]);
+        let expected_filled = 2.0 / 150.0; // 0.01333...
+        for (i, &val) in profile.iter().enumerate() {
+            if i < 75 {
+                assert!(
+                    (val - expected_filled).abs() < 1e-10,
+                    "bin {i}: expected {expected_filled}, got {val}"
+                );
+            } else {
+                assert!(
+                    val.abs() < 1e-10,
+                    "bin {i}: expected 0.0 (unfilled), got {val}"
+                );
+            }
+        }
+    }
+
+    /// Ramp array [0, 1, ..., 99], length 100: step=1, bin i = i/100.0.
+    #[test]
+    fn test_coverage_profile_binning_ramp_100() {
+        let coverage: Vec<i32> = (0..100).collect();
+        let entry = single_entry(coverage);
+        let profile = compute_coverage_profile(&[&entry]);
+        for (i, &val) in profile.iter().enumerate() {
+            let expected = i as f64 / 100.0;
+            assert!(
+                (val - expected).abs() < 1e-10,
+                "bin {i}: expected {expected}, got {val}"
+            );
+        }
+    }
+
+    /// Short uniform array of length 50: step=1 (clamped), 50 bins filled (each = 1.0/50 = 0.02),
+    /// bins 50-99 = 0.0.
+    #[test]
+    fn test_coverage_profile_binning_short_50() {
+        let entry = single_entry(vec![1; 50]);
+        let profile = compute_coverage_profile(&[&entry]);
+        let expected_filled = 1.0 / 50.0; // 0.02
+        for (i, &val) in profile.iter().enumerate() {
+            if i < 50 {
+                assert!(
+                    (val - expected_filled).abs() < 1e-10,
+                    "bin {i}: expected {expected_filled}, got {val}"
+                );
+            } else {
+                assert!(
+                    val.abs() < 1e-10,
+                    "bin {i}: expected 0.0 (unfilled), got {val}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn test_coverage_profile_single_transcript() {
         // Simple transcript: 200 bases, uniform coverage of 10
