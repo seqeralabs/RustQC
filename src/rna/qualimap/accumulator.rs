@@ -282,39 +282,9 @@ impl QualimapAccum {
         // offset += length for ALL operations, including I/S/H/P).
         let m_blocks = extract_m_blocks(record);
 
-        // --- Per-block coverage (Qualimap adds coverage per-block independently) ---
-        // This must run BEFORE the multi-mapper skip so that multi-mapped reads
-        // contribute to coverage (matching Qualimap behavior where addCoverage is
-        // called for every primary alignment block that overlaps a gene).
-        // We use the per-transcript exon tree to find overlapping genes — each
-        // block that overlaps ANY exon from ANY transcript of a gene triggers
-        // coverage for all of that gene's transcripts.
-        if !m_blocks.is_empty() {
-            if let Some(chrom_tree) = index.exon_trees.get(chrom) {
-                for &(block_start, block_end) in &m_blocks {
-                    let mut block_genes = HashSet::new();
-                    chrom_tree.query(block_start, block_end, |iv| {
-                        block_genes.insert(iv.metadata.gene_idx);
-                    });
-                    for &gidx in &block_genes {
-                        let (tx_start, _) = index.gene_transcript_ranges[gidx as usize];
-                        let transcripts = index.gene_transcripts(gidx);
-                        let single_block = [(block_start, block_end)];
-                        self.coverage
-                            .add_coverage(&single_block, transcripts, tx_start);
-                        if let Some(model) = index.merged_gene_models.get(gidx as usize) {
-                            self.merged_gene_coverage
-                                .add_coverage(gidx, &single_block, model);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Skip multi-mappers from gene assignment and junction counting.
-        // In Qualimap Java, computeReadWeight() (NH>1 → skip) runs before
-        // getReadIntervals()/collectJunctionInfo(), so multi-mapped reads
-        // do not contribute to junction counts.
+        // Skip multi-mappers from gene assignment, junction counting, and coverage.
+        // Coverage is added only for uniquely-mapped reads, restricted to fully-enclosed
+        // M-blocks, matching the correct Qualimap coverage model.
         if is_multi_mapped {
             return;
         }
@@ -331,6 +301,18 @@ impl QualimapAccum {
 
         // Determine enclosing genes for this read's M-blocks
         let enclosing_genes = find_enclosing_genes(&m_blocks, chrom, index);
+
+        // --- Coverage: enclosed-only, uniquely-mapped ---
+        // Add per-transcript and merged-gene coverage for each M-block that is
+        // fully enclosed by a merged exon of an enclosing gene. Only genes that
+        // enclose ALL blocks of this read contribute, matching Qualimap's model
+        // where coverage is tied to the enclosure-based gene assignment.
+        // For SE reads this is the current read's blocks; for PE it is deferred
+        // to reconcile_pair() where combined blocks from both mates are available.
+        if flags & BAM_FPAIRED == 0 || flags & BAM_FPROPER_PAIR == 0 {
+            // SE or non-proper-pair: add coverage now with this read's blocks.
+            self.add_enclosed_coverage(&m_blocks, &enclosing_genes, index);
+        }
 
         // PE path: check BAM flags directly (no library-level paired flag needed)
         if flags & BAM_FPAIRED != 0 && flags & BAM_FPROPER_PAIR != 0 {
@@ -428,6 +410,11 @@ impl QualimapAccum {
         // processAlignmentIntervals passes ALL intervals to findIntersectingFeatures)
         let assigned_genes = find_enclosing_genes(&combined_blocks, chrom, index);
 
+        // --- Coverage: enclosed-only for combined PE blocks ---
+        // Add per-transcript and merged-gene coverage using the combined M-blocks
+        // from both mates. Only genes that enclose ALL combined blocks contribute.
+        self.add_enclosed_coverage(&combined_blocks, &assigned_genes, index);
+
         // Collect junction motifs from both mates
         let all_motifs: Vec<&JunctionMotif> = r1_motifs.iter().chain(r2_motifs.iter()).collect();
         for motif in &all_motifs {
@@ -472,9 +459,6 @@ impl QualimapAccum {
         self.count_ssp_for_blocks(r1_blocks, chrom, index, r1_is_reverse, r1_is_first_of_pair);
         let r2_is_first = !r1_is_first_of_pair;
         self.count_ssp_for_blocks(r2_blocks, chrom, index, r2_is_reverse, r2_is_first);
-
-        // Coverage is handled per-block in process_read() (matching
-        // Qualimap's per-alignment addCoverage behavior).
     }
 
     /// Assign an SE read immediately.
@@ -521,8 +505,6 @@ impl QualimapAccum {
         // SSP estimation: counted per (M-block, gene) pair for ALL reads —
         // including ambiguous — because Qualimap counts SSP in findIntersectingFeatures()
         // before the exonic/ambiguous/no-feature decision.
-        // Coverage is handled per-block in process_read() (matching
-        // Qualimap's per-alignment addCoverage behavior).
         self.count_ssp_for_blocks(m_blocks, chrom, index, is_reverse, is_first_of_pair);
     }
 
@@ -572,6 +554,37 @@ impl QualimapAccum {
             }
         }
         false
+    }
+
+    /// Add per-transcript and merged-gene coverage for fully-enclosed M-blocks.
+    ///
+    /// For each M-block, queries the merged exon tree and adds coverage only
+    /// to genes where `block_start >= exon_start && block_end <= exon_end`
+    /// (fully enclosed). Only genes present in `enclosing_genes` contribute,
+    /// so coverage is restricted to genes that enclose ALL blocks of the read.
+    ///
+    /// # Arguments
+    /// * `m_blocks`        - M-only aligned blocks (0-based half-open).
+    /// * `enclosing_genes` - Genes that enclose ALL blocks (from `find_enclosing_genes`).
+    /// * `index`           - Qualimap annotation index.
+    fn add_enclosed_coverage(
+        &mut self,
+        m_blocks: &[(i32, i32)],
+        enclosing_genes: &HashSet<u32>,
+        index: &QualimapIndex,
+    ) {
+        if enclosing_genes.is_empty() || m_blocks.is_empty() {
+            return;
+        }
+        for &gidx in enclosing_genes {
+            let (tx_start, _) = index.gene_transcript_ranges[gidx as usize];
+            let transcripts = index.gene_transcripts(gidx);
+            self.coverage.add_coverage(m_blocks, transcripts, tx_start);
+            if let Some(model) = index.merged_gene_models.get(gidx as usize) {
+                self.merged_gene_coverage
+                    .add_coverage(gidx, m_blocks, model);
+            }
+        }
     }
 
     /// Classify a read that wasn't assigned to any gene as intronic or intergenic.

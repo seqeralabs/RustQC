@@ -24,6 +24,7 @@ use crate::gtf::Gene;
 #[derive(Debug, Clone, Copy)]
 pub struct ExonMeta {
     /// Index into the gene list (position in the IndexMap).
+    #[allow(dead_code)]
     pub gene_idx: u32,
     /// Index into the transcript list within the gene.
     #[allow(dead_code)]
