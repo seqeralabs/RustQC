@@ -455,60 +455,8 @@ impl QualimapAccum {
             }
             1 => {
                 // Exactly one gene — assigned (exonic)
-                let gene_idx = *assigned_genes.iter().next().unwrap();
                 // Qualimap: exonicReads += numReads (2 for PE fragment)
                 self.counters.exonic_reads += 2;
-
-                // SSP estimation: for each enclosed M-block, compare read strand to gene strand.
-                // Qualimap counts SSP per M-block, not per read.
-                let (tx_start, _tx_end) = index.gene_transcript_ranges[gene_idx as usize];
-                let gene_strand = index.transcripts[tx_start as usize].strand;
-
-                // R1 blocks: use r1_is_reverse, r1_is_first_of_pair
-                for &(block_start, block_end) in r1_blocks {
-                    // Check if this block is enclosed by any exon of the gene
-                    if Self::block_enclosed_by_gene(block_start, block_end, gene_idx, chrom, index)
-                    {
-                        let same_strand = (r1_is_reverse && gene_strand == '-')
-                            || (!r1_is_reverse && gene_strand == '+');
-                        if r1_is_first_of_pair {
-                            if same_strand {
-                                self.counters.ssp_fwd += 1;
-                            } else {
-                                self.counters.ssp_rev += 1;
-                            }
-                        } else if same_strand {
-                            self.counters.ssp_rev += 1;
-                        } else {
-                            self.counters.ssp_fwd += 1;
-                        }
-                    }
-                }
-
-                // R2 blocks: mate has opposite first-of-pair, and its own strand
-                for &(block_start, block_end) in r2_blocks {
-                    if Self::block_enclosed_by_gene(block_start, block_end, gene_idx, chrom, index)
-                    {
-                        let same_strand = (r2_is_reverse && gene_strand == '-')
-                            || (!r2_is_reverse && gene_strand == '+');
-                        // r2 is the mate, so first-of-pair is !r1_is_first_of_pair
-                        let r2_is_first = !r1_is_first_of_pair;
-                        if r2_is_first {
-                            if same_strand {
-                                self.counters.ssp_fwd += 1;
-                            } else {
-                                self.counters.ssp_rev += 1;
-                            }
-                        } else if same_strand {
-                            self.counters.ssp_rev += 1;
-                        } else {
-                            self.counters.ssp_fwd += 1;
-                        }
-                    }
-                }
-
-                // Coverage is handled per-block in process_read() (matching
-                // Qualimap's per-alignment addCoverage behavior).
             }
             _ => {
                 // Multiple genes — ambiguous
@@ -516,6 +464,17 @@ impl QualimapAccum {
                 self.counters.ambiguous += 2;
             }
         }
+
+        // SSP estimation: counted per (M-block, gene) pair for ALL fragments —
+        // including ambiguous — because Qualimap counts SSP in findIntersectingFeatures()
+        // before the exonic/ambiguous/no-feature decision. Count each mate separately
+        // with its own strand and first-of-pair flags.
+        self.count_ssp_for_blocks(r1_blocks, chrom, index, r1_is_reverse, r1_is_first_of_pair);
+        let r2_is_first = !r1_is_first_of_pair;
+        self.count_ssp_for_blocks(r2_blocks, chrom, index, r2_is_reverse, r2_is_first);
+
+        // Coverage is handled per-block in process_read() (matching
+        // Qualimap's per-alignment addCoverage behavior).
     }
 
     /// Assign an SE read immediately.
@@ -552,40 +511,19 @@ impl QualimapAccum {
                 self.counters.no_feature += 1;
             }
             1 => {
-                let gene_idx = *enclosing_genes.iter().next().unwrap();
                 self.counters.exonic_reads += 1;
-
-                // SSP estimation per enclosed M-block: for each M-block that is
-                // enclosed by an exon of this gene, compare read strand to gene
-                // strand. Qualimap counts SSP per M-block, not per read.
-                let (tx_start, _tx_end) = index.gene_transcript_ranges[gene_idx as usize];
-                let gene_strand = index.transcripts[tx_start as usize].strand;
-                for &(block_start, block_end) in m_blocks {
-                    if Self::block_enclosed_by_gene(block_start, block_end, gene_idx, chrom, index)
-                    {
-                        let same_strand = (is_reverse && gene_strand == '-')
-                            || (!is_reverse && gene_strand == '+');
-                        if is_first_of_pair {
-                            if same_strand {
-                                self.counters.ssp_fwd += 1;
-                            } else {
-                                self.counters.ssp_rev += 1;
-                            }
-                        } else if same_strand {
-                            self.counters.ssp_rev += 1;
-                        } else {
-                            self.counters.ssp_fwd += 1;
-                        }
-                    }
-                }
-
-                // Coverage is handled per-block in process_read() (matching
-                // Qualimap's per-alignment addCoverage behavior).
             }
             _ => {
                 self.counters.ambiguous += 1;
             }
         }
+
+        // SSP estimation: counted per (M-block, gene) pair for ALL reads —
+        // including ambiguous — because Qualimap counts SSP in findIntersectingFeatures()
+        // before the exonic/ambiguous/no-feature decision.
+        // Coverage is handled per-block in process_read() (matching
+        // Qualimap's per-alignment addCoverage behavior).
+        self.count_ssp_for_blocks(m_blocks, chrom, index, is_reverse, is_first_of_pair);
     }
 
     /// Check if any M-block overlaps an exon region without being fully enclosed.
@@ -660,33 +598,61 @@ impl QualimapAccum {
         self.counters.intergenic_reads += num_reads;
     }
 
-    /// Check if a single M-block is enclosed by any exon of the specified gene.
+    /// Count SSP votes for a set of M-blocks across all their enclosing genes.
     ///
-    /// Used for per-block SSP estimation where we only count SSP for blocks
-    /// that are actually enclosed by an exon of the assigned gene.
-    fn block_enclosed_by_gene(
-        block_start: i32,
-        block_end: i32,
-        gene_idx: u32,
+    /// Qualimap's `findIntersectingFeatures()` counts SSP per (M-block, gene) pair —
+    /// i.e., once per gene per block, for every gene whose merged exon encloses that
+    /// block. This happens before the exonic/ambiguous/no-feature decision, so
+    /// ambiguous reads (and even no-feature reads that happen to be enclosed) still
+    /// contribute to the SSP estimation.
+    ///
+    /// `is_first_of_pair` maps to Qualimap's interval name 'f'/'r':
+    ///   - 'f' (first): same strand → fwd++, else rev++
+    ///   - 'r' (second): same strand → rev++, else fwd++
+    fn count_ssp_for_blocks(
+        &mut self,
+        m_blocks: &[(i32, i32)],
         chrom: &str,
         index: &QualimapIndex,
-    ) -> bool {
-        // Use the merged exon tree for consistency with find_enclosing_genes().
-        // Qualimap Java uses its merged IntervalTree for all enclosure checks,
-        // including the per-block SSP determination.
-        if let Some(tree) = index.merged_exon_tree(chrom) {
-            let mut enclosed = false;
+        is_reverse: bool,
+        is_first_of_pair: bool,
+    ) {
+        let tree = match index.merged_exon_tree(chrom) {
+            Some(t) => t,
+            None => return,
+        };
+
+        for &(block_start, block_end) in m_blocks {
+            // Collect the set of genes that enclose this block, along with
+            // their strand. A block may be enclosed by multiple genes simultaneously
+            // (Qualimap counts SSP once per gene per block, hence the HashSet of
+            // (gene_idx, strand) pairs to avoid double-counting from multiple nodes
+            // of the same gene).
+            let mut gene_strands: HashSet<(u32, char)> = HashSet::new();
             tree.query(block_start, block_end, |iv| {
-                if iv.metadata.gene_idx == gene_idx
-                    && block_start >= iv.metadata.exon_start
-                    && block_end <= iv.metadata.exon_end
-                {
-                    enclosed = true;
+                if block_start >= iv.metadata.exon_start && block_end <= iv.metadata.exon_end {
+                    let gidx = iv.metadata.gene_idx;
+                    let (tx_start, _) = index.gene_transcript_ranges[gidx as usize];
+                    let strand = index.transcripts[tx_start as usize].strand;
+                    gene_strands.insert((gidx, strand));
                 }
             });
-            enclosed
-        } else {
-            false
+
+            for (_gidx, gene_strand) in &gene_strands {
+                let same_strand =
+                    (is_reverse && *gene_strand == '-') || (!is_reverse && *gene_strand == '+');
+                if is_first_of_pair {
+                    if same_strand {
+                        self.counters.ssp_fwd += 1;
+                    } else {
+                        self.counters.ssp_rev += 1;
+                    }
+                } else if same_strand {
+                    self.counters.ssp_rev += 1;
+                } else {
+                    self.counters.ssp_fwd += 1;
+                }
+            }
         }
     }
 
