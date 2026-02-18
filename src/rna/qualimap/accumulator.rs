@@ -441,6 +441,11 @@ impl QualimapAccum {
         // Fragment assignment
         self.counters.fragment_count += 1;
 
+        // Check for overlapping_exon (runs for ALL reads, not just no-feature).
+        // Qualimap increments this in findIntersectingFeatures() for any read
+        // where an M-block overlaps an exon without being fully enclosed by it.
+        self.check_overlapping_exon(&combined_blocks, chrom, index);
+
         match assigned_genes.len() {
             0 => {
                 // No gene encloses all blocks — classify as intronic or intergenic
@@ -536,6 +541,11 @@ impl QualimapAccum {
 
         self.counters.fragment_count += 1;
 
+        // Check for overlapping_exon (runs for ALL reads, not just no-feature).
+        // Qualimap increments this in findIntersectingFeatures() for any read
+        // where an M-block overlaps an exon without being fully enclosed by it.
+        self.check_overlapping_exon(m_blocks, chrom, index);
+
         match enclosing_genes.len() {
             0 => {
                 self.classify_no_feature(m_blocks, chrom, index, 1);
@@ -578,12 +588,55 @@ impl QualimapAccum {
         }
     }
 
-    /// Classify a read that wasn't assigned to any gene as intronic or intergenic.
+    /// Check if any M-block overlaps an exon region without being fully enclosed.
     ///
-    /// Also checks if any M-block overlaps an exon region — if so, increments
-    /// `overlapping_exon`. In Qualimap terminology this is "intronic/intergenic
-    /// overlapping exon": a read that is NOT enclosed by exons of any gene, but
-    /// still physically overlaps an exon region.
+    /// Qualimap Java increments `overlapping_exon` in `findIntersectingFeatures()`
+    /// for ANY read (exonic, ambiguous, or no-feature) where at least one M-block
+    /// overlaps an exon but is NOT fully enclosed by that exon. The `readOverlaps`
+    /// flag is set once per read/fragment.
+    fn check_overlapping_exon(
+        &mut self,
+        m_blocks: &[(i32, i32)],
+        chrom: &str,
+        index: &QualimapIndex,
+    ) -> bool {
+        if let Some(merged_tree) = index.merged_exon_tree(chrom) {
+            let mut overlaps_not_enclosed = false;
+            for &(start, end) in m_blocks {
+                // COITree uses closed [first, last] intervals internally, but our
+                // coordinates are 0-based half-open. The tree may return nodes
+                // that are merely abutting (not truly overlapping) in half-open
+                // semantics. We verify actual overlap explicitly.
+                merged_tree.query(start, end, |iv| {
+                    // Verify overlap in half-open coordinates
+                    let exon_start = iv.metadata.exon_start;
+                    let exon_end = iv.metadata.exon_end;
+                    if exon_start >= end || start >= exon_end {
+                        return; // Abutting or non-overlapping — skip
+                    }
+                    // Qualimap checks per-node: if this specific exon does NOT
+                    // enclose the M-block, it sets readOverlaps = true. Even if
+                    // a different exon DOES enclose the block, the non-enclosing
+                    // overlap still counts.
+                    let enclosed = exon_start <= start && end <= exon_end;
+                    if !enclosed {
+                        overlaps_not_enclosed = true;
+                    }
+                });
+                if overlaps_not_enclosed {
+                    break;
+                }
+            }
+            if overlaps_not_enclosed {
+                // Qualimap counts overlapping_exon once per read/fragment.
+                self.counters.overlapping_exon += 1;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Classify a read that wasn't assigned to any gene as intronic or intergenic.
     fn classify_no_feature(
         &mut self,
         m_blocks: &[(i32, i32)],
@@ -591,25 +644,6 @@ impl QualimapAccum {
         index: &QualimapIndex,
         num_reads: u64,
     ) {
-        // Check if any M-block overlaps an exon region (for overlapping_exon count).
-        // Qualimap Java uses its merged interval tree (same one used for enclosure)
-        // for this overlap check. We use merged_exon_tree to match.
-        if let Some(merged_tree) = index.merged_exon_tree(chrom) {
-            let mut overlaps_exon = false;
-            for &(start, end) in m_blocks {
-                merged_tree.query(start, end, |_iv| {
-                    overlaps_exon = true;
-                });
-                if overlaps_exon {
-                    break;
-                }
-            }
-            if overlaps_exon {
-                // Qualimap counts overlapping_exon once per read/fragment, not per-read-in-pair.
-                self.counters.overlapping_exon += 1;
-            }
-        }
-
         // Classify as intronic or intergenic
         if let Some(intron_tree) = index.intron_tree(chrom) {
             for &(start, end) in m_blocks {
