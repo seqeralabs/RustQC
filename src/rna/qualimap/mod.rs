@@ -17,12 +17,11 @@ use std::collections::HashMap;
 // Result types
 // ============================================================================
 
-/// Final Qualimap result, produced from a merged `QualimapAccum` + `CoverageTracker`.
+/// Final Qualimap result, produced from a merged `QualimapAccum`.
 ///
 /// Holds all counters and coverage data needed to produce Qualimap-compatible
-/// output files, plots, and the HTML report.
+/// output files (coverage profiles, bias metrics, `rnaseq_qc_results.txt`).
 #[derive(Debug)]
-#[allow(dead_code)] // Fields used in Phase 2 (output/plots/report)
 pub struct QualimapResult {
     // --- Read counters ---
     /// Total primary alignments (excluding unmapped, secondary, supplementary, QC-fail).
@@ -52,6 +51,7 @@ pub struct QualimapResult {
     /// Total reads counted (PE: each mate counts as 1 read).
     pub read_count: u64,
     /// Total fragments counted (PE: 1 per paired fragment).
+    #[allow(dead_code)] // populated but not yet consumed in output
     pub fragment_count: u64,
     /// Left-of-pair reads (first-of-pair in paired mode).
     pub left_proper_in_pair: u64,
@@ -68,6 +68,7 @@ pub struct QualimapResult {
 
     // --- Per-transcript coverage ---
     /// Per-transcript coverage arrays (transcript_key -> per-base coverage).
+    #[allow(dead_code)] // populated but not yet consumed in output
     pub transcript_coverage: HashMap<String, Vec<i32>>,
 
     /// Raw per-transcript coverage keyed by flat index (for bias computation).
@@ -81,12 +82,11 @@ pub struct QualimapResult {
     /// Qualimap's Picard Gene.Transcript merges all exons from all isoforms into
     /// a single non-redundant exon set per gene. This produces more accurate
     /// bias and profile values than per-transcript tracking.
+    #[allow(dead_code)] // populated but not yet consumed in output
     pub merged_gene_coverage: coverage::MergedGeneCoverage,
 
-    /// Forward strand estimation count for SSP
-    #[allow(dead_code)]
+    /// Forward strand estimation count for SSP.
     pub ssp_fwd: u64,
-    /// Reverse strand estimation count for SSP
-    #[allow(dead_code)]
+    /// Reverse strand estimation count for SSP.
     pub ssp_rev: u64,
 }

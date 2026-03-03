@@ -88,8 +88,7 @@ pub struct MergedExonMeta {
     pub exon_start: i32,
     /// Exon end in 0-based half-open coordinates.
     pub exon_end: i32,
-    /// Strand ('+', '-', or '.').
-    #[allow(dead_code)]
+    /// Strand (b'+', b'-', or b'.').
     pub strand: u8,
 }
 
