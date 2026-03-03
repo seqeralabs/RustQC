@@ -188,17 +188,23 @@ pub struct QualimapAccum {
     pub junction_motifs: JunctionMotifCounts,
     /// Mate buffer for PE reconciliation.
     mate_buffer: HashMap<MateKey, MateInfo>,
+    /// Strandedness protocol: 0=unstranded, 1=forward, 2=reverse.
+    stranded: u8,
 }
 
 impl QualimapAccum {
     /// Create a new Qualimap accumulator.
-    pub fn new() -> Self {
+    ///
+    /// # Arguments
+    /// * `stranded` - Strandedness: 0=unstranded, 1=forward, 2=reverse.
+    pub fn new(stranded: u8) -> Self {
         Self {
             counters: QualimapCounters::default(),
             coverage: TranscriptCoverage::new(),
             merged_gene_coverage: MergedGeneCoverage::new(),
             junction_motifs: JunctionMotifCounts::default(),
             mate_buffer: HashMap::new(),
+            stranded,
         }
     }
 
@@ -299,19 +305,24 @@ impl QualimapAccum {
         // even when the motif extraction guard fails. Match that behavior.
         self.counters.reads_at_junctions += n_op_count as u64;
 
-        // Determine enclosing genes for this read's M-blocks
-        let enclosing_genes = find_enclosing_genes(&m_blocks, chrom, index);
+        // Determine enclosing genes for this read's M-blocks (with strand filtering)
+        let is_reverse = flags & BAM_FREVERSE != 0;
+        let is_first_of_pair = flags & BAM_FREAD1 != 0;
+        let enclosing_genes = find_enclosing_genes(
+            &m_blocks,
+            chrom,
+            index,
+            self.stranded,
+            is_reverse,
+            is_first_of_pair,
+        );
 
-        // --- Coverage: enclosed-only, uniquely-mapped ---
-        // Add per-transcript and merged-gene coverage for each M-block that is
-        // fully enclosed by a merged exon of an enclosing gene. Only genes that
-        // enclose ALL blocks of this read contribute, matching Qualimap's model
-        // where coverage is tied to the enclosure-based gene assignment.
-        // For SE reads this is the current read's blocks; for PE it is deferred
-        // to reconcile_pair() where combined blocks from both mates are available.
+        // --- Coverage: per-block, strand-independent (Qualimap model) ---
+        // Qualimap adds coverage per M-block to each enclosing gene, without
+        // strand filtering. This is separate from gene assignment counting.
+        // For SE reads: add coverage now. For PE: deferred to reconcile_pair().
         if flags & BAM_FPAIRED == 0 || flags & BAM_FPROPER_PAIR == 0 {
-            // SE or non-proper-pair: add coverage now with this read's blocks.
-            self.add_enclosed_coverage(&m_blocks, &enclosing_genes, index);
+            self.add_per_block_coverage(&m_blocks, chrom, index);
         }
 
         // PE path: check BAM flags directly (no library-level paired flag needed)
@@ -400,20 +411,38 @@ impl QualimapAccum {
         chrom: &str,
         index: &QualimapIndex,
     ) {
-        // Combine M-blocks from both mates
+        // Combine M-blocks from both mates (used for coverage and overlapping-exon checks)
         let mut combined_blocks: Vec<(i32, i32)> =
             Vec::with_capacity(r1_blocks.len() + r2_blocks.len());
         combined_blocks.extend_from_slice(r1_blocks);
         combined_blocks.extend_from_slice(r2_blocks);
 
-        // Re-run enclosure check on all combined blocks (Qualimap's approach:
-        // processAlignmentIntervals passes ALL intervals to findIntersectingFeatures)
-        let assigned_genes = find_enclosing_genes(&combined_blocks, chrom, index);
+        // Qualimap's findIntersectingFeatures processes each read's intervals with its own
+        // corrected strand, then a gene must cover intervals from BOTH mates. We replicate
+        // this by running find_enclosing_genes per mate and intersecting the two gene sets.
+        let r2_is_first_of_pair = !r1_is_first_of_pair;
+        let r1_genes = find_enclosing_genes(
+            r1_blocks,
+            chrom,
+            index,
+            self.stranded,
+            r1_is_reverse,
+            r1_is_first_of_pair,
+        );
+        let r2_genes = find_enclosing_genes(
+            r2_blocks,
+            chrom,
+            index,
+            self.stranded,
+            r2_is_reverse,
+            r2_is_first_of_pair,
+        );
+        let assigned_genes: HashSet<u32> = r1_genes.intersection(&r2_genes).copied().collect();
 
-        // --- Coverage: enclosed-only for combined PE blocks ---
-        // Add per-transcript and merged-gene coverage using the combined M-blocks
-        // from both mates. Only genes that enclose ALL combined blocks contribute.
-        self.add_enclosed_coverage(&combined_blocks, &assigned_genes, index);
+        // --- Coverage: per-block, strand-independent (Qualimap model) ---
+        // Qualimap adds coverage per M-block to each enclosing gene, without
+        // strand filtering. Uses combined blocks from both mates.
+        self.add_per_block_coverage(&combined_blocks, chrom, index);
 
         // Collect junction motifs from both mates
         let all_motifs: Vec<&JunctionMotif> = r1_motifs.iter().chain(r2_motifs.iter()).collect();
@@ -556,33 +585,51 @@ impl QualimapAccum {
         false
     }
 
-    /// Add per-transcript and merged-gene coverage for fully-enclosed M-blocks.
+    /// Add per-transcript and merged-gene coverage, per-block, strand-independent.
     ///
-    /// For each M-block, queries the merged exon tree and adds coverage only
-    /// to genes where `block_start >= exon_start && block_end <= exon_end`
-    /// (fully enclosed). Only genes present in `enclosing_genes` contribute,
-    /// so coverage is restricted to genes that enclose ALL blocks of the read.
+    /// Matches Qualimap's coverage model exactly: in `findIntersectingFeatures`,
+    /// `addCoverage` is called inside the per-interval loop for every feature
+    /// whose merged-exon node encloses that individual M-block. Coverage is:
+    /// - **Per-block**: each M-block is independently checked for enclosure
+    /// - **Strand-independent**: no strand protocol check for coverage
+    /// - **All enclosing genes**: every gene enclosing a block gets coverage
     ///
     /// # Arguments
-    /// * `m_blocks`        - M-only aligned blocks (0-based half-open).
-    /// * `enclosing_genes` - Genes that enclose ALL blocks (from `find_enclosing_genes`).
-    /// * `index`           - Qualimap annotation index.
-    fn add_enclosed_coverage(
+    /// * `m_blocks` - M-only aligned blocks (0-based half-open).
+    /// * `chrom`    - Chromosome name for tree lookup.
+    /// * `index`    - Qualimap annotation index.
+    fn add_per_block_coverage(
         &mut self,
         m_blocks: &[(i32, i32)],
-        enclosing_genes: &HashSet<u32>,
+        chrom: &str,
         index: &QualimapIndex,
     ) {
-        if enclosing_genes.is_empty() || m_blocks.is_empty() {
+        if m_blocks.is_empty() {
             return;
         }
-        for &gidx in enclosing_genes {
-            let (tx_start, _) = index.gene_transcript_ranges[gidx as usize];
-            let transcripts = index.gene_transcripts(gidx);
-            self.coverage.add_coverage(m_blocks, transcripts, tx_start);
-            if let Some(model) = index.merged_gene_models.get(gidx as usize) {
-                self.merged_gene_coverage
-                    .add_coverage(gidx, m_blocks, model);
+        let tree = match index.merged_exon_tree(chrom) {
+            Some(t) => t,
+            None => return,
+        };
+
+        for &(block_start, block_end) in m_blocks {
+            let mut block_genes: HashSet<u32> = HashSet::new();
+            tree.query(block_start, block_end, |iv| {
+                if block_start >= iv.metadata.exon_start && block_end <= iv.metadata.exon_end {
+                    block_genes.insert(iv.metadata.gene_idx);
+                }
+            });
+
+            let single_block = &[(block_start, block_end)];
+            for &gidx in &block_genes {
+                let (tx_start, _) = index.gene_transcript_ranges[gidx as usize];
+                let transcripts = index.gene_transcripts(gidx);
+                self.coverage
+                    .add_coverage(single_block, transcripts, tx_start);
+                if let Some(model) = index.merged_gene_models.get(gidx as usize) {
+                    self.merged_gene_coverage
+                        .add_coverage(gidx, single_block, model);
+                }
             }
         }
     }
@@ -961,10 +1008,18 @@ fn decode_base(encoded: u8) -> u8 {
 /// by at least one merged exon interval of that gene. This matches Qualimap's
 /// `processAlignmentIntervals()` → `findIntersectingFeatures()` → BitSet
 /// cardinality check.
+///
+/// When `stranded > 0`, only genes whose strand matches the read's effective
+/// strand are considered. Effective strand follows Qualimap's `getReadIntervals()`
+/// logic: for `stranded=2` (reverse), read1 strand is flipped; for `stranded=1`
+/// (forward), read2 strand is flipped.
 fn find_enclosing_genes(
     m_blocks: &[(i32, i32)],
     chrom: &str,
     index: &QualimapIndex,
+    stranded: u8,
+    is_reverse: bool,
+    is_first_of_pair: bool,
 ) -> HashSet<u32> {
     let tree = match index.merged_exon_tree(chrom) {
         Some(t) => t,
@@ -975,11 +1030,38 @@ fn find_enclosing_genes(
         return HashSet::new();
     }
 
-    // For the first M-block, find all genes with an enclosing merged exon
+    // Compute the effective strand of this read after protocol correction.
+    // Qualimap's getReadIntervals() flips the strand of:
+    //   - read1 for strand-specific-reverse (stranded=2)
+    //   - read2 for strand-specific-forward (stranded=1)
+    // Result: read_on_plus = true means this read maps to the + gene strand.
+    let read_on_plus = if stranded == 0 {
+        true // no filtering; handled by skipping strand check below
+    } else {
+        let flip = (stranded == 2 && is_first_of_pair) || (stranded == 1 && !is_first_of_pair);
+        if flip {
+            is_reverse
+        } else {
+            !is_reverse
+        }
+    };
+
+    // Closure: does an exon's strand match this read?
+    let strand_ok = |exon_strand: u8| -> bool {
+        if stranded == 0 {
+            return true;
+        }
+        (read_on_plus && exon_strand == b'+') || (!read_on_plus && exon_strand == b'-')
+    };
+
+    // For the first M-block, find all strand-compatible genes with an enclosing merged exon
     let mut candidate_genes: HashSet<u32> = HashSet::new();
     let (first_start, first_end) = m_blocks[0];
     tree.query(first_start, first_end, |iv| {
-        if first_start >= iv.metadata.exon_start && first_end <= iv.metadata.exon_end {
+        if first_start >= iv.metadata.exon_start
+            && first_end <= iv.metadata.exon_end
+            && strand_ok(iv.metadata.strand)
+        {
             candidate_genes.insert(iv.metadata.gene_idx);
         }
     });
@@ -995,6 +1077,7 @@ fn find_enclosing_genes(
             if block_start >= iv.metadata.exon_start
                 && block_end <= iv.metadata.exon_end
                 && candidate_genes.contains(&iv.metadata.gene_idx)
+                && strand_ok(iv.metadata.strand)
             {
                 block_genes.insert(iv.metadata.gene_idx);
             }
@@ -1067,7 +1150,7 @@ mod tests {
     fn test_find_enclosing_genes_empty_chrom() {
         let genes = indexmap::IndexMap::new();
         let index = QualimapIndex::from_genes(&genes);
-        let result = find_enclosing_genes(&[(100, 200)], "chr1", &index);
+        let result = find_enclosing_genes(&[(100, 200)], "chr1", &index, 0, false, true);
         assert!(result.is_empty());
     }
 

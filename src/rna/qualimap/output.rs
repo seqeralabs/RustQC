@@ -241,60 +241,15 @@ fn compute_bias(entries: &[TranscriptCoverageEntry]) -> (f64, f64, f64) {
         let three_mean = three_prime_sum / NUM_PRIME_BASES as f64;
         let whole_mean = whole_sum / len as f64;
 
-        // Only include transcripts with non-zero coverage at the respective end.
-        // This matches Qualimap's effective behavior where TreeMap deduplication
-        // and transcript selection naturally excludes many zero-coverage entries.
-        // Session 5 analysis showed: removing 92 zero-5' transcripts → median ~0.73
-        // (very close to Qualimap's 0.71).
-        if whole_mean > 0.0 && five_mean > 0.0 {
+        // Qualimap pushes bias values for all qualifying transcripts unconditionally
+        // (lines 247-249 of TranscriptDataHandler.java) — no zero-coverage filtering.
+        // The 5'-3' ratio is only included when three_mean > 0 to avoid infinity.
+        if whole_mean > 0.0 {
             five_prime_biases.push(five_mean / whole_mean);
-        }
-        if whole_mean > 0.0 && three_mean > 0.0 {
             three_prime_biases.push(three_mean / whole_mean);
-        }
-        if three_mean > 0.0 && five_mean > 0.0 {
-            five_three_biases.push(five_mean / three_mean);
-        }
-    }
-
-    // Diagnostic logging for bias analysis
-    let zero_five = five_prime_biases.iter().filter(|&&v| v == 0.0).count();
-    let zero_three = three_prime_biases.iter().filter(|&&v| v == 0.0).count();
-    log::debug!(
-        "QM_BIAS qualifying={} zero_5'={} zero_3'={} total_entries={}",
-        qualifying.len(),
-        zero_five,
-        zero_three,
-        entries.len()
-    );
-    // Print details of first 5 zero-5' transcripts
-    let mut zero_five_count = 0;
-    for (mean, entry) in &qualifying {
-        let cov = &entry.coverage;
-        let len = cov.len();
-        if len < NUM_PRIME_BASES {
-            continue;
-        }
-        let first_100: f64 = if entry.strand == '-' {
-            cov[len - NUM_PRIME_BASES..].iter().map(|&v| v as f64).sum()
-        } else {
-            cov[..NUM_PRIME_BASES].iter().map(|&v| v as f64).sum()
-        };
-        if first_100 == 0.0 && zero_five_count < 5 {
-            let first_nonzero = cov.iter().position(|&v| v > 0).unwrap_or(len);
-            let last_nonzero = cov.iter().rposition(|&v| v > 0).unwrap_or(0);
-            log::debug!(
-                "QM_BIAS_ZERO_5 gene_idx={} strand={} len={} mean={:.2} first_nonzero={} last_nonzero={} first_5cov=[{},{},{},{},{}] last_5cov=[{},{},{},{},{}]",
-                entry.gene_idx,
-                entry.strand,
-                len,
-                mean,
-                first_nonzero,
-                last_nonzero,
-                cov[0], cov[1], cov[2], cov[3], cov[4],
-                cov[len-5], cov[len-4], cov[len-3], cov[len-2], cov[len-1],
-            );
-            zero_five_count += 1;
+            if three_mean > 0.0 {
+                five_three_biases.push(five_mean / three_mean);
+            }
         }
     }
 
@@ -350,6 +305,7 @@ pub fn write_qualimap_results(
     index: &QualimapIndex,
     bam_path: &str,
     gtf_path: &str,
+    stranded: u8,
     output_dir: &Path,
 ) -> Result<()> {
     // Auto-detect paired mode from the data
@@ -429,6 +385,7 @@ pub fn write_qualimap_results(
         bam_path,
         gtf_path,
         paired,
+        stranded,
         five_bias,
         three_bias,
         five_three_bias,
@@ -447,6 +404,7 @@ fn write_results_file(
     bam_path: &str,
     gtf_path: &str,
     paired: bool,
+    stranded: u8,
     five_bias: f64,
     three_bias: f64,
     five_three_bias: f64,
@@ -468,7 +426,12 @@ fn write_results_file(
     writeln!(f, "    bam file = {bam_path}")?;
     writeln!(f, "    gff file = {gtf_path}")?;
     writeln!(f, "    counting algorithm = uniquely-mapped-reads")?;
-    writeln!(f, "    protocol = non-strand-specific")?;
+    let protocol = match stranded {
+        1 => "strand-specific-forward",
+        2 => "strand-specific-reverse",
+        _ => "non-strand-specific",
+    };
+    writeln!(f, "    protocol = {protocol}")?;
     writeln!(f, "    5'-3' bias region size = {NUM_PRIME_BASES}")?;
     writeln!(
         f,
@@ -536,12 +499,15 @@ fn write_results_file(
         format_with_commas(result.not_aligned)
     )?;
 
-    // SSP estimation — from strand comparison during enclosure check
-    let ssp_total = result.ssp_fwd + result.ssp_rev;
-    if ssp_total > 0 {
-        let fwd = result.ssp_fwd as f64 / ssp_total as f64;
-        let rev = result.ssp_rev as f64 / ssp_total as f64;
-        writeln!(f, "    SSP estimation (fwd/rev) = {:.2} / {:.2}", fwd, rev)?;
+    // SSP estimation — only written when protocol was not pre-specified (stranded == 0)
+    // When the user specifies --stranded, Qualimap does not output this line.
+    if stranded == 0 {
+        let ssp_total = result.ssp_fwd + result.ssp_rev;
+        if ssp_total > 0 {
+            let fwd = result.ssp_fwd as f64 / ssp_total as f64;
+            let rev = result.ssp_rev as f64 / ssp_total as f64;
+            writeln!(f, "    SSP estimation (fwd/rev) = {:.2} / {:.2}", fwd, rev)?;
+        }
     }
     writeln!(f)?;
     writeln!(f)?;

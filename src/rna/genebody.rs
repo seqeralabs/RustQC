@@ -164,18 +164,21 @@ impl GenebodyCoverageAccum {
     /// * `gene_idx` - Index of the assigned gene
     /// * `aligned_blocks` - Read's aligned genomic blocks (0-based half-open)
     /// * `position_map` - Precomputed exon position map
+    /// * `read_count` - Number of reads in this fragment (1 for single-end, 2 for paired-end).
+    ///   Qualimap counts reads, not fragments, so aligned_to_genes increments by read_count.
     pub fn record_coverage(
         &mut self,
         gene_idx: usize,
         aligned_blocks: &[(u64, u64)],
         position_map: &TranscriptPositionMap,
+        read_count: u64,
     ) {
         let gene_map = match position_map.get(gene_idx) {
             Some(m) => m,
             None => return,
         };
 
-        self.aligned_to_genes += 1;
+        self.aligned_to_genes += read_count;
 
         // Track exon overlap count for overlapping_exon metric
         let mut exons_hit = 0u32;
@@ -257,16 +260,20 @@ impl GenebodyCoverageAccum {
     }
 
     /// Record a read that was not assigned to any gene (intergenic).
-    pub fn record_no_feature(&mut self, aligned_blocks: &[(u64, u64)]) {
-        self.no_feature += 1;
+    ///
+    /// `read_count` is 1 for single-end, 2 for paired-end (Qualimap counts reads not fragments).
+    pub fn record_no_feature(&mut self, aligned_blocks: &[(u64, u64)], read_count: u64) {
+        self.no_feature += read_count;
         for &(start, end) in aligned_blocks {
             self.intergenic += end - start;
         }
     }
 
     /// Record an ambiguous read (overlapping multiple genes).
-    pub fn record_ambiguous(&mut self) {
-        self.ambiguous += 1;
+    ///
+    /// `read_count` is 1 for single-end, 2 for paired-end (Qualimap counts reads not fragments).
+    pub fn record_ambiguous(&mut self, read_count: u64) {
+        self.ambiguous += read_count;
     }
 
     /// Merge another accumulator into this one.

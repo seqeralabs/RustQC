@@ -573,8 +573,8 @@ fn test_multiple_bam_files() {
 /// Passing the same BAM file twice should fail with a duplicate-stem error.
 #[test]
 fn test_duplicate_bam_stems_rejected() {
-    let bin = env!("CARGO_BIN_EXE_rustqc");
-    let output = Command::new(bin)
+    let bin = rustqc_binary();
+    let output = Command::new(&bin)
         .args([
             "rna",
             "tests/data/test.bam",

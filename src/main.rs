@@ -1048,6 +1048,7 @@ fn process_single_bam(
                 qm_index,
                 bam_path,
                 params.gtf_path.unwrap_or(""),
+                params.stranded,
                 &qm_dir,
             )?;
             info!(

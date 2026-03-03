@@ -1371,7 +1371,7 @@ mod tests {
     #[test]
     fn test_bootstrap_reproducibility() {
         let hist = vec![(1, 100), (2, 50), (3, 25)];
-        let total_reads = 225;
+        let _total_reads = 225;
 
         let mut rng1 = ChaCha8Rng::seed_from_u64(42);
         let (h1, t1, d1) = bootstrap_resample(&hist, &mut rng1);
