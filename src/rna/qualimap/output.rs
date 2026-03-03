@@ -242,14 +242,17 @@ fn compute_bias(entries: &[TranscriptCoverageEntry]) -> (f64, f64, f64) {
         let whole_mean = whole_sum / len as f64;
 
         // Qualimap pushes bias values for all qualifying transcripts unconditionally
-        // (lines 247-249 of TranscriptDataHandler.java) — no zero-coverage filtering.
-        // The 5'-3' ratio is only included when three_mean > 0 to avoid infinity.
-        if whole_mean > 0.0 {
-            five_prime_biases.push(five_mean / whole_mean);
-            three_prime_biases.push(three_mean / whole_mean);
-            if three_mean > 0.0 {
-                five_three_biases.push(five_mean / three_mean);
-            }
+        // (lines 247-249 of TranscriptDataHandler.java). Since pickTranscripts()
+        // already ensures mean >= 1.0, whole_mean is always positive. The 5'-3'
+        // ratio may produce infinity or NaN when three_mean == 0; Java's
+        // StatUtils.percentile handles these via Arrays.sort which places NaN
+        // at the end. We filter NaN values since they don't contribute meaningful
+        // information to the median.
+        five_prime_biases.push(five_mean / whole_mean);
+        three_prime_biases.push(three_mean / whole_mean);
+        let ratio = five_mean / three_mean;
+        if !ratio.is_nan() {
+            five_three_biases.push(ratio);
         }
     }
 

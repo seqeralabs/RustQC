@@ -69,19 +69,28 @@ impl TranscriptCoverage {
             // For each genomic position in an M-block that falls within an exon,
             // compute the exonic offset (position within concatenated exons)
             // and increment the depth at that position.
-            // This matches Picard's Gene.Transcript.addCoverageCounts()
-            // which calls getTranscriptCoordinate() per genomic position.
+            //
+            // Picard 1.70's Gene.Transcript.addCoverageCounts() has an off-by-one
+            // bug: `for (pos = startPos; pos < endPos; ...)` uses strict less-than
+            // with 1-based inclusive coordinates, effectively skipping the last base
+            // of each alignment block. We replicate this by using `block_end - 1`
+            // as the effective end (converting from 0-based half-open to exclusive
+            // of the last base).
             for &(block_start, block_end) in m_blocks {
+                // Replicate Picard off-by-one: skip last base of each M-block.
+                // In 0-based half-open, block_end is already exclusive, so
+                // subtracting 1 makes it skip one additional base.
+                let effective_end = block_end - 1;
                 // For each exon, compute overlap with this M-block.
                 // exonic_offset tracks cumulative exonic bases from prior exons.
                 let mut exonic_offset = 0usize;
                 for &(exon_start, exon_end) in &tx_info.exons {
                     let exon_len = (exon_end - exon_start) as usize;
 
-                    // Compute overlap between M-block [block_start, block_end)
+                    // Compute overlap between M-block [block_start, effective_end)
                     // and exon [exon_start, exon_end) (both 0-based half-open)
                     let overlap_start = block_start.max(exon_start);
-                    let overlap_end = block_end.min(exon_end);
+                    let overlap_end = effective_end.min(exon_end);
 
                     if overlap_start < overlap_end {
                         // This M-block overlaps this exon.
@@ -206,14 +215,16 @@ impl MergedGeneCoverage {
             .or_insert_with(|| vec![0i32; total_len]);
 
         // Map each M-block to merged exonic coordinates.
+        // Replicate Picard off-by-one: skip last base of each M-block.
         for &(block_start, block_end) in m_blocks {
+            let effective_end = block_end - 1;
             let mut exonic_offset = 0usize;
             for &(exon_start, exon_end) in &model.exons {
                 let exon_len = (exon_end - exon_start) as usize;
 
                 // Compute overlap between M-block and this merged exon
                 let overlap_start = block_start.max(exon_start);
-                let overlap_end = block_end.min(exon_end);
+                let overlap_end = effective_end.min(exon_end);
 
                 if overlap_start < overlap_end {
                     let rel_start = exonic_offset + (overlap_start - exon_start) as usize;
@@ -303,15 +314,16 @@ mod tests {
         let mut cov = TranscriptCoverage::new();
         let tx = make_tx_info(100, 200);
         // M-block: 120..150 (0-based half-open)
+        // Picard off-by-one: effective_end = 149, so coverage at 120..149
         cov.add_coverage(&[(120, 150)], &[tx], 0);
 
         let depth = cov.get(0).unwrap();
         assert_eq!(depth.len(), 100);
-        // Positions 20..50 (relative) should have depth 1
+        // Positions 20..49 (relative) should have depth 1 (off-by-one: 49 not 50)
         assert_eq!(depth[19], 0);
         assert_eq!(depth[20], 1);
-        assert_eq!(depth[49], 1);
-        assert_eq!(depth[50], 0);
+        assert_eq!(depth[48], 1);
+        assert_eq!(depth[49], 0);
     }
 
     #[test]
@@ -351,10 +363,11 @@ mod tests {
     fn test_mean_coverage() {
         let mut cov = TranscriptCoverage::new();
         let tx = make_tx_info(0, 10);
-        // Cover all 10 bases with depth 1
+        // Cover all 10 bases with depth 1 (Picard off-by-one: only 9 bases)
         cov.add_coverage(&[(0, 10)], &[tx], 0);
         let mean = cov.mean_coverage(0);
-        assert!((mean - 1.0).abs() < 1e-10);
+        // 9 bases out of 10 covered → mean = 0.9
+        assert!((mean - 0.9).abs() < 1e-10);
 
         // Non-existent transcript
         assert!((cov.mean_coverage(99) - 0.0).abs() < 1e-10);
@@ -373,14 +386,15 @@ mod tests {
             exonic_length: 100,
         };
         let mut cov = MergedGeneCoverage::new();
+        // M-block: 120..150, effective_end = 149 (Picard off-by-one)
         cov.add_coverage(0, &[(120, 150)], &model);
 
         let depth = cov.get(0).unwrap();
         assert_eq!(depth.len(), 100);
         assert_eq!(depth[19], 0);
         assert_eq!(depth[20], 1);
-        assert_eq!(depth[49], 1);
-        assert_eq!(depth[50], 0);
+        assert_eq!(depth[48], 1);
+        assert_eq!(depth[49], 0);
     }
 
     #[test]
@@ -394,15 +408,16 @@ mod tests {
             exonic_length: 200,
         };
         let mut cov = MergedGeneCoverage::new();
-        // M-block in second exon: 310..330 (genomic) → offset 100 + 10 = 110..130 (exonic)
+        // M-block in second exon: 310..330 (genomic), effective_end = 329
+        // → offset 100 + 10 = 110..129 (exonic, Picard off-by-one)
         cov.add_coverage(0, &[(310, 330)], &model);
 
         let depth = cov.get(0).unwrap();
         assert_eq!(depth.len(), 200);
         assert_eq!(depth[109], 0);
         assert_eq!(depth[110], 1);
-        assert_eq!(depth[129], 1);
-        assert_eq!(depth[130], 0);
+        assert_eq!(depth[128], 1);
+        assert_eq!(depth[129], 0);
     }
 
     #[test]
@@ -420,15 +435,16 @@ mod tests {
         assert_eq!(model.exonic_length, 250);
 
         let mut cov = MergedGeneCoverage::new();
-        // M-block spanning the merged first exon: 180..220 → offset 80..120
+        // M-block spanning the merged first exon: 180..220, effective_end = 219
+        // → offset 80..119 (Picard off-by-one)
         cov.add_coverage(0, &[(180, 220)], &model);
 
         let depth = cov.get(0).unwrap();
         assert_eq!(depth.len(), 250);
         assert_eq!(depth[79], 0);
         assert_eq!(depth[80], 1);
-        assert_eq!(depth[119], 1);
-        assert_eq!(depth[120], 0);
+        assert_eq!(depth[118], 1);
+        assert_eq!(depth[119], 0);
     }
 
     #[test]

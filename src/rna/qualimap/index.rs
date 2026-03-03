@@ -321,6 +321,22 @@ impl QualimapIndex {
                     }
                 }
 
+                // Qualimap Java's createHelperMaps() sorts negative-strand exons in
+                // descending order by start position (Arrays.sort with comparator
+                // `e1.start > e2.start ? -1 : 1`). This in-place mutation affects
+                // getTranscriptCoordinate() during BAM processing: for minus-strand
+                // transcripts, position 0 in the coverage array corresponds to the
+                // rightmost exon (biological 5' end). We replicate this here by
+                // re-sorting minus-strand exons descending after the ascending-order
+                // work (interval tree, intron gaps) is done.
+                let coverage_exons = if tx.strand == '-' {
+                    let mut desc = exons_0based.clone();
+                    desc.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+                    desc
+                } else {
+                    exons_0based
+                };
+
                 // Store transcript metadata
                 transcripts.push(TranscriptInfo {
                     gene_idx,
@@ -332,7 +348,7 @@ impl QualimapIndex {
                     end: tx_end,
                     strand: tx.strand,
                     length: (tx_end - tx_start) as u32,
-                    exons: exons_0based,
+                    exons: coverage_exons,
                     exonic_length,
                 });
             }
