@@ -652,7 +652,7 @@ impl Config {
     pub fn from_file(path: &Path) -> Result<Self> {
         let contents = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read config file: {}", path.display()))?;
-        let config: Config = serde_yml::from_str(&contents)
+        let config: Config = serde_yaml_ng::from_str(&contents)
             .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
         Ok(config)
     }
@@ -711,7 +711,7 @@ mod tests {
 
     #[test]
     fn test_empty_config() {
-        let config: Config = serde_yml::from_str("").unwrap();
+        let config: Config = serde_yaml_ng::from_str("").unwrap();
         assert!(config.chromosome_mapping.is_empty());
         assert!(!config.has_chromosome_mapping());
         // flat_output defaults to false (nested subdirectories)
@@ -746,11 +746,11 @@ mod tests {
     #[test]
     fn test_flat_output_config() {
         let yaml = "flat_output: true\n";
-        let config: Config = serde_yml::from_str(yaml).unwrap();
+        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
         assert!(config.flat_output);
 
         let yaml = "flat_output: false\n";
-        let config: Config = serde_yml::from_str(yaml).unwrap();
+        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
         assert!(!config.flat_output);
     }
 
@@ -763,7 +763,7 @@ chromosome_mapping:
   chrX: "X"
   chrM: "MT"
 "#;
-        let config: Config = serde_yml::from_str(yaml).unwrap();
+        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
         assert_eq!(config.chromosome_mapping.len(), 4);
         assert_eq!(config.chromosome_mapping.get("chr1").unwrap(), "1");
         assert_eq!(config.chromosome_mapping.get("chrM").unwrap(), "MT");
@@ -782,7 +782,7 @@ future_setting: true
 another_section:
   key: value
 "#;
-        let config: Config = serde_yml::from_str(yaml).unwrap();
+        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
         assert_eq!(config.chromosome_mapping.len(), 1);
     }
 
@@ -797,7 +797,7 @@ featurecounts:
   summary_file: false
   biotype_attribute: "gene_type"
 "#;
-        let config: Config = serde_yml::from_str(yaml).unwrap();
+        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
         assert!(config.dupradar.dup_matrix);
         assert!(!config.dupradar.boxplot);
         assert!(config.featurecounts.counts_file);
@@ -817,7 +817,7 @@ dupradar:
   multiqc_intercept: false
   multiqc_curve: false
 "#;
-        let config: Config = serde_yml::from_str(yaml).unwrap();
+        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
         assert!(!config.any_dupradar_output());
     }
 
@@ -839,7 +839,7 @@ junction_saturation:
 inner_distance:
   enabled: false
 "#;
-        let config: Config = serde_yml::from_str(yaml).unwrap();
+        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
         assert!(!config.bam_stat.enabled);
         assert!(!config.infer_experiment.enabled);
         assert!(!config.read_duplication.enabled);
@@ -868,7 +868,7 @@ inner_distance:
   upper_bound: 500
   step: 10
 "#;
-        let config: Config = serde_yml::from_str(yaml).unwrap();
+        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
         assert_eq!(config.infer_experiment.sample_size, Some(500_000));
         assert_eq!(config.junction_saturation.min_coverage, Some(5));
         assert_eq!(config.junction_saturation.percentile_floor, Some(10));

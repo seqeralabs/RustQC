@@ -28,7 +28,7 @@ plotters-svg = "0.3"
 
 # Configuration
 serde = { version = "1", features = ["derive"] }
-serde_yml = "0.0.12"
+serde_yaml_ng = "0.10"
 
 # Interval trees
 coitrees = "0.4"
