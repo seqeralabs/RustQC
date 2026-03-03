@@ -393,7 +393,7 @@ impl QualimapIndex {
         // Build COITrees from collected intervals
         let total_exon_ivs: usize = exon_intervals.values().map(|v| v.len()).sum();
         let total_merged_ivs: usize = merged_exon_intervals.values().map(|v| v.len()).sum();
-        eprintln!(
+        log::info!(
             "QM_INDEX: {} exon intervals ({} merged), {} transcripts, {} genes",
             total_exon_ivs,
             total_merged_ivs,

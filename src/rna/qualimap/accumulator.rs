@@ -609,6 +609,7 @@ impl QualimapAccum {
     pub fn merge(&mut self, other: QualimapAccum) {
         self.counters.merge(&other.counters);
         self.coverage.merge(other.coverage);
+        self.merged_gene_coverage.merge(other.merged_gene_coverage);
         self.junction_motifs.merge(&other.junction_motifs);
 
         // Merge mate buffers (cross-chromosome mates).
