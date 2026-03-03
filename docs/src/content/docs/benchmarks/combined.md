@@ -85,4 +85,4 @@ See the individual benchmark pages for detailed per-tool comparisons:
   timings include container overhead and emulation penalties. The relative
   comparison demonstrates the magnitude of the speedup.
 - **Reproducibility:** Benchmark scripts and data are in the
-  [benchmark directory](https://github.com/ewels/RustQC/tree/main/benchmark).
+  [benchmark directory](https://github.com/seqeralabs/RustQC/tree/main/benchmark).

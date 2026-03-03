@@ -40,7 +40,7 @@ Performs dupRadar-equivalent duplicate rate analysis, featureCounts-compatible r
 | Memory | High (R overhead) | Low |
 | Output format | Identical | Identical |
 
-All gene counts match **exactly** across all 63,086 genes. Cell-by-cell comparison of the full duplication matrix (820,118 values) shows **zero mismatches**. See the [benchmark documentation](https://ewels.github.io/RustQC/benchmarks/dupradar/) for detailed results.
+All gene counts match **exactly** across all 63,086 genes. Cell-by-cell comparison of the full duplication matrix (820,118 values) shows **zero mismatches**. See the [benchmark documentation](https://rustqc.netlify.app/benchmarks/dupradar/) for detailed results.
 
 ### RSeQC tools (integrated)
 
@@ -103,26 +103,26 @@ All RSeQC tools run by default when annotation is provided via `--gtf` or `--bed
 
 ### Pre-built binaries
 
-Download a pre-built binary for your platform from the [Releases](https://github.com/ewels/RustQC/releases) page:
+Download a pre-built binary for your platform from the [Releases](https://github.com/seqeralabs/RustQC/releases) page:
 
 ```bash
 # Linux (x86_64)
-curl -fsSL https://github.com/ewels/RustQC/releases/latest/download/rustqc-linux-x86_64.tar.gz | tar xz
+curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-linux-x86_64.tar.gz | tar xz
 chmod +x ./rustqc
 sudo mv rustqc /usr/local/bin/
 
 # Linux (aarch64)
-curl -fsSL https://github.com/ewels/RustQC/releases/latest/download/rustqc-linux-aarch64.tar.gz | tar xz
+curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-linux-aarch64.tar.gz | tar xz
 chmod +x ./rustqc
 sudo mv rustqc /usr/local/bin/
 
 # macOS (Apple Silicon)
-curl -fsSL https://github.com/ewels/RustQC/releases/latest/download/rustqc-macos-aarch64.tar.gz | tar xz
+curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-macos-aarch64.tar.gz | tar xz
 chmod +x ./rustqc
 sudo mv rustqc /usr/local/bin/
 
 # macOS (Intel)
-curl -fsSL https://github.com/ewels/RustQC/releases/latest/download/rustqc-macos-x86_64.tar.gz | tar xz
+curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-macos-x86_64.tar.gz | tar xz
 chmod +x ./rustqc
 sudo mv rustqc /usr/local/bin/
 ```
@@ -130,7 +130,7 @@ sudo mv rustqc /usr/local/bin/
 ### Docker
 
 ```bash
-docker run --rm -v "$PWD":/data ghcr.io/ewels/rustqc:latest \
+docker run --rm -v "$PWD":/data ghcr.io/seqeralabs/rustqc:latest \
   rna /data/sample.markdup.bam --gtf /data/genes.gtf --outdir /data/results
 ```
 

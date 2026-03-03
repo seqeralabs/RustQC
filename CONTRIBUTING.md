@@ -74,16 +74,24 @@ src/
     featurecounts/
       mod.rs                     Re-exports output
       output.rs                  featureCounts-format output and biotype counting
+    genebody.rs                Gene body coverage profiling, Qualimap-compatible output
+    preseq.rs                  preseq lc_extrap library complexity extrapolation
     rseqc/
-      mod.rs                     Re-exports all 7 RSeQC modules + plots
+      mod.rs                     Re-exports all RSeQC modules + common helpers
+      accumulators.rs            Shared RSeQC accumulator infrastructure (read dispatch)
+      common.rs                  Shared junction/intron extraction, from_genes/from_bed builders
       plots.rs                   Plot generation (duplication, junctions, inner distance)
       bam_stat.rs                Basic BAM alignment statistics
+      flagstat.rs                samtools flagstat-compatible output
+      idxstats.rs                samtools idxstats-compatible output
       infer_experiment.rs        Library strandedness inference
-      read_duplication.rs        Position- and sequence-based duplication histograms
-      read_distribution.rs       Read distribution across genomic features
+      inner_distance.rs          Inner distance for paired-end reads
       junction_annotation.rs     Splice junction classification
       junction_saturation.rs     Junction saturation analysis
-      inner_distance.rs          Inner distance for paired-end reads
+      read_distribution.rs       Read distribution across genomic features
+      read_duplication.rs        Position- and sequence-based duplication histograms
+      stats.rs                   samtools stats SN-section compatible output
+      tin.rs                     TIN (Transcript Integrity Number) analysis
 tests/
   integration_test.rs            Integration tests vs R reference output
   data/                          Test BAM/GTF input files
@@ -135,7 +143,7 @@ All pull requests must pass three checks:
 
 ## Reporting issues
 
-Please open a [GitHub issue](https://github.com/ewels/RustQC/issues) with:
+Please open a [GitHub issue](https://github.com/seqeralabs/RustQC/issues) with:
 
 - What you expected to happen
 - What actually happened

@@ -9,7 +9,7 @@ submit changes.
 ## Building
 
 ```bash
-git clone https://github.com/ewels/RustQC.git
+git clone https://github.com/seqeralabs/RustQC.git
 cd RustQC
 
 # Debug build
