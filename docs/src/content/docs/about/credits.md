@@ -111,4 +111,4 @@ RustQC is built with the following open-source Rust libraries:
 
 RustQC is created by [Phil Ewels](https://github.com/ewels).
 
-- Repository: <https://github.com/ewels/RustQC>
+- Repository: <https://github.com/seqeralabs/RustQC>

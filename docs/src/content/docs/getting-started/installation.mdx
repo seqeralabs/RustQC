@@ -7,12 +7,12 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 ## Pre-compiled binaries
 
-Pre-built binaries are available from the [GitHub Releases page](https://github.com/ewels/RustQC/releases) for Linux and macOS. This is the fastest way to get started.
+Pre-built binaries are available from the [GitHub Releases page](https://github.com/seqeralabs/RustQC/releases) for Linux and macOS. This is the fastest way to get started.
 
 <Tabs>
   <TabItem label="macOS Apple Silicon" icon="apple">
     ```bash
-    curl -fsSL https://github.com/ewels/RustQC/releases/latest/download/rustqc-macos-aarch64.tar.gz | tar xz
+    curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-macos-aarch64.tar.gz | tar xz
     chmod +x ./rustqc
     sudo mv ./rustqc /usr/local/bin/
     rustqc --version
@@ -20,7 +20,7 @@ Pre-built binaries are available from the [GitHub Releases page](https://github.
   </TabItem>
   <TabItem label="macOS Intel" icon="apple">
     ```bash
-    curl -fsSL https://github.com/ewels/RustQC/releases/latest/download/rustqc-macos-x86_64.tar.gz | tar xz
+    curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-macos-x86_64.tar.gz | tar xz
     chmod +x ./rustqc
     sudo mv ./rustqc /usr/local/bin/
     rustqc --version
@@ -28,7 +28,7 @@ Pre-built binaries are available from the [GitHub Releases page](https://github.
   </TabItem>
   <TabItem label="Linux x86_64" icon="linux">
     ```bash
-    curl -fsSL https://github.com/ewels/RustQC/releases/latest/download/rustqc-linux-x86_64.tar.gz | tar xz
+    curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-linux-x86_64.tar.gz | tar xz
     chmod +x ./rustqc
     sudo mv ./rustqc /usr/local/bin/
     rustqc --version
@@ -36,7 +36,7 @@ Pre-built binaries are available from the [GitHub Releases page](https://github.
   </TabItem>
   <TabItem label="Linux aarch64" icon="linux">
     ```bash
-    curl -fsSL https://github.com/ewels/RustQC/releases/latest/download/rustqc-linux-aarch64.tar.gz | tar xz
+    curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-linux-aarch64.tar.gz | tar xz
     chmod +x ./rustqc
     sudo mv ./rustqc /usr/local/bin/
     rustqc --version
@@ -52,7 +52,7 @@ Run RustQC without any local installation using Docker:
 
 ```bash
 # Run all RNA-seq QC (dupRadar + featureCounts + RSeQC) in a single pass
-docker run -v $(pwd):/data ghcr.io/ewels/rustqc:latest \
+docker run -v $(pwd):/data ghcr.io/seqeralabs/rustqc:latest \
   rna /data/sample.bam --gtf /data/genes.gtf --bed /data/genes.bed -p -o /data/output/
 ```
 
@@ -74,7 +74,7 @@ Select your operating system for the complete build instructions:
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
     # Build RustQC
-    git clone https://github.com/ewels/RustQC.git
+    git clone https://github.com/seqeralabs/RustQC.git
     cd RustQC
     cargo build --release
 
@@ -92,7 +92,7 @@ Select your operating system for the complete build instructions:
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
     # Build RustQC
-    git clone https://github.com/ewels/RustQC.git
+    git clone https://github.com/seqeralabs/RustQC.git
     cd RustQC
     cargo build --release
     ./target/release/rustqc --version
@@ -108,7 +108,7 @@ Select your operating system for the complete build instructions:
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
     # Build RustQC
-    git clone https://github.com/ewels/RustQC.git
+    git clone https://github.com/seqeralabs/RustQC.git
     cd RustQC
     cargo build --release
     ./target/release/rustqc --version

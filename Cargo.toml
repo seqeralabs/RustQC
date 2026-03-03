@@ -6,7 +6,7 @@ rust-version = "1.87"
 authors = ["Phil Ewels"]
 description = "Fast RNA-seq QC: dupRadar, featureCounts, and RSeQC reimplemented in Rust"
 license = "MIT"
-repository = "https://github.com/ewels/RustQC"
+repository = "https://github.com/seqeralabs/RustQC"
 readme = "README.md"
 keywords = ["bioinformatics", "rna-seq", "duplication", "qc", "rseqc"]
 

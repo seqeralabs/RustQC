@@ -22,7 +22,7 @@ export default defineConfig({
         {
           icon: "github",
           label: "GitHub",
-          href: "https://github.com/ewels/RustQC",
+          href: "https://github.com/seqeralabs/RustQC",
         },
       ],
       sidebar: [
