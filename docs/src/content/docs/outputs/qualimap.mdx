@@ -3,7 +3,9 @@ title: Qualimap Outputs
 description: Output files produced by RustQC's Qualimap rnaseq-compatible RNA-Seq quality control analysis.
 ---
 
-import { FileTree } from '@astrojs/starlight/components';
+import { Card, CardGrid, FileTree } from '@astrojs/starlight/components';
+
+export const base = import.meta.env.BASE_URL;
 
 ## What is Qualimap?
 
@@ -47,11 +49,19 @@ output directory, matching the directory structure that MultiQC expects.
 
 <FileTree>
 - qualimap/
+  - qualimapReport.html Self-contained HTML report
   - rnaseq_qc_results.txt Qualimap-compatible QC report
   - raw_data_qualimapReport/
     - coverage_profile_along_genes_(total).txt Coverage profile -- all genes
     - coverage_profile_along_genes_(high).txt Coverage profile -- highly expressed genes
     - coverage_profile_along_genes_(low).txt Coverage profile -- lowly expressed genes
+  - images_qualimapReport/
+    - Coverage Profile Along Genes (Total).png Gene body coverage chart
+    - Coverage Profile Along Genes (High).png Coverage chart -- highly expressed genes
+    - Coverage Profile Along Genes (Low).png Coverage chart -- lowly expressed genes
+    - Transcript coverage histogram.png Coverage depth histogram (0-50X)
+    - Reads Genomic Origin.png Exonic/intronic/intergenic pie chart
+    - Junction Analysis.png Known/novel junction pie chart
 </FileTree>
 
 ### QC results
@@ -161,6 +171,35 @@ Three tiers are produced:
 
 The **total** profile is the one parsed by MultiQC for the gene body coverage
 plot.
+
+### Chart images
+
+Six chart images are generated in `images_qualimapReport/`, matching the plots
+produced by Qualimap's HTML report:
+
+<CardGrid>
+  <Card title="Coverage Profile Along Genes (Total)">
+    <img src={`${base}examples/qualimap/Coverage Profile Along Genes (Total).png`} alt="Coverage Profile Along Genes (Total)" style={{width: "100%"}} />
+  </Card>
+  <Card title="Transcript coverage histogram">
+    <img src={`${base}examples/qualimap/Transcript coverage histogram.png`} alt="Coverage Histogram (0-50X)" style={{width: "100%"}} />
+  </Card>
+  <Card title="Reads Genomic Origin">
+    <img src={`${base}examples/qualimap/Reads Genomic Origin.png`} alt="Reads Genomic Origin" style={{width: "100%"}} />
+  </Card>
+  <Card title="Junction Analysis">
+    <img src={`${base}examples/qualimap/Junction Analysis.png`} alt="Junction Analysis" style={{width: "100%"}} />
+  </Card>
+</CardGrid>
+
+### HTML report
+
+**File:** `qualimapReport.html`
+
+A self-contained HTML report matching Qualimap's layout and styling, including
+all six chart images, summary tables, and a sidebar table of contents.
+The report uses embedded CSS and base64-encoded assets so it can be viewed
+in any browser without external dependencies.
 
 ## Interpreting results
 
