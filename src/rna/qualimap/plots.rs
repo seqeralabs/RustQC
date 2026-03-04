@@ -11,8 +11,9 @@ use std::path::Path;
 
 // ============================= Constants =======================================
 
-/// Scale factor for high-resolution PNG output.
-const SCALE: u32 = 2;
+/// Scale factor for PNG output.
+/// Qualimap produces 1024×768 images — we match that exactly.
+const SCALE: u32 = 1;
 
 /// Helper to scale a dimension by SCALE.
 const fn s(v: u32) -> u32 {
@@ -33,8 +34,8 @@ const CHART_BG: RGBColor = RGBColor(230, 230, 230);
 /// Plot area background: white.
 const PLOT_BG: RGBColor = RGBColor(255, 255, 255);
 
-/// Gridline color: light gray rgb(192, 192, 192) — JFreeChart default.
-const GRIDLINE_COLOR: RGBColor = RGBColor(192, 192, 192);
+/// Gridline color: warm tan rgb(192, 168, 144) — matches Qualimap reference output.
+const GRIDLINE_COLOR: RGBColor = RGBColor(192, 168, 144);
 
 /// Title/subtitle text color: dark gray rgb(64, 64, 64).
 const TITLE_COLOR: RGBColor = RGBColor(64, 64, 64);
@@ -45,14 +46,13 @@ const COVERAGE_LINE_COLOR: RGBColor = RGBColor(255, 0, 0);
 /// Histogram bar border: dark gray rgb(50, 50, 50).
 const HISTOGRAM_BAR_BORDER: RGBColor = RGBColor(50, 50, 50);
 
-/// JFreeChart default pie palette — `DefaultDrawingSupplier.DEFAULT_PAINT_SEQUENCE`.
-/// Order: red, blue, green — JFreeChart cycles R,B,G (not R,G,B).
-const PIE_COLOR_0: RGBColor = RGBColor(255, 85, 85); // 0xFF5555 — red (Exonic / Known)
-const PIE_COLOR_1: RGBColor = RGBColor(85, 85, 255); // 0x5555FF — blue (Intronic / Partly known)
-const PIE_COLOR_2: RGBColor = RGBColor(85, 255, 85); // 0x55FF55 — green (Intergenic / Novel)
+/// Qualimap pie palette — sampled from actual Qualimap output PNGs.
+const PIE_COLOR_0: RGBColor = RGBColor(0xEC, 0x62, 0x5C); // #EC625C — red (Exonic / Known)
+const PIE_COLOR_1: RGBColor = RGBColor(0x55, 0x55, 0xF6); // #5555F6 — blue (Intronic / Partly known)
+const PIE_COLOR_2: RGBColor = RGBColor(0x8A, 0xFC, 0x6E); // #8AFC6E — green (Intergenic / Novel)
 
-/// Pie chart shadow color: gray with 50% transparency.
-const PIE_SHADOW_COLOR: RGBColor = RGBColor(160, 160, 160);
+/// Pie chart shadow color: gray rgb(128, 128, 128).
+const PIE_SHADOW_COLOR: RGBColor = RGBColor(0x80, 0x80, 0x80);
 
 /// Pie label background: light yellow.
 const PIE_LABEL_BG: RGBColor = RGBColor(255, 255, 204);
@@ -120,17 +120,18 @@ where
     // Round up to a nice number for the Y-axis ceiling
     let y_ceil = nice_ceil(y_max);
 
-    // Draw title and subtitle manually (JFreeChart style: bold title + plain subtitle)
-    let title_font = ("sans-serif", ps(18.0) as f64)
+    // Draw title and subtitle — sizes scaled up to match Qualimap visual appearance.
+    // Plotters' sans-serif renders smaller than Java's SansSerif at the same pt size.
+    let title_font = ("sans-serif", ps(24.0) as f64)
         .into_font()
         .style(FontStyle::Bold)
         .color(&TITLE_COLOR);
-    let subtitle_font = ("sans-serif", ps(12.0) as f64)
+    let subtitle_font = ("sans-serif", ps(16.0) as f64)
         .into_font()
         .color(&TITLE_COLOR);
 
-    let title_y = ps(12.0) as i32;
-    let subtitle_y = title_y + ps(22.0) as i32;
+    let title_y = ps(10.0) as i32;
+    let subtitle_y = title_y + ps(28.0) as i32;
 
     // Center title
     let (w, _h) = root.dim_in_pixel();
@@ -138,7 +139,7 @@ where
         title,
         &title_font.into_text_style(root),
         (
-            (w as i32 - estimate_text_width(title, ps(18.0) as f64) as i32) / 2,
+            (w as i32 - estimate_text_width(title, ps(24.0) as f64) as i32) / 2,
             title_y,
         ),
     )
@@ -149,14 +150,14 @@ where
         sample_name,
         &subtitle_font.into_text_style(root),
         (
-            (w as i32 - estimate_text_width(sample_name, ps(12.0) as f64) as i32) / 2,
+            (w as i32 - estimate_text_width(sample_name, ps(16.0) as f64) as i32) / 2,
             subtitle_y,
         ),
     )
     .map_err(|e| anyhow::anyhow!("{}", e))?;
 
     // Create chart area below title region
-    let chart_top = ps(50.0);
+    let chart_top = ps(55.0);
     let chart_area = root.clone().margin(chart_top, ps(20.0), ps(20.0), ps(20.0));
 
     let mut chart = ChartBuilder::on(&chart_area)
@@ -171,21 +172,21 @@ where
         .fill(&PLOT_BG)
         .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-    // Configure mesh to match JFreeChart gridline style.
-    // Qualimap has X-axis ticks every 5 units (0, 5, 10, ..., 100).
+    // Configure mesh to match Qualimap gridline style.
+    // Qualimap has gridlines every 5 units on X (0, 5, 10, ..., 100).
     chart
         .configure_mesh()
         .x_desc("Transcript position")
         .y_desc("Counts")
         .x_labels(21) // 0, 5, 10, ..., 100 = 21 labels
-        .label_style(("sans-serif", ps(10.0) as f64).into_font().color(&BLACK))
-        .axis_desc_style(("sans-serif", ps(11.0) as f64).into_font().color(&BLACK))
+        .label_style(("sans-serif", ps(15.0) as f64).into_font().color(&BLACK))
+        .axis_desc_style(("sans-serif", ps(16.0) as f64).into_font().color(&BLACK))
         .x_label_formatter(&|v| format!("{}", *v as i32))
         .y_label_formatter(&|v| format_y_label(*v))
-        .axis_style(BLACK.stroke_width(ps(1.0)))
-        .light_line_style(GRIDLINE_COLOR.mix(0.4).stroke_width(1))
-        .bold_line_style(GRIDLINE_COLOR.mix(0.7).stroke_width(1))
-        .set_all_tick_mark_size(ps(3.0))
+        .axis_style(BLACK.stroke_width(1))
+        .light_line_style(GRIDLINE_COLOR.mix(0.0)) // hide intermediate gridlines
+        .bold_line_style(GRIDLINE_COLOR.stroke_width(1))
+        .set_all_tick_mark_size(ps(4.0))
         .draw()
         .map_err(|e| anyhow::anyhow!("{}", e))?;
 
@@ -259,23 +260,23 @@ where
     let y_ceil = nice_ceil(y_max);
 
     let title = "Coverage Histogram (0-50X)";
-    let title_font = ("sans-serif", ps(18.0) as f64)
+    let title_font = ("sans-serif", ps(24.0) as f64)
         .into_font()
         .style(FontStyle::Bold)
         .color(&TITLE_COLOR);
-    let subtitle_font = ("sans-serif", ps(12.0) as f64)
+    let subtitle_font = ("sans-serif", ps(16.0) as f64)
         .into_font()
         .color(&TITLE_COLOR);
 
     let (w, _h) = root.dim_in_pixel();
-    let title_y = ps(12.0) as i32;
-    let subtitle_y = title_y + ps(22.0) as i32;
+    let title_y = ps(10.0) as i32;
+    let subtitle_y = title_y + ps(28.0) as i32;
 
     root.draw_text(
         title,
         &title_font.into_text_style(root),
         (
-            (w as i32 - estimate_text_width(title, ps(18.0) as f64) as i32) / 2,
+            (w as i32 - estimate_text_width(title, ps(24.0) as f64) as i32) / 2,
             title_y,
         ),
     )
@@ -285,13 +286,13 @@ where
         sample_name,
         &subtitle_font.into_text_style(root),
         (
-            (w as i32 - estimate_text_width(sample_name, ps(12.0) as f64) as i32) / 2,
+            (w as i32 - estimate_text_width(sample_name, ps(16.0) as f64) as i32) / 2,
             subtitle_y,
         ),
     )
     .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-    let chart_area = root.clone().margin(ps(50.0), ps(20.0), ps(20.0), ps(20.0));
+    let chart_area = root.clone().margin(ps(55.0), ps(20.0), ps(20.0), ps(20.0));
 
     let mut chart = ChartBuilder::on(&chart_area)
         .x_label_area_size(ps(40.0))
@@ -305,14 +306,14 @@ where
         .fill(&PLOT_BG)
         .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-    // Qualimap shows a label for every integer 0..50
+    // Qualimap shows gridlines every 5 units on X-axis (0, 5, 10, ..., 50)
     chart
         .configure_mesh()
         .x_desc("Coverage (X)")
         .y_desc("Number of transcripts")
-        .x_labels(52) // 0, 1, 2, ..., 50 + margins = 52 labels
-        .label_style(("sans-serif", ps(8.0) as f64).into_font().color(&BLACK))
-        .axis_desc_style(("sans-serif", ps(11.0) as f64).into_font().color(&BLACK))
+        .x_labels(11) // 0, 5, 10, ..., 50
+        .label_style(("sans-serif", ps(15.0) as f64).into_font().color(&BLACK))
+        .axis_desc_style(("sans-serif", ps(16.0) as f64).into_font().color(&BLACK))
         .x_label_formatter(&|v| {
             let iv = v.round() as i32;
             if (0..=50).contains(&iv) && (v - iv as f64).abs() < 0.01 {
@@ -322,10 +323,10 @@ where
             }
         })
         .y_label_formatter(&|v| format_y_label(*v))
-        .axis_style(BLACK.stroke_width(ps(1.0)))
-        .light_line_style(GRIDLINE_COLOR.mix(0.4).stroke_width(1))
-        .bold_line_style(GRIDLINE_COLOR.mix(0.7).stroke_width(1))
-        .set_all_tick_mark_size(ps(3.0))
+        .axis_style(BLACK.stroke_width(1))
+        .light_line_style(GRIDLINE_COLOR.mix(0.0)) // hide intermediate gridlines
+        .bold_line_style(GRIDLINE_COLOR.stroke_width(1))
+        .set_all_tick_mark_size(ps(4.0))
         .draw()
         .map_err(|e| anyhow::anyhow!("{}", e))?;
 
@@ -507,23 +508,23 @@ where
     let w = w as i32;
     let h = h as i32;
 
-    // Draw title and subtitle
-    let title_font = ("sans-serif", ps(18.0) as f64)
+    // Draw title and subtitle — font sizes matched to Qualimap reference
+    let title_font = ("sans-serif", ps(24.0) as f64)
         .into_font()
         .style(FontStyle::Bold)
         .color(&TITLE_COLOR);
-    let subtitle_font = ("sans-serif", ps(12.0) as f64)
+    let subtitle_font = ("sans-serif", ps(16.0) as f64)
         .into_font()
         .color(&TITLE_COLOR);
 
-    let title_y = ps(15.0);
-    let subtitle_y = title_y + ps(22.0);
+    let title_y = ps(12.0);
+    let subtitle_y = title_y + ps(28.0);
 
     root.draw_text(
         title,
         &title_font.into_text_style(root),
         (
-            (w - estimate_text_width(title, ps(18.0) as f64) as i32) / 2,
+            (w - estimate_text_width(title, ps(24.0) as f64) as i32) / 2,
             title_y,
         ),
     )
@@ -533,19 +534,63 @@ where
         sample_name,
         &subtitle_font.into_text_style(root),
         (
-            (w - estimate_text_width(sample_name, ps(12.0) as f64) as i32) / 2,
+            (w - estimate_text_width(sample_name, ps(16.0) as f64) as i32) / 2,
             subtitle_y,
         ),
     )
     .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-    // Qualimap pie charts have no white inner plot area — gray background extends everywhere.
-    // Compute pie geometry — leave room for labels outside the pie.
+    // Qualimap draws a plot frame: E6E6E6 filled rectangle with 1px black inner border,
+    // then the white pie area sits inside it.
+    let frame_margin = ps(8.0);
+    let frame_top = subtitle_y + ps(12.0);
+    let frame_bottom = h - frame_margin;
+    let frame_left = frame_margin;
+    let frame_right = w - frame_margin;
+
+    // E6E6E6 plot frame background
+    root.draw(&Rectangle::new(
+        [(frame_left, frame_top), (frame_right, frame_bottom)],
+        ShapeStyle {
+            color: CHART_BG.to_rgba(),
+            filled: true,
+            stroke_width: 0,
+        },
+    ))
+    .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+    // White interior
+    let inner_pad = ps(1.0);
+    root.draw(&Rectangle::new(
+        [
+            (frame_left + inner_pad, frame_top + inner_pad),
+            (frame_right - inner_pad, frame_bottom - inner_pad),
+        ],
+        ShapeStyle {
+            color: PLOT_BG.to_rgba(),
+            filled: true,
+            stroke_width: 0,
+        },
+    ))
+    .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+    // 1px black border around frame
+    root.draw(&Rectangle::new(
+        [(frame_left, frame_top), (frame_right, frame_bottom)],
+        ShapeStyle {
+            color: BLACK.to_rgba(),
+            filled: false,
+            stroke_width: 1,
+        },
+    ))
+    .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+    // Compute pie geometry within the white interior
     let plot_margin = ps(30.0);
-    let plot_top = subtitle_y + ps(20.0);
-    let plot_w = w - 2 * plot_margin;
-    let plot_h = h - plot_top - plot_margin;
-    let cx = plot_margin + plot_w / 2;
+    let plot_top = frame_top + ps(10.0);
+    let plot_w = frame_right - frame_left - 2 * plot_margin;
+    let plot_h = frame_bottom - plot_top - plot_margin;
+    let cx = frame_left + (frame_right - frame_left) / 2;
     let cy = plot_top + plot_h / 2;
     let radius = (plot_w.min(plot_h) as f64 * 0.38) as i32;
 
@@ -604,27 +649,9 @@ where
         }
         points.push((cx, cy));
 
-        // Filled slice
-        root.draw(&Polygon::new(
-            points.clone(),
-            ShapeStyle {
-                color: slice.color.to_rgba(),
-                filled: true,
-                stroke_width: 0,
-            },
-        ))
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
-
-        // Slice outline — JFreeChart draws per-slice outlines in gray
-        root.draw(&Polygon::new(
-            points,
-            ShapeStyle {
-                color: RGBColor(128, 128, 128).mix(0.6),
-                filled: false,
-                stroke_width: 1,
-            },
-        ))
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
+        // Filled slice — fully opaque
+        root.draw(&Polygon::new(points, slice.color.filled()))
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
         // Store label info
         let mid_angle = start_angle - sweep / 2.0;
@@ -660,11 +687,11 @@ where
         ))
         .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        // Label box dimensions
-        let font_size = ps(10.0) as f64;
+        // Label box dimensions — tighter padding to match JFreeChart
+        let font_size = ps(14.0) as f64;
         let text_w = estimate_text_width(label_text, font_size) as i32;
         let text_h = ps(14.0);
-        let pad_x = ps(4.0);
+        let pad_x = ps(3.0);
         let pad_y = ps(2.0);
 
         // Position label box: extend outward from pie center
