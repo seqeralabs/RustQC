@@ -34,10 +34,11 @@ to GRCh38 (63,086 genes).
 | samtools idxstats | <1s | -- |
 | samtools stats | ~5m | -- |
 | preseq lc_extrap | ~3m | -- |
+| samtools sort -n (for Qualimap) | ~5-10m | -- |
 | Qualimap rnaseq | ~10m | -- |
 | Biotype summaries | Additional scripting | -- |
 | **All outputs, single pass** | -- | **~5m** |
-| **Total** | **~2h 5m** | **~5m** |
+| **Total** | **~2h 15m** | **~5m** |
 
 RustQC produces all outputs -- dupRadar duplication matrix, model fit, plots,
 featureCounts-compatible counts, assignment summary, biotype counts, all 7
@@ -72,10 +73,12 @@ Every output file produced by RustQC matches the original tools:
 - **stats** core SN metrics (read counts, lengths, duplicates) match samtools stats
 - **preseq** extrapolation curve within <0.1% of preseq v3.2.0 across entire range
 - **RSeQC tools** all values match Python RSeQC (see [RSeQC benchmark](rseqc/))
+- **Qualimap** all read counts, genomic origin percentages, and coverage bias metrics
+  match Qualimap Java 2.3 exactly (see [Qualimap benchmark](qualimap/))
 
 See the individual benchmark pages for detailed per-tool comparisons:
 [dupRadar](dupradar/), [featureCounts](featurecounts/), [RSeQC](rseqc/),
-[preseq](preseq/), [Samtools](samtools/).
+[preseq](preseq/), [Samtools](samtools/), [Qualimap](qualimap/).
 
 ## Benchmark conditions
 
