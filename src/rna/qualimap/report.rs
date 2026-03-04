@@ -547,8 +547,8 @@ fn write_image_sections(html: &mut String, data: &ReportData) {
         html.push_str("</div>\n");
     }
 
-    // Junction Analysis — only if data exists
-    if data.junction_counts.is_some() {
+    // Junction Analysis — only if non-zero junction counts exist
+    if data.junction_counts.is_some_and(|(k, p, n)| k + p + n > 0) {
         html.push_str("<div class=\"section\">\n");
         html.push_str(
             "<h2>Junction Analysis<a class=\"headerlink\" name=\"Junction Analysis\">&nbsp;</a></h2>\n",
@@ -595,7 +595,7 @@ fn write_sidebar(html: &mut String, data: &ReportData) {
         ));
     }
 
-    if data.junction_counts.is_some() {
+    if data.junction_counts.is_some_and(|(k, p, n)| k + p + n > 0) {
         html.push_str(
             "<li class=\"toctree-l1\"><a href=\"#Junction Analysis\">Junction Analysis</a></li>\n",
         );

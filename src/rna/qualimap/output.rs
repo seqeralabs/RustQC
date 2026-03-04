@@ -480,15 +480,17 @@ pub fn write_qualimap_results(
         &images_dir.join("Reads Genomic Origin.png"),
     )?;
 
-    // Junction Analysis pie chart (optional — requires RSeQC junction annotation data)
+    // Junction Analysis pie chart (optional — requires non-zero junction counts)
     if let Some((known, partly_known, novel)) = junction_counts {
-        plots::junction_analysis_plot(
-            known,
-            partly_known,
-            novel,
-            sample_name,
-            &images_dir.join("Junction Analysis.png"),
-        )?;
+        if known + partly_known + novel > 0 {
+            plots::junction_analysis_plot(
+                known,
+                partly_known,
+                novel,
+                sample_name,
+                &images_dir.join("Junction Analysis.png"),
+            )?;
+        }
     }
 
     info!("Wrote Qualimap plots to {}", images_dir.display());
