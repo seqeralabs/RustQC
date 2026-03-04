@@ -9,4 +9,4 @@
 #         min: 0
 #         format: '{:.2f}'
 Sample	dupRadar_intercept
-GM12878_REP1.markdup.sorted	0.8245216334168248
+GM12878_REP1.markdup.sorted	0.7419969763829039

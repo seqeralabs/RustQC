@@ -1,9 +1,9 @@
-Total read pairs: 9840640
+Total read pairs: 8000000
 Different chromosome: 0
-Different transcript: 2870259
-Same exon (mRNA distance): 928097
-Different exon (mRNA distance): 338053
-Non-exonic (genomic distance): 4720173
+Different transcript: 2313116
+Same exon (mRNA distance): 607516
+Different exon (mRNA distance): 260579
+Non-exonic (genomic distance): 4009786
 Unknown chromosome: 0
-Read pair overlap: 984058
-Mean inner distance: 28.22
+Read pair overlap: 809003
+Mean inner distance: 28.29
