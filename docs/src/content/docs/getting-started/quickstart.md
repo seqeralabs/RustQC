@@ -49,13 +49,14 @@ will find in the output directory:
 | `samtools/sample.markdup.idxstats` | samtools idxstats-compatible output |
 | `samtools/sample.markdup.stats` | samtools stats SN-compatible output |
 | `preseq/sample.markdup.lc_extrap.txt` | Library complexity extrapolation |
-| `qualimap/rnaseq_qc_results.txt` | Qualimap-compatible QC summary |
+| `qualimap/rnaseq_qc_results.txt` | Qualimap-compatible QC report (bias, read origin, SSP) |
+| `qualimap/raw_data_qualimapReport/coverage_profile_along_genes_(total).txt` | Gene body coverage profile |
 
 Plus SVG versions of all plots, biotype count tables, and MultiQC-compatible
 report files. Use `--flat-output` to write all files directly to the output
 directory without subdirectories.
 
-See [dupRadar Outputs](/outputs/dupradar/), [featureCounts Outputs](/outputs/featurecounts/), [RSeQC Outputs](/outputs/rseqc/), [Preseq Outputs](/outputs/preseq/), [Samtools Outputs](/outputs/samtools/), and [TIN & Gene Body Coverage](/outputs/tin/) for full details.
+See [dupRadar Outputs](/outputs/dupradar/), [featureCounts Outputs](/outputs/featurecounts/), [RSeQC Outputs](/outputs/rseqc/), [TIN](/outputs/tin/), [Qualimap](/outputs/qualimap/), [Preseq Outputs](/outputs/preseq/), and [Samtools Outputs](/outputs/samtools/) for full details.
 
 ## RSeQC quality control tools
 

@@ -219,27 +219,14 @@ provides a cleaner summary with one score per gene.
 
 ## Gene body coverage (Qualimap)
 
-RustQC produces Qualimap-compatible gene body coverage output, including:
-- A 100-bin coverage profile along normalized gene body positions (5' to 3')
-- A Qualimap `rnaseq_qc_results.txt` file parseable by MultiQC
-
-### Coverage bias metrics
-
-| Metric | Value |
-| --- | --- |
-| 5' bias | 1.20 |
-| 3' bias | 0.92 |
-| 5'-3' bias | 1.24 |
-
-These metrics help identify degradation patterns — a 5'-3' bias significantly
-above 1.0 may indicate RNA degradation, while values near 1.0 indicate
-uniform coverage.
+See the dedicated [Qualimap Benchmark](/benchmarks/qualimap/) page for gene
+body coverage profiling, bias metrics, and Qualimap-compatible output comparison.
 
 ## Benchmark conditions
 
 - **BAM file**: GM12878 ENCODE RNA-Seq, paired-end, ~185M reads, 10 GB
 - **Annotation**: Ensembl BED12 gene model (same file used by both RSeQC and RustQC);
-  Ensembl GTF used for TIN and gene body coverage (require gene-level annotation)
+  Ensembl GTF used for TIN and Qualimap (require gene-level annotation)
 - **RSeQC version**: 5.0.4 (run via Docker on Apple M3 Max with Rosetta x86 emulation)
-- **RustQC**: 10 threads, `--gtf` mode for TIN/genebody, `--bed` mode for RSeQC tools
+- **RustQC**: 10 threads, `--gtf` mode for TIN/Qualimap, `--bed` mode for RSeQC tools
 - **Hardware**: Apple M3 Max, 128 GB RAM

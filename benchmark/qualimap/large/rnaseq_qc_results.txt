@@ -3,10 +3,10 @@ RNA-Seq QC report
 
 >>>>>>> Input
 
-    bam file = /data/input/large/GM12878_REP1.markdup.sorted.bam
-    gff file = /data/input/large/genes.nochr.gtf
+    bam file = /data/GM12878_REP1.namesorted.bam
+    gff file = /data/genes.filtered.gtf
     counting algorithm = uniquely-mapped-reads
-    protocol = non-strand-specific
+    protocol = strand-specific-reverse
     5'-3' bias region size = 100
     5'-3' bias number of top transcripts = 1000
 
@@ -18,26 +18,25 @@ RNA-Seq QC report
     total alignments = 185,718,543
     secondary alignments = 10,620,822
     non-unique alignments = 17,723,193
-    aligned to genes  = 15,615,099
-    ambiguous alignments = 332,227
-    no feature assigned = 152,048,024
+    aligned to genes  = 126,404,800
+    ambiguous alignments = 2,552,785
+    no feature assigned = 39,037,765
     not aligned = 0
-    SSP estimation (fwd/rev) = 0.28 / 0.72
 
 
 >>>>>>> Reads genomic origin
 
-    exonic =  15,615,099 (9.31%)
-    intronic = 105,144,042 (62.71%)
-    intergenic = 46,903,982 (27.98%)
-    overlapping exon = 6,951,294 (4.15%)
+    exonic =  126,404,800 (76.4%)
+    intronic = 30,407,985 (18.38%)
+    intergenic = 8,629,780 (5.22%)
+    overlapping exon = 6,853,516 (4.14%)
 
 
 >>>>>>> Transcript coverage profile
 
-    5' bias = 0.31
-    3' bias = 0.22
-    5'-3' bias = 1.47
+    5' bias = 0.87
+    3' bias = 0.78
+    5'-3' bias = 1.11
 
 
 >>>>>>> Junction analysis

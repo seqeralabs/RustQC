@@ -1,0 +1,226 @@
+---
+title: Qualimap Outputs
+description: Output files produced by RustQC's Qualimap rnaseq-compatible RNA-Seq quality control analysis.
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+
+## What is Qualimap?
+
+[Qualimap](http://qualimap.conesalab.org/) is a platform-independent application
+for quality control of sequencing alignment data. RustQC reimplements the
+**rnaseq mode** of Qualimap, producing identical output that is directly parseable
+by [MultiQC](https://multiqc.info/).
+
+The Qualimap analysis runs automatically as part of `rustqc rna` in the same
+single-pass BAM scan as all other analyses -- at negligible additional cost.
+
+### What it provides
+
+RustQC's Qualimap module computes:
+
+- **Gene body coverage profiles** -- coverage distribution along normalized
+  transcript positions from 5' to 3', revealing systematic biases such as 3'
+  degradation or incomplete reverse transcription
+- **5'/3' bias metrics** -- quantitative measures of coverage uniformity across
+  gene bodies, used for sample QC and batch-effect detection
+- **Read origin classification** -- counts reads as exonic, intronic, intergenic,
+  or overlapping multiple genes' exons
+- **Strand-specificity estimation** -- validates whether the observed strand
+  distribution matches the expected library protocol
+- **Splice junction motif analysis** -- counts canonical and non-canonical
+  donor/acceptor junction motifs across all uniquely-mapped reads
+- **Alignment statistics** -- primary/secondary alignments, multi-mappers,
+  proper pairs, and supplementary read counts
+
+:::note
+Qualimap analyses only run in GTF mode (`--gtf`). They are skipped when using
+`--bed` because the merged exon models, transcript structure, and biotype
+information needed for coverage profiling and read origin classification are
+only available from GTF annotations.
+:::
+
+## Output files
+
+All Qualimap output files are written to a `qualimap/` subdirectory under the
+output directory, matching the directory structure that MultiQC expects.
+
+<FileTree>
+- qualimap/
+  - rnaseq_qc_results.txt Qualimap-compatible QC report
+  - raw_data_qualimapReport/
+    - coverage_profile_along_genes_(total).txt Coverage profile -- all genes
+    - coverage_profile_along_genes_(high).txt Coverage profile -- highly expressed genes
+    - coverage_profile_along_genes_(low).txt Coverage profile -- lowly expressed genes
+</FileTree>
+
+### QC results
+
+**File:** `rnaseq_qc_results.txt`
+
+The main QC report, formatted identically to Qualimap's rnaseq output. This
+file is the primary input for MultiQC's Qualimap rnaseq module. It contains
+four sections:
+
+#### Input
+
+```
+>>>>>>> Input
+     bam file = sample
+```
+
+#### Reads alignment
+
+Alignment-level statistics for all primary reads:
+
+```
+>>>>>>> Reads alignment
+     reads aligned (left/right) = 87,559,392 / 87,538,329
+     read pairs aligned = 87,420,177
+     total alignments = 185,718,543
+     secondary alignments = 10,620,822
+     non-unique alignments = 17,723,193
+     aligned to genes = 126,404,800
+     ambiguous alignments = 2,552,785
+     no feature assigned = 39,037,765
+     not aligned = 0
+     SSP estimation (fwd/rev) = 0.04 / 0.96
+```
+
+| Field | Description |
+|-------|-------------|
+| reads aligned | Total primary alignments (excluding secondary, supplementary, QC-fail) |
+| total alignments | All mapped reads (primary + secondary) |
+| secondary alignments | Alignments flagged as secondary (0x100) |
+| non-unique alignments | Multi-mappers (NH tag > 1) |
+| aligned to genes | Reads assigned to exactly one gene (exonic) |
+| ambiguous alignments | Reads enclosed by multiple genes |
+| no feature assigned | Reads with no enclosing gene annotation |
+| not aligned | Unmapped reads encountered in the BAM |
+| SSP estimation | Strand-specificity proportions (forward / reverse) |
+
+#### Reads genomic origin
+
+Per-base classification of read origin, counting each read's aligned bases
+against the annotation:
+
+```
+>>>>>>> Reads genomic origin
+     exonic = 126,404,800 (76.4%)
+     intronic = 30,407,985 (18.38%)
+     intergenic = 8,629,780 (5.22%)
+     overlapping exon = 6,853,516 (4.14%)
+```
+
+| Field | Description |
+|-------|-------------|
+| exonic | Reads fully enclosed by a single gene's exons |
+| intronic | Reads overlapping introns but not exons |
+| intergenic | Reads in regions with no gene annotation |
+| overlapping exon | Reads partially overlapping exons (not fully enclosed) |
+
+#### Transcript coverage profile
+
+Coverage bias metrics computed from the gene body coverage profile:
+
+```
+>>>>>>> Transcript coverage profile
+     5' bias = 0.87
+     3' bias = 0.78
+     5'-3' bias = 1.11
+```
+
+| Metric | Description |
+|--------|-------------|
+| 5' bias | Ratio of median coverage in the 5' region (first 100bp) to the median of the middle 80% |
+| 3' bias | Ratio of median coverage in the 3' region (last 100bp) to the median of the middle 80% |
+| 5'-3' bias | Ratio of 5' median to 3' median |
+
+Bias values close to 1.0 indicate uniform coverage. Values significantly above
+1.0 for 5' bias or below 1.0 for 3' bias suggest degradation or protocol issues.
+
+### Coverage profiles
+
+**Files:** `coverage_profile_along_genes_(total|high|low).txt`
+
+Tab-separated files with 100 rows, one per percentile bin (0-99), showing the
+normalized coverage depth at each position along the gene body:
+
+| Column | Description |
+|--------|-------------|
+| Position | Percentile position along gene body (0.0 to 99.0) |
+| Coverage | Normalized coverage depth at this position |
+
+Three tiers are produced:
+
+| Tier | File | Description |
+|------|------|-------------|
+| Total | `coverage_profile_along_genes_(total).txt` | All expressed genes |
+| High | `coverage_profile_along_genes_(high).txt` | Top 500 genes by mean coverage |
+| Low | `coverage_profile_along_genes_(low).txt` | Bottom 500 genes by mean coverage |
+
+The **total** profile is the one parsed by MultiQC for the gene body coverage
+plot.
+
+## Interpreting results
+
+### Gene body coverage shape
+
+| Pattern | Interpretation |
+|---------|---------------|
+| Flat/uniform | Good library quality -- even coverage across transcripts |
+| 3' bias (rising right) | RNA degradation or oligo-dT priming bias |
+| 5' bias (rising left) | Incomplete reverse transcription or random-priming protocol |
+| Both-end dropout | Short fragment library or size-selection issue |
+
+### Bias metrics
+
+| Metric | Good | Problematic |
+|--------|------|-------------|
+| 5'-3' bias | 0.8 -- 1.2 | < 0.5 or > 2.0 |
+| 5' bias | 0.8 -- 1.2 | > 2.0 (enrichment) or < 0.5 (depletion) |
+| 3' bias | 0.8 -- 1.2 | > 2.0 (enrichment) or < 0.5 (depletion) |
+
+### Strand specificity
+
+For strand-specific libraries, one of the SSP values should be close to 1.0
+and the other close to 0.0. Common patterns:
+
+| Library type | Expected fwd | Expected rev |
+|-------------|-------------|-------------|
+| Unstranded | ~0.5 | ~0.5 |
+| dUTP / Illumina TruSeq Stranded | ~0.02-0.05 | ~0.95-0.98 |
+| Ligation (e.g. SMARTer) | ~0.95-0.98 | ~0.02-0.05 |
+
+## Configuration
+
+### YAML configuration
+
+```yaml
+qualimap:
+  enabled: true    # Whether to run the Qualimap analysis
+```
+
+When Qualimap is enabled (the default), the analysis runs in the same BAM pass
+as dupRadar, featureCounts, and all other tools. The only additional requirement
+is a GTF annotation file (`--gtf`).
+
+## Compatibility with Qualimap
+
+The output files are designed for direct parsing by MultiQC's Qualimap rnaseq
+module. The directory structure (`qualimap/raw_data_qualimapReport/`) and file
+formats match Qualimap's output. Key differences from the Java implementation:
+
+- **Single-pass**: RustQC computes Qualimap metrics alongside all other analyses
+  in one BAM scan, whereas the original requires a separate dedicated run
+- **Merged exon model**: RustQC uses the same exon-merging strategy as Qualimap
+  (Picard Gene.Transcript model) for accurate non-redundant coverage
+- **Multi-threading**: Coverage is accumulated per chromosome in parallel and
+  merged, producing identical results to the original's single-threaded approach
+
+## References
+
+- **Qualimap:** Garcia-Alcalde F, Okonechnikov K, Carbonell J, et al. Qualimap:
+  evaluating next-generation sequencing alignment data. *Bioinformatics*.
+  2012;28(20):2678-2679.
+  [Qualimap website](http://qualimap.conesalab.org/)

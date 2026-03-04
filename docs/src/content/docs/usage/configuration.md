@@ -301,15 +301,29 @@ tin:
 Requires annotation (`--gtf` or `--bed`). The TIN (Transcript Integrity Number)
 measures transcript integrity via Shannon entropy of read coverage uniformity.
 
+### qualimap
+
+```yaml
+qualimap:
+  enabled: true    # Set to false to skip Qualimap RNA-Seq QC analysis
+```
+
+Requires annotation (`--gtf` only). Runs the Qualimap RNA-Seq QC analysis:
+gene body coverage profiling (100 percentile bins, 5'→3'), 5'/3' bias metrics,
+read origin classification (exonic/intronic/intergenic), strand-specificity
+estimation, and splice junction motif counting. Produces Qualimap-compatible
+output files parseable by MultiQC.
+
 ### genebody_coverage
 
 ```yaml
 genebody_coverage:
-  enabled: true    # Set to false to skip gene body coverage
+  enabled: true    # Legacy toggle for the older gene body coverage module
 ```
 
-Requires annotation (`--gtf` only). Computes coverage profiles along transcript
-bodies (100 percentile bins, 5'->3') and produces Qualimap-compatible output.
+Requires annotation (`--gtf` only). This is a legacy config key for the
+original gene body coverage implementation. The `qualimap:` section above
+controls the current Qualimap-compatible gene body coverage analysis.
 
 ### preseq
 

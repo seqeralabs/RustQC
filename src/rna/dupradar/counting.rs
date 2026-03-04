@@ -11,6 +11,7 @@
 
 use crate::gtf::Gene;
 use crate::rna::genebody::GenebodyCoverageAccum;
+use crate::rna::qualimap::QualimapAccum;
 use crate::rna::rseqc::accumulators::{RseqcAccumulators, RseqcAnnotations, RseqcConfig};
 use anyhow::{Context, Result};
 use coitrees::{COITree, Interval, IntervalTree};
@@ -355,7 +356,11 @@ pub struct CountResult {
     /// Accumulated RSeQC tool results, if RSeQC tools were enabled
     pub rseqc: Option<RseqcAccumulators>,
     /// Gene body coverage results (Qualimap-compatible).
+    #[allow(dead_code)]
     pub genebody: Option<crate::rna::genebody::GenebodyCoverageResult>,
+    /// Qualimap RNA-Seq QC results (if enabled).
+    #[allow(dead_code)]
+    pub qualimap: Option<crate::rna::qualimap::QualimapResult>,
 }
 
 /// Metadata stored with each interval in the cache-oblivious interval tree.
@@ -582,6 +587,8 @@ struct ChromResult {
     fc_unmapped: u64,
     /// Gene body coverage accumulator (if enabled).
     genebody: Option<GenebodyCoverageAccum>,
+    /// Qualimap RNA-Seq QC accumulator (if enabled).
+    qualimap: Option<QualimapAccum>,
 }
 
 impl ChromResult {
@@ -608,6 +615,7 @@ impl ChromResult {
             fc_multimapping: 0,
             fc_unmapped: 0,
             genebody: None,
+            qualimap: None,
         }
     }
 
@@ -645,6 +653,14 @@ impl ChromResult {
                 self_gb.merge(&other_gb);
             } else {
                 self.genebody = Some(other_gb);
+            }
+        }
+        // Merge Qualimap accumulator
+        if let Some(other_qm) = other.qualimap {
+            if let Some(ref mut self_qm) = self.qualimap {
+                self_qm.merge(other_qm);
+            } else {
+                self.qualimap = Some(other_qm);
             }
         }
     }
@@ -697,10 +713,14 @@ fn process_chromosome_batch(
     rseqc_annotations: Option<&RseqcAnnotations>,
     htslib_threads: usize,
     genebody_position_map: Option<&crate::rna::genebody::TranscriptPositionMap>,
+    qualimap_index: Option<&crate::rna::qualimap::QualimapIndex>,
 ) -> Result<(ChromResult, Option<RseqcAccumulators>)> {
     let mut result = ChromResult::new(num_genes);
     if genebody_position_map.is_some() {
         result.genebody = Some(crate::rna::genebody::GenebodyCoverageAccum::new());
+    }
+    if qualimap_index.is_some() {
+        result.qualimap = Some(crate::rna::qualimap::QualimapAccum::new(stranded));
     }
     let mut rseqc_accums = rseqc_config.map(|cfg| RseqcAccumulators::new(cfg, rseqc_annotations));
 
@@ -790,6 +810,17 @@ fn process_chromosome_batch(
                         ("", "")
                     };
                 accums.process_read(&record, chrom, chrom_upper, annots, cfg);
+            }
+
+            // --- Qualimap per-read dispatch (before counting filters) ---
+            // Qualimap accumulator handles its own filtering (unmapped, secondary,
+            // QC-fail, supplementary, NH>1) and uses enclosure-based gene assignment.
+            if let Some(ref mut qm) = result.qualimap {
+                let tid = record.tid();
+                if tid >= 0 && (tid as usize) < tid_to_gtf_chrom.len() {
+                    let qm_chrom = &tid_to_gtf_chrom[tid as usize];
+                    qm.process_read(&record, qm_chrom, qualimap_index.unwrap());
+                }
             }
 
             let flags = record.flags();
@@ -885,12 +916,12 @@ fn process_chromosome_batch(
                 if gene_hits.is_empty() {
                     result.stat_no_features += 1;
                     if let Some(ref mut gb) = result.genebody {
-                        gb.record_no_feature(&aligned_blocks_buf);
+                        gb.record_no_feature(&aligned_blocks_buf, 1);
                     }
                 } else if gene_hits.len() > 1 {
                     result.stat_ambiguous += 1;
                     if let Some(ref mut gb) = result.genebody {
-                        gb.record_ambiguous();
+                        gb.record_ambiguous(1);
                     }
                 } else if assign_fragment_to_gene(
                     &gene_hits,
@@ -902,7 +933,7 @@ fn process_chromosome_batch(
                     if let (Some(ref mut gb), Some(pos_map)) =
                         (&mut result.genebody, genebody_position_map)
                     {
-                        gb.record_coverage(gene_hits[0] as usize, &aligned_blocks_buf, pos_map);
+                        gb.record_coverage(gene_hits[0] as usize, &aligned_blocks_buf, pos_map, 1);
                     }
                 }
                 continue;
@@ -948,36 +979,33 @@ fn process_chromosome_batch(
                     result.n_unique_nodup += 1;
                 }
 
+                // Qualimap uses intersection: a gene must appear in BOTH mates' strand-filtered
+                // gene hits to be considered. If either mate has no hits the fragment is
+                // no-feature. This matches HTSeq / Qualimap behaviour for paired-end mode.
                 let combined_genes: Vec<GeneIdx> =
-                    if mate_info.gene_hits.is_empty() && gene_hits.is_empty() {
+                    if mate_info.gene_hits.is_empty() || gene_hits.is_empty() {
                         Vec::new()
                     } else {
-                        let mut scores: HashMap<GeneIdx, u8> = HashMap::new();
-                        for &g in &mate_info.gene_hits {
-                            *scores.entry(g).or_insert(0) += 1;
-                        }
-                        for &g in &gene_hits {
-                            *scores.entry(g).or_insert(0) += 1;
-                        }
-                        let max_score = scores.values().copied().max().unwrap_or(0);
-                        let mut best: Vec<GeneIdx> = scores
+                        // Intersect: keep only genes present in both mates
+                        let mut intersection: Vec<GeneIdx> = mate_info
+                            .gene_hits
                             .iter()
-                            .filter(|(_, &s)| s == max_score)
-                            .map(|(&g, _)| g)
+                            .filter(|g| gene_hits.contains(g))
+                            .copied()
                             .collect();
-                        best.sort_unstable();
-                        best
+                        intersection.sort_unstable();
+                        intersection
                     };
 
                 if combined_genes.is_empty() {
                     result.stat_no_features += 1;
                     if let Some(ref mut gb) = result.genebody {
-                        gb.record_no_feature(&aligned_blocks_buf);
+                        gb.record_no_feature(&aligned_blocks_buf, 2);
                     }
                 } else if combined_genes.len() > 1 {
                     result.stat_ambiguous += 1;
                     if let Some(ref mut gb) = result.genebody {
-                        gb.record_ambiguous();
+                        gb.record_ambiguous(2);
                     }
                 } else if assign_fragment_to_gene(
                     &combined_genes,
@@ -993,6 +1021,7 @@ fn process_chromosome_batch(
                             combined_genes[0] as usize,
                             &aligned_blocks_buf,
                             pos_map,
+                            2,
                         );
                     }
                 }
@@ -1055,6 +1084,7 @@ pub fn count_reads(
     rseqc_config: Option<&RseqcConfig>,
     rseqc_annotations: Option<&RseqcAnnotations>,
     genebody_position_map: Option<&crate::rna::genebody::TranscriptPositionMap>,
+    qualimap_index: Option<&crate::rna::qualimap::QualimapIndex>,
 ) -> Result<CountResult> {
     // Build gene ID interner for allocation-free lookups in the hot loop
     let interner = GeneIdInterner::from_genes(genes);
@@ -1167,6 +1197,7 @@ pub fn count_reads(
                         rseqc_annotations,
                         htslib_threads,
                         genebody_position_map,
+                        qualimap_index,
                     )
                 })
                 .collect()
@@ -1197,6 +1228,8 @@ pub fn count_reads(
         }
         let mut rseqc_accums: Option<RseqcAccumulators> =
             rseqc_config.map(|cfg| RseqcAccumulators::new(cfg, rseqc_annotations));
+        let mut qualimap_accum: Option<crate::rna::qualimap::QualimapAccum> =
+            qualimap_index.map(|_| crate::rna::qualimap::QualimapAccum::new(stranded));
 
         // Pre-compute resolved chromosome names for RSeQC tools
         // (apply chromosome prefix and mapping, same as parallel path)
@@ -1262,6 +1295,17 @@ pub fn count_reads(
                     ("", "")
                 };
                 accums.process_read(&record, chrom, chrom_upper, annots, cfg);
+            }
+
+            // --- Qualimap per-read dispatch (before counting filters) ---
+            // Qualimap has its own filtering (M-only CIGAR, NH>1, enclosure-based)
+            if let (Some(ref mut qm_accum), Some(qm_index)) = (&mut qualimap_accum, qualimap_index)
+            {
+                let tid = record.tid();
+                if tid >= 0 && (tid as usize) < tid_to_rseqc_chrom.len() {
+                    let chrom = &tid_to_rseqc_chrom[tid as usize];
+                    qm_accum.process_read(&record, chrom, qm_index);
+                }
             }
 
             if flags & BAM_FUNMAP != 0 {
@@ -1341,12 +1385,12 @@ pub fn count_reads(
                 if gene_hits.is_empty() {
                     result.stat_no_features += 1;
                     if let Some(ref mut gb) = result.genebody {
-                        gb.record_no_feature(&aligned_blocks_buf);
+                        gb.record_no_feature(&aligned_blocks_buf, 1);
                     }
                 } else if gene_hits.len() > 1 {
                     result.stat_ambiguous += 1;
                     if let Some(ref mut gb) = result.genebody {
-                        gb.record_ambiguous();
+                        gb.record_ambiguous(1);
                     }
                 } else if assign_fragment_to_gene(
                     &gene_hits,
@@ -1358,7 +1402,7 @@ pub fn count_reads(
                     if let (Some(ref mut gb), Some(pos_map)) =
                         (&mut result.genebody, genebody_position_map)
                     {
-                        gb.record_coverage(gene_hits[0] as usize, &aligned_blocks_buf, pos_map);
+                        gb.record_coverage(gene_hits[0] as usize, &aligned_blocks_buf, pos_map, 1);
                     }
                 }
                 continue;
@@ -1417,18 +1461,30 @@ pub fn count_reads(
                     result.n_unique_nodup += 1;
                 }
 
+                // Intersection: gene must appear in BOTH mates (Qualimap behaviour)
                 let combined_genes: Vec<GeneIdx> =
-                    merge_gene_hits(&mate_info.gene_hits, &gene_hits);
+                    if mate_info.gene_hits.is_empty() || gene_hits.is_empty() {
+                        Vec::new()
+                    } else {
+                        let mut intersection: Vec<GeneIdx> = mate_info
+                            .gene_hits
+                            .iter()
+                            .filter(|g| gene_hits.contains(g))
+                            .copied()
+                            .collect();
+                        intersection.sort_unstable();
+                        intersection
+                    };
 
                 if combined_genes.is_empty() {
                     result.stat_no_features += 1;
                     if let Some(ref mut gb) = result.genebody {
-                        gb.record_no_feature(&aligned_blocks_buf);
+                        gb.record_no_feature(&aligned_blocks_buf, 2);
                     }
                 } else if combined_genes.len() > 1 {
                     result.stat_ambiguous += 1;
                     if let Some(ref mut gb) = result.genebody {
-                        gb.record_ambiguous();
+                        gb.record_ambiguous(2);
                     }
                 } else if assign_fragment_to_gene(
                     &combined_genes,
@@ -1444,6 +1500,7 @@ pub fn count_reads(
                             combined_genes[0] as usize,
                             &aligned_blocks_buf,
                             pos_map,
+                            2,
                         );
                     }
                 }
@@ -1461,6 +1518,7 @@ pub fn count_reads(
         }
 
         result.unmatched_mates = mate_buffer;
+        result.qualimap = qualimap_accum;
         (result, rseqc_accums)
     };
 
@@ -1642,6 +1700,13 @@ pub fn count_reads(
         genebody: merged
             .genebody
             .map(|a: GenebodyCoverageAccum| a.into_result()),
+        qualimap: match (merged.qualimap, qualimap_index) {
+            (Some(mut a), Some(idx)) => {
+                a.flush_unpaired(idx);
+                Some(a.into_result(idx))
+            }
+            _ => None,
+        },
     })
 }
 

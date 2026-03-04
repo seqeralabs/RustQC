@@ -1,0 +1,105 @@
+---
+title: Qualimap Benchmarks
+description: Benchmark comparison of RustQC's Qualimap rnaseq output against the original Qualimap Java implementation.
+---
+
+## Performance
+
+RustQC's Qualimap analysis runs in the same single-pass BAM scan as all other
+tools, adding negligible overhead to the total runtime. The original Qualimap
+Java implementation requires a separate dedicated run on a **name-sorted** BAM
+file, meaning a `samtools sort -n` step is typically needed before Qualimap can
+run. RustQC works directly on coordinate-sorted BAMs (the standard output of
+most aligners), eliminating that preprocessing step entirely.
+
+| Tool | Runtime | Notes |
+|------|---------|-------|
+| `samtools sort -n` | ~5-10 min | Name-sort required by Qualimap Java (not needed by RustQC) |
+| Qualimap rnaseq (Java) | ~10 min | Separate BAM pass, single-threaded, requires name-sorted input |
+| RustQC (all tools) | ~4 min | Single pass, all analyses combined, coordinate-sorted input |
+
+In a typical pipeline, the original Qualimap workflow requires **15-20 minutes**
+(name-sort + Qualimap), while RustQC produces identical output with **zero
+additional cost** beyond its shared BAM scan.
+
+## Output comparison
+
+RustQC produces output identical to Qualimap Java across all key metrics.
+Both tools were run on the same dataset with matching parameters
+(`--stranded 2` / `strand-specific-reverse`, same GENCODE GTF).
+
+### Reads alignment
+
+| Metric | RustQC | Qualimap Java | Match? |
+|--------|--------|---------------|--------|
+| reads aligned (left/right) | 87,559,392 / 87,538,329 | 87,559,392 / 87,538,329 | ✅ |
+| read pairs aligned | 87,420,177 | 87,420,177 | ✅ |
+| total alignments | 185,718,543 | 185,718,543 | ✅ |
+| secondary alignments | 10,620,822 | 10,620,822 | ✅ |
+| non-unique alignments | 17,723,193 | 17,723,193 | ✅ |
+| aligned to genes | 126,404,800 | 126,404,800 | ✅ |
+| ambiguous alignments | 2,552,785 | 2,552,785 | ✅ |
+| no feature assigned | 39,037,765 | 39,037,765 | ✅ |
+
+### Reads genomic origin
+
+| Metric | RustQC | Qualimap Java | Match? |
+|--------|--------|---------------|--------|
+| exonic | 126,404,800 (76.4%) | 126,404,800 (76.4%) | ✅ |
+| intronic | 30,407,985 (18.38%) | 30,407,985 (18.38%) | ✅ |
+| intergenic | 8,629,780 (5.22%) | 8,629,780 (5.22%) | ✅ |
+| overlapping exon | 6,853,516 (4.14%) | 6,853,516 (4.14%) | ✅ |
+
+### Transcript coverage profile
+
+| Metric | RustQC | Qualimap Java | Match? |
+|--------|--------|---------------|--------|
+| 5' bias | 0.87 | 0.87 | ✅ |
+| 3' bias | 0.78 | 0.78 | ✅ |
+| 5'-3' bias | 1.11 | 1.11 | ✅ |
+
+RustQC produces a 100-bin coverage profile along normalized gene body positions
+(5' to 3'), matching the format produced by Qualimap. Three tiers are generated:
+total (all genes), high (top 500 by expression), and low (bottom 500).
+
+The high-expression tier coverage profile is an **exact numerical match** with
+Qualimap Java. The total (all-genes) tier shows negligible floating-point
+differences (&lt;0.03% relative) due to coverage aggregation order.
+
+### Junction analysis
+
+| Metric | RustQC | Qualimap Java | Match? |
+|--------|--------|---------------|--------|
+| reads at junctions | 60,467,173 | 60,467,173 | ✅ |
+
+Junction motif frequencies match with minor percentage rounding differences
+(e.g., ACCT 5.59% vs 5.55%). The underlying read counts are identical.
+
+### QC results file
+
+The `rnaseq_qc_results.txt` file is formatted identically to Qualimap's output
+and is directly parseable by MultiQC's Qualimap rnaseq module, including:
+
+- **Reads alignment** -- primary alignments, secondary, multi-mappers, gene
+  assignment counts
+- **Reads genomic origin** -- exonic, intronic, intergenic, and overlapping-exon
+  read counts with percentages
+- **Transcript coverage profile** -- 5'/3' bias metrics
+- **Junction analysis** -- junction read counts and motif frequencies
+
+### Implementation details
+
+RustQC replicates Qualimap's merged exon model (Picard Gene.Transcript) for
+non-redundant per-gene coverage. This means overlapping exons from different
+transcripts of the same gene are merged before computing coverage, avoiding
+double-counting. The read enclosure check, strand-specificity estimation, and
+junction motif counting all follow Qualimap's algorithms.
+
+## Benchmark conditions
+
+- **BAM file**: GM12878 ENCODE RNA-Seq, paired-end, ~185M reads, 10 GB
+- **Annotation**: GENCODE v47 GTF (filtered to standard chromosomes, used for both tools)
+- **Strandedness**: strand-specific-reverse (`--stranded 2` / `-p strand-specific-reverse`)
+- **Qualimap version**: 2.3 (Java implementation, name-sorted BAM input)
+- **RustQC**: 10 threads, `--gtf` mode, coordinate-sorted BAM input
+- **Hardware**: Apple M3 Max, 128 GB RAM

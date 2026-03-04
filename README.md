@@ -62,9 +62,9 @@ All RSeQC tools run by default when annotation is provided via `--gtf` or `--bed
 
 | Tool | Upstream equivalent | Description |
 |------|-------------------|-------------|
+| Qualimap rnaseq | [Qualimap](http://qualimap.conesalab.org/) rnaseq | Full RNA-Seq QC: gene body coverage profiling (5'→3'), 5'/3' bias metrics, read origin classification (exonic/intronic/intergenic), strand-specificity estimation, and junction analysis. Qualimap-compatible output parseable by MultiQC. |
 | preseq | [`preseq lc_extrap`](http://smithlabresearch.org/software/preseq/) | Library complexity extrapolation -- estimates distinct molecules at increasing sequencing depths |
 | TIN | [`tin.py`](https://rseqc.sourceforge.net/#tin-py) | Transcript Integrity Number -- measures transcript degradation via coverage uniformity |
-| Gene body coverage | [Qualimap](http://qualimap.conesalab.org/) rnaseq | Coverage profile along gene bodies (5'→3'), Qualimap-compatible output for MultiQC |
 | flagstat | [`samtools flagstat`](http://www.htslib.org/) | Alignment flag summary statistics, identical format to samtools |
 | idxstats | [`samtools idxstats`](http://www.htslib.org/) | Per-chromosome read counts, identical format to samtools |
 | stats | [`samtools stats`](http://www.htslib.org/) | Summary Numbers (SN) section, MultiQC-compatible format |
@@ -358,12 +358,16 @@ RSeQC outputs are organized into per-tool subdirectories under `rseqc/`.
 | `samtools/sample.idxstats` | samtools idxstats-compatible per-chromosome read counts |
 | `samtools/sample.stats` | samtools stats SN-section compatible summary numbers (MultiQC-parseable) |
 
-### Gene body coverage outputs (`qualimap/`)
+### Qualimap outputs (`qualimap/`)
+
+Reimplements [Qualimap](http://qualimap.conesalab.org/) rnaseq mode. The output files are written in the same format and directory structure as Qualimap, making them directly parseable by [MultiQC](https://multiqc.info/). Qualimap analyses only run in GTF mode (skipped with `--bed`).
 
 | File | Description |
 |------|-------------|
-| `qualimap/coverage_profile_along_genes_(total).txt` | Gene body coverage profile (100 percentile bins, 5'→3') |
-| `qualimap/rnaseq_qc_results.txt` | Qualimap rnaseq-compatible QC results (MultiQC-parseable) |
+| `qualimap/rnaseq_qc_results.txt` | Qualimap rnaseq-compatible QC report: alignment statistics, read origin (exonic/intronic/intergenic/overlapping exon), 5'/3' coverage bias, strand specificity, and junction analysis. MultiQC-parseable. |
+| `qualimap/raw_data_qualimapReport/coverage_profile_along_genes_(total).txt` | Gene body coverage profile across all genes (100 percentile bins, 5'→3') |
+| `qualimap/raw_data_qualimapReport/coverage_profile_along_genes_(high).txt` | Gene body coverage profile for highly-expressed genes (top 500 by mean coverage) |
+| `qualimap/raw_data_qualimapReport/coverage_profile_along_genes_(low).txt` | Gene body coverage profile for lowly-expressed genes (bottom 500 by mean coverage) |
 
 ### Duplication matrix columns
 
@@ -418,16 +422,18 @@ Note: PGO profiles are machine-specific and `target-cpu=native` produces non-por
 
 ### `rustqc rna`
 
-1. **GTF parsing**: Reads gene annotations (plain or gzip-compressed), computes effective gene lengths from non-overlapping exon bases, and extracts additional attributes (e.g., biotype) for downstream grouping.
+1. **GTF parsing**: Reads gene annotations (plain or gzip-compressed), computes effective gene lengths from non-overlapping exon bases, and extracts additional attributes (e.g., biotype) for downstream grouping. Builds interval trees for merged exon regions used by the Qualimap module.
 2. **Read counting**: Reads the alignment file (SAM/BAM/CRAM) once, assigning each read to a gene based on exon overlap. Four count modes are tracked simultaneously:
    - With/without multimappers x with/without duplicates
    - Assignment statistics (assigned, ambiguous, no features) are tracked for the featureCounts summary.
+   - Qualimap accumulator runs in the same pass: per-transcript coverage, gene body profiling, read origin classification (exonic/intronic/intergenic), overlapping-exon detection, strand-specificity estimation, and splice junction motif counting.
 3. **featureCounts output**: Writes gene-level counts and summary statistics in the standard featureCounts format.
 4. **Biotype counting**: Aggregates assigned read counts by a configurable GTF attribute (e.g., `gene_biotype`), producing biotype count tables and MultiQC-compatible rRNA QC metrics.
 5. **Duplication matrix**: Computes RPK, RPKM, and duplication rates for each gene in all four modes.
 6. **Logistic regression**: Fits a binomial GLM (`dupRate ~ log10(RPK)`) using iteratively reweighted least squares (IRLS) to model the relationship between expression and duplication.
-7. **Plots**: Generates density scatter, boxplot, and histogram visualizations.
-8. **MultiQC integration**: Outputs files compatible with [MultiQC](https://multiqc.info/) for pipeline reporting (dupRadar intercept, fit curve, biotype bargraph, rRNA percentage).
+7. **Qualimap output**: Computes gene body coverage profiles (total, high-expression, low-expression tiers), 5'/3' bias metrics, and produces a Qualimap-compatible `rnaseq_qc_results.txt` report with read origin counts, mapping statistics, and strand specificity.
+8. **Plots**: Generates density scatter, boxplot, and histogram visualizations.
+9. **MultiQC integration**: Outputs files compatible with [MultiQC](https://multiqc.info/) for pipeline reporting (dupRadar intercept, fit curve, biotype bargraph, rRNA percentage, Qualimap rnaseq reports).
 
 ### RSeQC tools
 
@@ -454,6 +460,8 @@ Each RSeQC tool is a single-pass BAM reader that processes the alignment file an
 - Original dupRadar R package: https://github.com/ssayols/dupRadar
 - Wang L, Wang S, Li W (2012). RSeQC: quality control of RNA-seq experiments. *Bioinformatics*, 28(16), 2184-2185. doi:10.1093/bioinformatics/bts356
 - RSeQC: https://rseqc.sourceforge.net/
+- García-Alcalde F, Okonechnikov K, Carbonell J, et al. (2012). Qualimap: evaluating next-generation sequencing alignment data. *Bioinformatics*, 28(20), 2678-2679. doi:10.1093/bioinformatics/bts503
+- Qualimap: http://qualimap.conesalab.org/
 
 ## License
 

@@ -355,30 +355,55 @@ docker run --rm --platform linux/amd64 \
 
 ### 9. Generate Qualimap reference outputs
 
-Reference outputs for validating the gene body coverage reimplementation are
-stored in `qualimap/small/` and `qualimap/large/`. These were generated with
+Reference outputs for validating the Qualimap reimplementation are stored in
+`qualimap/small/` and `qualimap/large/`. These were generated with
 [Qualimap 2.3](http://qualimap.conesalab.org/) run via Docker.
+
+> **Note:** Qualimap Java requires a **name-sorted BAM** (`samtools sort -n`).
+> The `-p strand-specific-reverse` and `-s` flags match the library preparation
+> of the GM12878 dataset. Both tools must use the same GTF and strandedness
+> settings for results to be comparable.
 
 ```bash
 QUALIMAP_IMG="quay.io/biocontainers/qualimap:2.3--hdfd78af_0"
 
-# Small (requires uncompressed GTF)
+# Small (name-sort BAM first, requires uncompressed GTF)
 gunzip -k benchmark/input/small/chr6.gtf.gz
+samtools sort -n -o benchmark/input/small/test.namesorted.bam benchmark/input/small/test.bam
 docker run --rm -v $(pwd)/benchmark:/data \
   $QUALIMAP_IMG qualimap rnaseq \
-  -bam /data/input/small/test.bam -gtf /data/input/small/chr6.gtf \
-  -outdir /data/qualimap_tmp_small --java-mem-size=4G -pe
+  -bam /data/input/small/test.namesorted.bam -gtf /data/input/small/chr6.gtf \
+  -outdir /data/qualimap_tmp_small --java-mem-size=4G \
+  -p strand-specific-reverse -pe -s
 cp benchmark/qualimap_tmp_small/rnaseq_qc_results.txt benchmark/qualimap/small/
 cp "benchmark/qualimap_tmp_small/raw_data_qualimapReport/coverage_profile_along_genes_(total).txt" benchmark/qualimap/small/
 
-# Large
-gunzip -k benchmark/input/large/genes.gtf.gz
+# Large (requires name-sorted BAM and filtered GTF)
 docker run --rm -v $(pwd)/benchmark:/data \
   $QUALIMAP_IMG qualimap rnaseq \
-  -bam /data/input/large/GM12878_REP1.markdup.sorted.bam -gtf /data/input/large/genes.gtf \
-  -outdir /data/qualimap_tmp_large --java-mem-size=8G -pe
+  -bam /data/input/large/GM12878_REP1.namesorted.bam \
+  -gtf /data/input/large/genes.filtered.gtf \
+  -outdir /data/qualimap_tmp_large --java-mem-size=8G \
+  -p strand-specific-reverse -pe -s
 cp benchmark/qualimap_tmp_large/rnaseq_qc_results.txt benchmark/qualimap/large/
 cp "benchmark/qualimap_tmp_large/raw_data_qualimapReport/coverage_profile_along_genes_(total).txt" benchmark/qualimap/large/
+```
+
+To generate matching RustQC Qualimap outputs for comparison, run with the same
+strandedness and GTF as the Java reference:
+
+```bash
+# Small (coord-sorted BAM, same GTF and strandedness as Java run)
+cargo run --release -- rna benchmark/input/small/test.bam \
+  --gtf benchmark/input/small/chr6.gtf \
+  --paired --stranded 2 --skip-dup-check \
+  --outdir benchmark/RustQC/small
+
+# Large (coord-sorted BAM, filtered GTF, same strandedness)
+cargo run --release -- rna benchmark/input/large/GM12878_REP1.markdup.sorted.bam \
+  --gtf benchmark/input/large/genes.filtered.gtf \
+  --paired --stranded 2 --biotype-attribute gene_biotype --threads 10 \
+  --outdir benchmark/RustQC/large
 ```
 
 ### 10. Compare results

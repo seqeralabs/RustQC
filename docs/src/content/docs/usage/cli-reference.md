@@ -139,8 +139,9 @@ printed and biotype counting is skipped.
 
 Write all output files directly into the output directory instead of organizing
 them into subdirectories. By default, RustQC creates `dupradar/`,
-`featurecounts/`, and `rseqc/<tool>/` subdirectories under the output directory.
-With `--flat-output`, all files are written to the top-level output directory.
+`featurecounts/`, `rseqc/<tool>/`, `qualimap/`, `preseq/`, and `samtools/`
+subdirectories under the output directory. With `--flat-output`, all files are
+written to the top-level output directory.
 
 This can also be set in the [configuration file](/usage/configuration/) as
 `flat_output: true`.
