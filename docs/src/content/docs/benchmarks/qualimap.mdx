@@ -7,15 +7,20 @@ description: Benchmark comparison of RustQC's Qualimap rnaseq output against the
 
 RustQC's Qualimap analysis runs in the same single-pass BAM scan as all other
 tools, adding negligible overhead to the total runtime. The original Qualimap
-Java implementation requires a separate dedicated run.
+Java implementation requires a separate dedicated run on a **name-sorted** BAM
+file, meaning a `samtools sort -n` step is typically needed before Qualimap can
+run. RustQC works directly on coordinate-sorted BAMs (the standard output of
+most aligners), eliminating that preprocessing step entirely.
 
 | Tool | Runtime | Notes |
 |------|---------|-------|
-| Qualimap rnaseq (Java) | ~10 min | Separate BAM pass, single-threaded |
-| RustQC (all tools) | ~4 min | Single pass, all analyses combined |
+| `samtools sort -n` | ~5-10 min | Name-sort required by Qualimap Java (not needed by RustQC) |
+| Qualimap rnaseq (Java) | ~10 min | Separate BAM pass, single-threaded, requires name-sorted input |
+| RustQC (all tools) | ~4 min | Single pass, all analyses combined, coordinate-sorted input |
 
-RustQC produces Qualimap-compatible output as part of its combined analysis --
-there is no additional cost for the Qualimap module beyond the shared BAM scan.
+In a typical pipeline, the original Qualimap workflow requires **15-20 minutes**
+(name-sort + Qualimap), while RustQC produces identical output with **zero
+additional cost** beyond its shared BAM scan.
 
 ## Output comparison
 
