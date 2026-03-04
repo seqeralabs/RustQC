@@ -790,9 +790,9 @@ mod tests {
 
     #[test]
     fn test_median() {
-        assert_eq!(median(&mut vec![1.0, 3.0, 2.0]), 2.0);
-        assert_eq!(median(&mut vec![1.0, 2.0, 3.0, 4.0]), 2.5);
-        assert!(median(&mut vec![]).is_nan());
+        assert_eq!(median(&mut [1.0, 3.0, 2.0]), 2.0);
+        assert_eq!(median(&mut [1.0, 2.0, 3.0, 4.0]), 2.5);
+        assert!(median(&mut []).is_nan());
     }
 
     /// Helper: build a single-transcript slice for compute_coverage_profile.

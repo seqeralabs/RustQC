@@ -330,7 +330,6 @@ mod tests {
             fc_multimapping: 0,
             fc_unmapped: 0,
             rseqc: None,
-            genebody: None,
             qualimap: None,
         };
 

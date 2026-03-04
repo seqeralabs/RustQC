@@ -74,7 +74,6 @@ src/
     featurecounts/
       mod.rs                     Re-exports output
       output.rs                  featureCounts-format output and biotype counting
-    genebody.rs                Gene body coverage profiling, Qualimap-compatible output
     preseq.rs                  preseq lc_extrap library complexity extrapolation
     rseqc/
       mod.rs                     Re-exports all RSeQC modules + common helpers

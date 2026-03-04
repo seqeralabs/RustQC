@@ -6,7 +6,7 @@
 
 use anyhow::{Context, Result};
 use log::info;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 
@@ -53,9 +53,6 @@ pub struct BamStatResult {
     pub proper_pairs: u64,
     /// Among proper-paired unique reads: number where mates map to different chromosomes.
     pub proper_pair_diff_chrom: u64,
-    /// MAPQ distribution for all primary, non-QC-fail, non-dup, mapped reads.
-    #[allow(dead_code)] // Kept for API completeness; not yet used by write_bam_stat
-    pub mapq_distribution: BTreeMap<u8, u64>,
 
     // --- samtools flagstat fields ---
     /// Secondary alignments (0x100).
@@ -128,9 +125,6 @@ pub struct BamStatResult {
     pub outward_pairs: u64,
     /// Other orientation pairs (FF, RR).
     pub other_orientation: u64,
-    /// Primary reads that are paired.
-    #[allow(dead_code)]
-    pub primary_paired: u64,
     /// Total primary reads (non-secondary, non-supplementary).
     pub primary_count: u64,
     /// Primary mapped reads count.

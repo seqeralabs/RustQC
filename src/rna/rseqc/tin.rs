@@ -34,10 +34,10 @@ pub struct TranscriptSampling {
     /// Transcript end position (0-based, exclusive).
     pub tx_end: u64,
     /// Sorted exon blocks as (start, end) in 0-based half-open coords.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // stored for API completeness; values used during construction
     pub exon_regions: Vec<(u64, u64)>,
     /// Total exonic bases across all exon blocks.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // stored for API completeness; values used during construction
     pub exon_length: u64,
     /// Genomic positions sampled within exonic regions (sorted).
     pub sampled_positions: Vec<u64>,

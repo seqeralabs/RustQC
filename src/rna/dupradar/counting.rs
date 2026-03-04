@@ -10,7 +10,6 @@
 //! This implements a simplified featureCounts-compatible counting strategy.
 
 use crate::gtf::Gene;
-use crate::rna::genebody::GenebodyCoverageAccum;
 use crate::rna::qualimap::QualimapAccum;
 use crate::rna::rseqc::accumulators::{RseqcAccumulators, RseqcAnnotations, RseqcConfig};
 use anyhow::{Context, Result};
@@ -342,9 +341,6 @@ pub struct CountResult {
     // --- RSeQC results (collected during the same BAM pass) ---
     /// Accumulated RSeQC tool results, if RSeQC tools were enabled
     pub rseqc: Option<RseqcAccumulators>,
-    /// Gene body coverage results (Qualimap-compatible).
-    #[allow(dead_code)]
-    pub genebody: Option<crate::rna::genebody::GenebodyCoverageResult>,
     /// Qualimap RNA-Seq QC results (if enabled).
     #[allow(dead_code)]
     pub qualimap: Option<crate::rna::qualimap::QualimapResult>,
@@ -572,8 +568,6 @@ struct ChromResult {
     fc_no_features: u64,
     fc_multimapping: u64,
     fc_unmapped: u64,
-    /// Gene body coverage accumulator (if enabled).
-    genebody: Option<GenebodyCoverageAccum>,
     /// Qualimap RNA-Seq QC accumulator (if enabled).
     qualimap: Option<QualimapAccum>,
 }
@@ -601,7 +595,6 @@ impl ChromResult {
             fc_no_features: 0,
             fc_multimapping: 0,
             fc_unmapped: 0,
-            genebody: None,
             qualimap: None,
         }
     }
@@ -634,14 +627,6 @@ impl ChromResult {
         self.fc_no_features += other.fc_no_features;
         self.fc_multimapping += other.fc_multimapping;
         self.fc_unmapped += other.fc_unmapped;
-        // Merge gene body coverage
-        if let Some(other_gb) = other.genebody {
-            if let Some(ref mut self_gb) = self.genebody {
-                self_gb.merge(&other_gb);
-            } else {
-                self.genebody = Some(other_gb);
-            }
-        }
         // Merge Qualimap accumulator
         if let Some(other_qm) = other.qualimap {
             if let Some(ref mut self_qm) = self.qualimap {
@@ -699,13 +684,9 @@ fn process_chromosome_batch(
     rseqc_config: Option<&RseqcConfig>,
     rseqc_annotations: Option<&RseqcAnnotations>,
     htslib_threads: usize,
-    genebody_position_map: Option<&crate::rna::genebody::TranscriptPositionMap>,
     qualimap_index: Option<&crate::rna::qualimap::QualimapIndex>,
 ) -> Result<(ChromResult, Option<RseqcAccumulators>)> {
     let mut result = ChromResult::new(num_genes);
-    if genebody_position_map.is_some() {
-        result.genebody = Some(crate::rna::genebody::GenebodyCoverageAccum::new());
-    }
     if qualimap_index.is_some() {
         result.qualimap = Some(crate::rna::qualimap::QualimapAccum::new(stranded));
     }
@@ -726,10 +707,8 @@ fn process_chromosome_batch(
         })
         .collect();
     let tid_to_rseqc_chrom = &tid_to_gtf_chrom;
-    let tid_to_rseqc_chrom_upper: Vec<String> = tid_to_gtf_chrom
-        .iter()
-        .map(|s| s.to_uppercase())
-        .collect();
+    let tid_to_rseqc_chrom_upper: Vec<String> =
+        tid_to_gtf_chrom.iter().map(|s| s.to_uppercase()).collect();
 
     // Open an indexed reader for this thread (supports BAM with .bai/.csi and CRAM with .crai)
     let mut bam = bam::IndexedReader::from_path(bam_path)
@@ -887,14 +866,8 @@ fn process_chromosome_batch(
 
                 if gene_hits.is_empty() {
                     result.stat_no_features += 1;
-                    if let Some(ref mut gb) = result.genebody {
-                        gb.record_no_feature(&aligned_blocks_buf, 1);
-                    }
                 } else if gene_hits.len() > 1 {
                     result.stat_ambiguous += 1;
-                    if let Some(ref mut gb) = result.genebody {
-                        gb.record_ambiguous(1);
-                    }
                 } else if assign_fragment_to_gene(
                     &gene_hits,
                     &mut result.gene_counts,
@@ -902,11 +875,6 @@ fn process_chromosome_batch(
                     is_multi,
                 ) {
                     result.stat_assigned += 1;
-                    if let (Some(ref mut gb), Some(pos_map)) =
-                        (&mut result.genebody, genebody_position_map)
-                    {
-                        gb.record_coverage(gene_hits[0] as usize, &aligned_blocks_buf, pos_map, 1);
-                    }
                 }
                 continue;
             }
@@ -971,14 +939,8 @@ fn process_chromosome_batch(
 
                 if combined_genes.is_empty() {
                     result.stat_no_features += 1;
-                    if let Some(ref mut gb) = result.genebody {
-                        gb.record_no_feature(&aligned_blocks_buf, 2);
-                    }
                 } else if combined_genes.len() > 1 {
                     result.stat_ambiguous += 1;
-                    if let Some(ref mut gb) = result.genebody {
-                        gb.record_ambiguous(2);
-                    }
                 } else if assign_fragment_to_gene(
                     &combined_genes,
                     &mut result.gene_counts,
@@ -986,16 +948,6 @@ fn process_chromosome_batch(
                     frag_is_multi,
                 ) {
                     result.stat_assigned += 1;
-                    if let (Some(ref mut gb), Some(pos_map)) =
-                        (&mut result.genebody, genebody_position_map)
-                    {
-                        gb.record_coverage(
-                            combined_genes[0] as usize,
-                            &aligned_blocks_buf,
-                            pos_map,
-                            2,
-                        );
-                    }
                 }
             } else {
                 // Take ownership of gene_hits instead of cloning (it's cleared at loop start)
@@ -1016,25 +968,6 @@ fn process_chromosome_batch(
     Ok((result, rseqc_accums))
 }
 
-/// Count reads from an alignment file (SAM/BAM/CRAM) and assign them to genes.
-///
-/// Performs four simultaneous counting modes matching dupRadar's approach:
-/// - With/without multimappers
-/// - With/without PCR duplicates
-///
-/// When `threads > 1`, processing is parallelized by chromosome: the alignment
-/// index is used to divide chromosomes among threads, each opening its own reader
-/// and processing independently. Per-chromosome results are merged, and any
-/// unmatched paired-end mates (from cross-chromosome pairs) are reconciled in a
-/// final pass.
-///
-/// For paired-end data, this function buffers mates by a composite key matching
-/// featureCounts' `SAM_pairer_get_read_full_name()` (read name, R1/R2 refIDs,
-/// R1/R2 positions, HI tag). Gene assignment uses featureCounts' scoring strategy:
-/// genes overlapped by both mates score higher than genes overlapped by only one.
-///
-/// # Arguments
-/// * `bam_path` - Path to the duplicate-marked alignment file (BAM/CRAM must have
 /// Partition chromosome indices across workers using greedy bin-packing
 /// (largest-first scheduling). Assigns each chromosome to the worker with the
 /// smallest current total length, producing a more balanced distribution than
@@ -1082,7 +1015,6 @@ pub fn count_reads(
     skip_dup_check: bool,
     rseqc_config: Option<&RseqcConfig>,
     rseqc_annotations: Option<&RseqcAnnotations>,
-    genebody_position_map: Option<&crate::rna::genebody::TranscriptPositionMap>,
     qualimap_index: Option<&crate::rna::qualimap::QualimapIndex>,
 ) -> Result<CountResult> {
     // Build gene ID interner for allocation-free lookups in the hot loop
@@ -1160,7 +1092,10 @@ pub fn count_reads(
                 .iter()
                 .map(|b| b.iter().map(|&tid| tid_to_len[tid as usize]).sum())
                 .collect();
-            debug!("Chromosome load distribution across {} workers: {:?}", num_workers, worker_loads);
+            debug!(
+                "Chromosome load distribution across {} workers: {:?}",
+                num_workers, worker_loads
+            );
         }
 
         // Configure rayon thread pool
@@ -1204,7 +1139,6 @@ pub fn count_reads(
                         rseqc_config,
                         rseqc_annotations,
                         htslib_threads,
-                        genebody_position_map,
                         qualimap_index,
                     )
                 })
@@ -1231,9 +1165,6 @@ pub fn count_reads(
         // This avoids the need for an index file.
         let global_read_counter = AtomicU64::new(0);
         let mut result = ChromResult::new(interner.len());
-        if genebody_position_map.is_some() {
-            result.genebody = Some(crate::rna::genebody::GenebodyCoverageAccum::new());
-        }
         let mut rseqc_accums: Option<RseqcAccumulators> =
             rseqc_config.map(|cfg| RseqcAccumulators::new(cfg, rseqc_annotations));
         let mut qualimap_accum: Option<crate::rna::qualimap::QualimapAccum> =
@@ -1392,14 +1323,8 @@ pub fn count_reads(
 
                 if gene_hits.is_empty() {
                     result.stat_no_features += 1;
-                    if let Some(ref mut gb) = result.genebody {
-                        gb.record_no_feature(&aligned_blocks_buf, 1);
-                    }
                 } else if gene_hits.len() > 1 {
                     result.stat_ambiguous += 1;
-                    if let Some(ref mut gb) = result.genebody {
-                        gb.record_ambiguous(1);
-                    }
                 } else if assign_fragment_to_gene(
                     &gene_hits,
                     &mut result.gene_counts,
@@ -1407,11 +1332,6 @@ pub fn count_reads(
                     is_multi,
                 ) {
                     result.stat_assigned += 1;
-                    if let (Some(ref mut gb), Some(pos_map)) =
-                        (&mut result.genebody, genebody_position_map)
-                    {
-                        gb.record_coverage(gene_hits[0] as usize, &aligned_blocks_buf, pos_map, 1);
-                    }
                 }
                 continue;
             }
@@ -1486,14 +1406,8 @@ pub fn count_reads(
 
                 if combined_genes.is_empty() {
                     result.stat_no_features += 1;
-                    if let Some(ref mut gb) = result.genebody {
-                        gb.record_no_feature(&aligned_blocks_buf, 2);
-                    }
                 } else if combined_genes.len() > 1 {
                     result.stat_ambiguous += 1;
-                    if let Some(ref mut gb) = result.genebody {
-                        gb.record_ambiguous(2);
-                    }
                 } else if assign_fragment_to_gene(
                     &combined_genes,
                     &mut result.gene_counts,
@@ -1501,16 +1415,6 @@ pub fn count_reads(
                     frag_is_multi,
                 ) {
                     result.stat_assigned += 1;
-                    if let (Some(ref mut gb), Some(pos_map)) =
-                        (&mut result.genebody, genebody_position_map)
-                    {
-                        gb.record_coverage(
-                            combined_genes[0] as usize,
-                            &aligned_blocks_buf,
-                            pos_map,
-                            2,
-                        );
-                    }
                 }
             } else {
                 // Take ownership of gene_hits instead of cloning (it's cleared at loop start)
@@ -1705,13 +1609,10 @@ pub fn count_reads(
         fc_multimapping: merged.fc_multimapping,
         fc_unmapped: merged.fc_unmapped,
         rseqc: merged_rseqc,
-        genebody: merged
-            .genebody
-            .map(|a: GenebodyCoverageAccum| a.into_result()),
         qualimap: match (merged.qualimap, qualimap_index) {
             (Some(mut a), Some(idx)) => {
                 a.flush_unpaired(idx);
-                Some(a.into_result(idx))
+                Some(a.into_result())
             }
             _ => None,
         },
@@ -2002,7 +1903,9 @@ mod tests {
     #[test]
     fn test_partition_chromosomes_balanced() {
         // Simulate human-like chromosome sizes (large variation)
-        let lengths = vec![250, 243, 198, 191, 182, 171, 159, 146, 138, 133, 135, 130, 57];
+        let lengths = vec![
+            250, 243, 198, 191, 182, 171, 159, 146, 138, 133, 135, 130, 57,
+        ];
         let batches = partition_chromosomes(&lengths, 4);
 
         assert_eq!(batches.len(), 4);

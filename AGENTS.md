@@ -68,7 +68,6 @@ src/
     featurecounts/
       mod.rs        — Re-exports output
       output.rs     — featureCounts-format output & biotype counting
-    genebody.rs     — Gene body coverage profiling, Qualimap-compatible output
     preseq.rs       — preseq lc_extrap library complexity extrapolation
     rseqc/
       mod.rs                — Re-exports all RSeQC modules + common helpers
@@ -262,7 +261,7 @@ forwarded to `count_reads()` as the `skip_dup_check: bool` parameter).
   `infer_experiment:`, `read_duplication:`, `read_distribution:`, `junction_annotation:`,
   `junction_saturation:`, `inner_distance:`). Each has an `enabled: bool` toggle
   and tool-specific parameter overrides. CLI flags take precedence over config values.
-- The YAML config also has sections for `tin:`, `preseq:`, `genebody_coverage:`,
+- The YAML config also has sections for `tin:`, `preseq:`,
   `flagstat:`, `idxstats:`, and `samtools_stats:`. Each has an `enabled: bool` toggle.
   Preseq has additional parameters: `max_extrap`, `step_size`, `n_bootstraps`,
   `confidence_level`, `seed`, `max_terms`, `defects`. TIN has `sample_size` and
@@ -270,10 +269,6 @@ forwarded to `count_reads()` as the `skip_dup_check: bool` parameter).
 - The `featurecounts.rs` module produces featureCounts-compatible output files (counts TSV,
   summary, biotype counts, and MultiQC files). These are generated in the same pass as
   the dupRadar analysis — no separate featureCounts run is needed.
-- The genebody module (`genebody.rs`) produces Qualimap-compatible output files
-  (`coverage_profile_along_genes_(total).txt` and `rnaseq_qc_results.txt`). These
-  files are written to a `qualimap/` subdirectory and are parseable by MultiQC as
-  Qualimap rnaseq reports. Gene body coverage only runs in GTF mode.
 - The GTF parser (`gtf.rs`) accepts extra attribute names to extract (e.g., `gene_biotype`,
   `gene_type`) and stores them in `Gene.attributes`. The biotype attribute name is
   configurable via `--biotype-attribute` CLI flag or `featurecounts.biotype_attribute`

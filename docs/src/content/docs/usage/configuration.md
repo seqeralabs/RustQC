@@ -83,10 +83,6 @@ tin:
   sample_size: 100
   min_coverage: 10
 
-# Gene body coverage / Qualimap
-genebody_coverage:
-  enabled: true
-
 # Library complexity (preseq lc_extrap)
 preseq:
   enabled: true
@@ -313,17 +309,6 @@ gene body coverage profiling (100 percentile bins, 5'→3'), 5'/3' bias metrics,
 read origin classification (exonic/intronic/intergenic), strand-specificity
 estimation, and splice junction motif counting. Produces Qualimap-compatible
 output files parseable by MultiQC.
-
-### genebody_coverage
-
-```yaml
-genebody_coverage:
-  enabled: true    # Legacy toggle for the older gene body coverage module
-```
-
-Requires annotation (`--gtf` only). This is a legacy config key for the
-original gene body coverage implementation. The `qualimap:` section above
-controls the current Qualimap-compatible gene body coverage analysis.
 
 ### preseq
 

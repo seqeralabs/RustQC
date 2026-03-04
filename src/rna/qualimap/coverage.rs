@@ -147,11 +147,6 @@ impl TranscriptCoverage {
         self.coverage.len()
     }
 
-    /// Iterate over all transcripts with coverage data.
-    pub fn iter(&self) -> impl Iterator<Item = (u32, &[i32])> {
-        self.coverage.iter().map(|(&idx, v)| (idx, v.as_slice()))
-    }
-
     /// Compute mean coverage for a transcript.
     #[allow(dead_code)]
     pub fn mean_coverage(&self, tx_flat_idx: u32) -> f64 {
@@ -183,6 +178,7 @@ pub struct MergedGeneCoverage {
     coverage: HashMap<u32, Vec<i32>>,
 }
 
+#[allow(dead_code)] // tested API; not yet consumed in output pipeline
 impl MergedGeneCoverage {
     /// Create a new empty merged gene coverage tracker.
     pub fn new() -> Self {
@@ -204,7 +200,7 @@ impl MergedGeneCoverage {
         m_blocks: &[(i32, i32)],
         model: &MergedGeneModel,
     ) {
-        let total_len = model.exonic_length as usize;
+        let total_len: usize = model.exons.iter().map(|(s, e)| (e - s) as usize).sum();
         if total_len == 0 {
             return;
         }
@@ -380,10 +376,8 @@ mod tests {
     #[test]
     fn test_merged_gene_single_exon() {
         let model = MergedGeneModel {
-            gene_idx: 0,
             strand: '+',
             exons: vec![(100, 200)],
-            exonic_length: 100,
         };
         let mut cov = MergedGeneCoverage::new();
         // M-block: 120..150, effective_end = 149 (Picard off-by-one)
@@ -402,10 +396,8 @@ mod tests {
         // Gene with two merged exons: (100,200) and (300,400)
         // Total exonic length = 200, offset: first exon 0..100, second 100..200
         let model = MergedGeneModel {
-            gene_idx: 0,
             strand: '+',
             exons: vec![(100, 200), (300, 400)],
-            exonic_length: 200,
         };
         let mut cov = MergedGeneCoverage::new();
         // M-block in second exon: 310..330 (genomic), effective_end = 329
@@ -427,12 +419,10 @@ mod tests {
         // tx2: exons (150,250) and (350,400)
         // Merged: (100,250) and (300,400) → total 250
         let model = MergedGeneModel::from_transcripts(
-            0,
             '+',
             &[(100, 200), (300, 400), (150, 250), (350, 400)],
         );
         assert_eq!(model.exons, vec![(100, 250), (300, 400)]);
-        assert_eq!(model.exonic_length, 250);
 
         let mut cov = MergedGeneCoverage::new();
         // M-block spanning the merged first exon: 180..220, effective_end = 219
@@ -450,10 +440,8 @@ mod tests {
     #[test]
     fn test_merged_gene_merge() {
         let model = MergedGeneModel {
-            gene_idx: 0,
             strand: '+',
             exons: vec![(100, 200)],
-            exonic_length: 100,
         };
 
         let mut cov1 = MergedGeneCoverage::new();

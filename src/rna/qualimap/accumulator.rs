@@ -13,7 +13,7 @@ use coitrees::IntervalTree;
 use rust_htslib::bam;
 use rust_htslib::bam::record::Cigar;
 
-use super::coverage::{MergedGeneCoverage, TranscriptCoverage};
+use super::coverage::TranscriptCoverage;
 use super::index::QualimapIndex;
 
 // ============================================================
@@ -108,8 +108,6 @@ pub struct QualimapCounters {
     pub overlapping_exon: u64,
     /// Total reads counted (numReads: for PE, 2 per fragment).
     pub read_count: u64,
-    /// Total fragments counted (PE: 1 per pair, SE: 1 per read).
-    pub fragment_count: u64,
     /// Left mates in proper pairs (flag 0x2 + 0x40).
     pub left_proper_in_pair: u64,
     /// Right mates in proper pairs (flag 0x2 + 0x80).
@@ -140,7 +138,6 @@ impl QualimapCounters {
         self.intergenic_reads += other.intergenic_reads;
         self.overlapping_exon += other.overlapping_exon;
         self.read_count += other.read_count;
-        self.fragment_count += other.fragment_count;
         self.left_proper_in_pair += other.left_proper_in_pair;
         self.right_proper_in_pair += other.right_proper_in_pair;
         self.both_proper_in_pair += other.both_proper_in_pair;
@@ -190,8 +187,6 @@ pub struct QualimapAccum {
     pub counters: QualimapCounters,
     /// Per-transcript per-base coverage.
     pub coverage: TranscriptCoverage,
-    /// Per-gene merged-model coverage.
-    pub merged_gene_coverage: MergedGeneCoverage,
     /// Junction splice motif counts.
     pub junction_motifs: JunctionMotifCounts,
     /// Mate buffer for PE reconciliation.
@@ -209,7 +204,6 @@ impl QualimapAccum {
         Self {
             counters: QualimapCounters::default(),
             coverage: TranscriptCoverage::new(),
-            merged_gene_coverage: MergedGeneCoverage::new(),
             junction_motifs: JunctionMotifCounts::default(),
             mate_buffer: HashMap::new(),
             stranded,
@@ -400,9 +394,6 @@ impl QualimapAccum {
                 .or_insert(0) += 1;
         }
 
-        // Fragment assignment
-        self.counters.fragment_count += 1;
-
         // Check for overlapping_exon using cached hits from both mates.
         // At most one increment per fragment: check r2 only if r1 didn't trigger.
         if !check_has_overlap_not_enclosed(&r1.cached_hits) {
@@ -462,8 +453,6 @@ impl QualimapAccum {
                 .or_insert(0) += 1;
         }
 
-        self.counters.fragment_count += 1;
-
         // Check for overlapping_exon using cached results.
         self.check_overlapping_exon_cached(&data.cached_hits);
 
@@ -516,10 +505,6 @@ impl QualimapAccum {
                 let transcripts = index.gene_transcripts(gidx);
                 self.coverage
                     .add_coverage(single_block, transcripts, tx_start);
-                if let Some(model) = index.merged_gene_models.get(gidx as usize) {
-                    self.merged_gene_coverage
-                        .add_coverage(gidx, single_block, model);
-                }
             }
         }
     }
@@ -597,7 +582,6 @@ impl QualimapAccum {
     pub fn merge(&mut self, other: QualimapAccum) {
         self.counters.merge(&other.counters);
         self.coverage.merge(other.coverage);
-        self.merged_gene_coverage.merge(other.merged_gene_coverage);
         self.junction_motifs.merge(&other.junction_motifs);
 
         // Merge mate buffers (cross-chromosome mates).
@@ -607,8 +591,6 @@ impl QualimapAccum {
             if let Some(existing) = self.mate_buffer.remove(&key) {
                 // We don't have the chrom handy for intronic classification,
                 // so treat no-feature conservatively as intergenic.
-                self.counters.fragment_count += 1;
-
                 let common_genes: HashSet<u32> = existing
                     .enclosing_genes
                     .intersection(&info.enclosing_genes)
@@ -670,7 +652,7 @@ impl QualimapAccum {
     ///
     /// This should be called after all reads have been processed and
     /// `flush_unpaired()` has been called.
-    pub fn into_result(self, index: &QualimapIndex) -> super::QualimapResult {
+    pub fn into_result(self) -> super::QualimapResult {
         // Convert junction motif byte arrays to readable strings
         let mut junction_motifs_str = HashMap::new();
         for ((donor, acceptor), count) in &self.junction_motifs.counts {
@@ -680,16 +662,6 @@ impl QualimapAccum {
             );
             *junction_motifs_str.entry(motif).or_insert(0u64) += count;
         }
-
-        // Build string-keyed coverage map from the raw coverage data, then
-        // take ownership of the raw coverage without cloning.
-        let mut transcript_coverage = HashMap::new();
-        for (flat_idx, depth) in self.coverage.iter() {
-            if let Some(tx_info) = index.transcripts.get(flat_idx as usize) {
-                transcript_coverage.insert(tx_info.transcript_id.clone(), depth.to_vec());
-            }
-        }
-        let transcript_coverage_raw = self.coverage;
 
         super::QualimapResult {
             primary_alignments: self.counters.primary_alignments,
@@ -703,15 +675,12 @@ impl QualimapAccum {
             intergenic_reads: self.counters.intergenic_reads,
             overlapping_exon_reads: self.counters.overlapping_exon,
             read_count: self.counters.read_count,
-            fragment_count: self.counters.fragment_count,
             left_proper_in_pair: self.counters.left_proper_in_pair,
             right_proper_in_pair: self.counters.right_proper_in_pair,
             both_proper_in_pair: self.counters.both_proper_in_pair,
             reads_at_junctions: self.counters.reads_at_junctions,
             junction_motifs: junction_motifs_str,
-            transcript_coverage,
-            transcript_coverage_raw,
-            merged_gene_coverage: self.merged_gene_coverage,
+            transcript_coverage_raw: self.coverage,
             ssp_fwd: self.counters.ssp_fwd,
             ssp_rev: self.counters.ssp_rev,
         }
