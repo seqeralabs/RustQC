@@ -11,6 +11,7 @@ use log::info;
 
 use super::coverage::TranscriptCoverage;
 use super::index::QualimapIndex;
+use super::plots;
 use super::QualimapResult;
 
 // ============================= Constants =======================================
@@ -277,6 +278,34 @@ fn median(values: &mut [f64]) -> f64 {
     }
 }
 
+// ============================= Coverage Histogram ==============================
+
+/// Number of bins for the mean coverage histogram (0 to 50, inclusive).
+const COVERAGE_HIST_BINS: usize = 51;
+
+/// Compute the mean transcript coverage histogram.
+///
+/// For each transcript, computes `mean_coverage = sum(per_base_depth) / length`
+/// and bins it into 51 buckets (0-50, with bin 50 collecting all transcripts
+/// with mean coverage >= 50). Matches Qualimap's `computeMeanTranscriptCoverageHist`.
+fn compute_mean_coverage_histogram(
+    entries: &[TranscriptCoverageEntry],
+) -> [u64; COVERAGE_HIST_BINS] {
+    let mut hist = [0u64; COVERAGE_HIST_BINS];
+
+    for entry in entries {
+        if entry.coverage.is_empty() {
+            hist[0] += 1;
+            continue;
+        }
+        let mean_level = entry.mean_coverage as usize;
+        let bin = mean_level.min(COVERAGE_HIST_BINS - 1);
+        hist[bin] += 1;
+    }
+
+    hist
+}
+
 // ============================= Output Writers ==================================
 
 /// Write the coverage profile TSV file.
@@ -297,11 +326,18 @@ fn write_coverage_profile(profile: &[f64; NUM_BINS], path: &Path) -> Result<()> 
     Ok(())
 }
 
-/// Write the complete Qualimap RNA-Seq QC results file.
+/// Write the complete Qualimap RNA-Seq QC results: text files, coverage profiles,
+/// and all plots (coverage profile, histogram, reads genomic origin, junction analysis).
 ///
-/// Produces `rnaseq_qc_results.txt` in exact Qualimap format with all sections:
-/// Input, Reads alignment, Reads genomic origin, Transcript coverage profile,
-/// and Junction analysis.
+/// Produces:
+/// - `rnaseq_qc_results.txt` in exact Qualimap format
+/// - `raw_data_qualimapReport/` with 3 coverage profile TSVs
+/// - `images_qualimapReport/` with 6 PNG + SVG chart images
+///
+/// # Arguments
+/// * `junction_counts` - Optional (known, partly_known, novel) event counts for the
+///   Junction Analysis pie chart. Pass `None` to skip that chart (e.g., when junction
+///   annotation is disabled).
 #[allow(clippy::too_many_arguments)]
 pub fn write_qualimap_results(
     result: &QualimapResult,
@@ -310,6 +346,8 @@ pub fn write_qualimap_results(
     gtf_path: &str,
     stranded: u8,
     output_dir: &Path,
+    sample_name: &str,
+    junction_counts: Option<(u64, u64, u64)>,
 ) -> Result<()> {
     // Auto-detect paired mode from the data
     let paired = result.left_proper_in_pair > 0 || result.right_proper_in_pair > 0;
@@ -362,6 +400,9 @@ pub fn write_qualimap_results(
     // --- Compute bias ---
     let (five_bias, three_bias, five_three_bias) = compute_bias(&entries);
 
+    // --- Compute mean coverage histogram ---
+    let coverage_histogram = compute_mean_coverage_histogram(&entries);
+
     // --- Write coverage profile TSVs ---
     let raw_data_dir = output_dir.join("raw_data_qualimapReport");
     fs::create_dir_all(&raw_data_dir)?;
@@ -396,6 +437,93 @@ pub fn write_qualimap_results(
     )?;
 
     info!("Wrote {}", results_path.display());
+
+    // --- Generate plots ---
+    let images_dir = output_dir.join("images_qualimapReport");
+    fs::create_dir_all(&images_dir)?;
+
+    // Coverage Profile Along Genes (Total / High / Low)
+    plots::coverage_profile_plot(
+        &total_profile,
+        "Coverage Profile Along Genes (Total)",
+        sample_name,
+        &images_dir.join("Coverage Profile Along Genes (Total).png"),
+    )?;
+
+    plots::coverage_profile_plot(
+        &high_profile,
+        "Coverage Profile Along Genes (High)",
+        sample_name,
+        &images_dir.join("Coverage Profile Along Genes (High).png"),
+    )?;
+
+    plots::coverage_profile_plot(
+        &low_profile,
+        "Coverage Profile Along Genes (Low)",
+        sample_name,
+        &images_dir.join("Coverage Profile Along Genes (Low).png"),
+    )?;
+
+    // Coverage Histogram (0-50X)
+    plots::coverage_histogram_plot(
+        &coverage_histogram,
+        sample_name,
+        &images_dir.join("Transcript coverage histogram.png"),
+    )?;
+
+    // Reads Genomic Origin pie chart
+    plots::reads_genomic_origin_plot(
+        result.exonic_reads,
+        result.intronic_reads,
+        result.intergenic_reads,
+        sample_name,
+        &images_dir.join("Reads Genomic Origin.png"),
+    )?;
+
+    // Junction Analysis pie chart (optional — requires RSeQC junction annotation data)
+    if let Some((known, partly_known, novel)) = junction_counts {
+        plots::junction_analysis_plot(
+            known,
+            partly_known,
+            novel,
+            sample_name,
+            &images_dir.join("Junction Analysis.png"),
+        )?;
+    }
+
+    info!("Wrote Qualimap plots to {}", images_dir.display());
+
+    // --- HTML report ---
+    let report_data = super::report::ReportData {
+        sample_name,
+        bam_path,
+        gtf_path,
+        paired,
+        stranded,
+        left_proper: result.left_proper_in_pair,
+        right_proper: result.right_proper_in_pair,
+        both_proper: result.both_proper_in_pair,
+        read_count: result.read_count,
+        primary_alignments: result.primary_alignments,
+        secondary_alignments: result.secondary_alignments,
+        alignment_not_unique: result.alignment_not_unique,
+        exonic_reads: result.exonic_reads,
+        ambiguous_reads: result.ambiguous_reads,
+        no_feature: result.no_feature,
+        not_aligned: result.not_aligned,
+        intronic_reads: result.intronic_reads,
+        intergenic_reads: result.intergenic_reads,
+        overlapping_exon_reads: result.overlapping_exon_reads,
+        ssp_fwd: result.ssp_fwd,
+        ssp_rev: result.ssp_rev,
+        reads_at_junctions: result.reads_at_junctions,
+        junction_motifs: &result.junction_motifs,
+        five_bias,
+        three_bias,
+        five_three_bias,
+        junction_counts,
+    };
+    super::report::write_html_report(&report_data, output_dir)?;
 
     Ok(())
 }

@@ -1043,6 +1043,18 @@ fn process_single_bam(
                 outdir.join("qualimap")
             };
 
+            // Extract junction event counts from the RSeQC accumulator (if available)
+            let junction_counts = rseqc_accums
+                .as_ref()
+                .and_then(|a| a.junc_annot.as_ref())
+                .map(|ja| {
+                    (
+                        ja.known_events,
+                        ja.partial_novel_events,
+                        ja.complete_novel_events,
+                    )
+                });
+
             rna::qualimap::output::write_qualimap_results(
                 qm_result,
                 qm_index,
@@ -1050,6 +1062,8 @@ fn process_single_bam(
                 params.gtf_path.unwrap_or(""),
                 params.stranded,
                 &qm_dir,
+                bam_stem,
+                junction_counts,
             )?;
             info!(
                 "[{}] Qualimap RNA-Seq QC results written to {:?}",

@@ -7,6 +7,8 @@ pub mod accumulator;
 pub mod coverage;
 pub mod index;
 pub mod output;
+pub mod plots;
+pub mod report;
 
 pub use accumulator::QualimapAccum;
 pub use index::QualimapIndex;
