@@ -707,10 +707,8 @@ fn process_chromosome_batch(
         })
         .collect();
     let tid_to_rseqc_chrom = &tid_to_gtf_chrom;
-    let tid_to_rseqc_chrom_upper: Vec<String> = tid_to_gtf_chrom
-        .iter()
-        .map(|s| s.to_uppercase())
-        .collect();
+    let tid_to_rseqc_chrom_upper: Vec<String> =
+        tid_to_gtf_chrom.iter().map(|s| s.to_uppercase()).collect();
 
     // Open an indexed reader for this thread (supports BAM with .bai/.csi and CRAM with .crai)
     let mut bam = bam::IndexedReader::from_path(bam_path)
@@ -970,25 +968,6 @@ fn process_chromosome_batch(
     Ok((result, rseqc_accums))
 }
 
-/// Count reads from an alignment file (SAM/BAM/CRAM) and assign them to genes.
-///
-/// Performs four simultaneous counting modes matching dupRadar's approach:
-/// - With/without multimappers
-/// - With/without PCR duplicates
-///
-/// When `threads > 1`, processing is parallelized by chromosome: the alignment
-/// index is used to divide chromosomes among threads, each opening its own reader
-/// and processing independently. Per-chromosome results are merged, and any
-/// unmatched paired-end mates (from cross-chromosome pairs) are reconciled in a
-/// final pass.
-///
-/// For paired-end data, this function buffers mates by a composite key matching
-/// featureCounts' `SAM_pairer_get_read_full_name()` (read name, R1/R2 refIDs,
-/// R1/R2 positions, HI tag). Gene assignment uses featureCounts' scoring strategy:
-/// genes overlapped by both mates score higher than genes overlapped by only one.
-///
-/// # Arguments
-/// * `bam_path` - Path to the duplicate-marked alignment file (BAM/CRAM must have
 /// Partition chromosome indices across workers using greedy bin-packing
 /// (largest-first scheduling). Assigns each chromosome to the worker with the
 /// smallest current total length, producing a more balanced distribution than
@@ -1113,7 +1092,10 @@ pub fn count_reads(
                 .iter()
                 .map(|b| b.iter().map(|&tid| tid_to_len[tid as usize]).sum())
                 .collect();
-            debug!("Chromosome load distribution across {} workers: {:?}", num_workers, worker_loads);
+            debug!(
+                "Chromosome load distribution across {} workers: {:?}",
+                num_workers, worker_loads
+            );
         }
 
         // Configure rayon thread pool
@@ -1921,7 +1903,9 @@ mod tests {
     #[test]
     fn test_partition_chromosomes_balanced() {
         // Simulate human-like chromosome sizes (large variation)
-        let lengths = vec![250, 243, 198, 191, 182, 171, 159, 146, 138, 133, 135, 130, 57];
+        let lengths = vec![
+            250, 243, 198, 191, 182, 171, 159, 146, 138, 133, 135, 130, 57,
+        ];
         let batches = partition_chromosomes(&lengths, 4);
 
         assert_eq!(batches.len(), 4);
