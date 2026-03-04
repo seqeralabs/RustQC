@@ -45,7 +45,7 @@ Given a duplicate-marked BAM file and a GTF or BED12 annotation, `rustqc rna` ru
 6. **Outputs featureCounts-format files** including biotype-level summaries
 7. **Estimates library complexity** via extrapolation (preseq lc_extrap equivalent)
 8. **Computes Transcript Integrity Number (TIN)** for RNA degradation assessment
-9. **Profiles gene body coverage** with Qualimap-compatible output
+9. **Runs Qualimap rnaseq analysis**: gene body coverage profiling, 5'/3' bias metrics, read origin classification, strand-specificity estimation, and junction analysis -- all with Qualimap-compatible MultiQC-parseable output
 10. **Produces samtools-compatible outputs** (flagstat, idxstats, stats)
 
 ### RSeQC tools -- RNA-seq quality control
@@ -67,13 +67,13 @@ Seven reimplementations of [RSeQC](https://rseqc.sourceforge.net/) tools, plus T
 
 | Tool | Equivalent | Description |
 |------|-----------|-------------|
+| Qualimap rnaseq | [Qualimap](http://qualimap.conesalab.org/) rnaseq | Gene body coverage profiling, 5'/3' bias metrics, read origin classification (exonic/intronic/intergenic), strand-specificity estimation, and junction analysis. Qualimap-compatible output parseable by MultiQC. |
 | preseq | [preseq](http://smithlabresearch.org/software/preseq/) `lc_extrap` | Library complexity extrapolation with bootstrap confidence intervals |
-| gene body coverage | [Qualimap](http://qualimap.conesalab.org/) rnaseq | Coverage profile along gene bodies with 5'/3' bias metrics |
 | flagstat | `samtools flagstat` | Alignment flag statistics |
 | idxstats | `samtools idxstats` | Per-chromosome read counts |
 | stats | `samtools stats` | Summary number (SN) statistics |
 
-When a GTF file is provided via `--gtf`, all tools run automatically — transcript-level structure is extracted from the GTF. Alternatively, a BED12 gene model file can be provided via `--bed` (mutually exclusive with `--gtf`), which runs the RSeQC tools, TIN, preseq, and samtools outputs, but skips dupRadar, featureCounts, and gene body coverage (they require a GTF). Both GTF and BED files can be provided plain or gzip-compressed (`.gz`) — compression is detected automatically. Individual tools can be disabled via the YAML configuration file.
+When a GTF file is provided via `--gtf`, all tools run automatically — transcript-level structure is extracted from the GTF. Alternatively, a BED12 gene model file can be provided via `--bed` (mutually exclusive with `--gtf`), which runs the RSeQC tools, TIN, preseq, and samtools outputs, but skips dupRadar, featureCounts, and Qualimap (they require a GTF). Both GTF and BED files can be provided plain or gzip-compressed (`.gz`) — compression is detected automatically. Individual tools can be disabled via the YAML configuration file.
 
 ## Credits
 
