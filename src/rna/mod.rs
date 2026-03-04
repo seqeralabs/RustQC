@@ -6,7 +6,6 @@
 pub mod bam_flags;
 pub mod dupradar;
 pub mod featurecounts;
-pub mod genebody;
 pub mod preseq;
 pub mod qualimap;
 pub mod rseqc;

@@ -645,13 +645,6 @@ fn process_single_bam(
         || rseqc_config.inner_distance_enabled
         || rseqc_config.preseq_enabled;
 
-    // === Build gene body coverage position map (if enabled) ===
-    let genebody_position_map = if params.config.genebody_coverage.enabled {
-        genes.map(rna::genebody::TranscriptPositionMap::from_genes)
-    } else {
-        None
-    };
-
     // === Build Qualimap exon index (if enabled, GTF-only) ===
     let qualimap_index = if params.config.qualimap.enabled {
         genes.map(rna::qualimap::QualimapIndex::from_genes)
@@ -686,7 +679,6 @@ fn process_single_bam(
             } else {
                 None
             },
-            genebody_position_map.as_ref(),
             qualimap_index.as_ref(),
         )?;
         info!(

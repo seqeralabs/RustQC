@@ -101,10 +101,6 @@ pub struct Config {
     #[serde(default)]
     pub tin: TinConfig,
 
-    /// Gene body coverage + Qualimap-compatible output configuration.
-    #[serde(default)]
-    pub genebody_coverage: GenebodyCoverageConfig,
-
     /// samtools stats-compatible output configuration (SN section).
     #[serde(default)]
     pub samtools_stats: SamtoolsStatsConfig,
@@ -513,23 +509,6 @@ impl Default for TinConfig {
             sample_size: None,
             min_coverage: None,
         }
-    }
-}
-
-/// Configuration for gene body coverage and Qualimap-compatible output.
-///
-/// When enabled, produces a coverage profile along gene bodies and a
-/// Qualimap-compatible `rnaseq_qc_results.txt` file parseable by MultiQC.
-#[derive(Debug, Deserialize)]
-#[serde(default)]
-pub struct GenebodyCoverageConfig {
-    /// Whether to produce gene body coverage output. Defaults to true.
-    pub enabled: bool,
-}
-
-impl Default for GenebodyCoverageConfig {
-    fn default() -> Self {
-        Self { enabled: true }
     }
 }
 
