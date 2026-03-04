@@ -73,7 +73,7 @@ mod tests {
         let header_refs: Vec<(String, u64)> = (0..header.target_count())
             .map(|tid| {
                 let name = String::from_utf8_lossy(header.tid2name(tid)).to_string();
-                let len = header.target_len(tid).unwrap_or(0) as u64;
+                let len = header.target_len(tid).unwrap_or(0);
                 (name, len)
             })
             .collect();

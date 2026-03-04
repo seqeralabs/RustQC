@@ -137,8 +137,6 @@ pub struct BamStatAccum {
     pub proper_pairs: u64,
     /// Among proper-paired unique reads: mates on different chromosomes.
     pub proper_pair_diff_chrom: u64,
-    /// MAPQ distribution for primary, non-QC-fail, non-dup, mapped reads.
-    pub mapq_distribution: BTreeMap<u8, u64>,
 
     // --- samtools flagstat additional fields ---
     /// Secondary alignments (0x100) — counted independently of QC/dup.
@@ -211,8 +209,6 @@ pub struct BamStatAccum {
     pub outward_pairs: u64,
     /// Other orientation pairs (FF, RR).
     pub other_orientation: u64,
-    /// Primary reads that are paired (for "raw total sequences" = paired means /2 fragments).
-    pub primary_paired: u64,
     /// Total primary reads (non-secondary, non-supplementary).
     pub primary_count: u64,
     /// Primary mapped reads count (non-secondary, non-supplementary, !unmapped).
@@ -342,9 +338,6 @@ impl BamStatAccum {
                 self.max_len = seq_len;
             }
 
-            if is_paired {
-                self.primary_paired += 1;
-            }
             if is_dup {
                 self.primary_duplicates += 1;
                 self.bases_duplicated += seq_len;
@@ -485,9 +478,6 @@ impl BamStatAccum {
             return;
         }
 
-        // Mapped primary non-QC-fail non-dup: record MAPQ distribution
-        *self.mapq_distribution.entry(mapq).or_insert(0) += 1;
-
         // 5. MAPQ classification
         if mapq < mapq_cut {
             self.non_unique += 1;
@@ -547,9 +537,6 @@ impl BamStatAccum {
         self.non_splice += other.non_splice;
         self.proper_pairs += other.proper_pairs;
         self.proper_pair_diff_chrom += other.proper_pair_diff_chrom;
-        for (mapq, count) in other.mapq_distribution {
-            *self.mapq_distribution.entry(mapq).or_insert(0) += count;
-        }
 
         // samtools flagstat fields
         self.secondary += other.secondary;
@@ -599,7 +586,6 @@ impl BamStatAccum {
         self.inward_pairs += other.inward_pairs;
         self.outward_pairs += other.outward_pairs;
         self.other_orientation += other.other_orientation;
-        self.primary_paired += other.primary_paired;
         self.primary_count += other.primary_count;
         self.primary_mapped += other.primary_mapped;
         self.primary_duplicates += other.primary_duplicates;
@@ -1633,7 +1619,6 @@ impl BamStatAccum {
             non_splice: self.non_splice,
             proper_pairs: self.proper_pairs,
             proper_pair_diff_chrom: self.proper_pair_diff_chrom,
-            mapq_distribution: self.mapq_distribution,
             // samtools flagstat fields
             secondary: self.secondary,
             supplementary: self.supplementary,
@@ -1670,7 +1655,6 @@ impl BamStatAccum {
             inward_pairs: self.inward_pairs,
             outward_pairs: self.outward_pairs,
             other_orientation: self.other_orientation,
-            primary_paired: self.primary_paired,
             primary_count: self.primary_count,
             primary_mapped: self.primary_mapped,
             primary_duplicates: self.primary_duplicates,

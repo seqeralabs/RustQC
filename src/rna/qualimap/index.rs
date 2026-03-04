@@ -22,21 +22,15 @@ use crate::gtf::Gene;
 /// Qualimap assigns reads by checking that all M-blocks are *enclosed*
 /// (fully contained) within exons of the same gene.
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)] // fields are stored in COITree; read in tests and available for future queries
 pub struct ExonMeta {
     /// Index into the gene list (position in the IndexMap).
-    #[allow(dead_code)]
     pub gene_idx: u32,
-    /// Index into the transcript list within the gene.
-    #[allow(dead_code)]
-    pub transcript_idx: u16,
     /// Exon start in 0-based half-open coordinates.
-    #[allow(dead_code)]
     pub exon_start: i32,
     /// Exon end in 0-based half-open coordinates.
-    #[allow(dead_code)]
     pub exon_end: i32,
     /// Strand ('+', '-', or '.').
-    #[allow(dead_code)]
     pub strand: u8,
 }
 
@@ -44,7 +38,6 @@ impl Default for ExonMeta {
     fn default() -> Self {
         Self {
             gene_idx: 0,
-            transcript_idx: 0,
             exon_start: 0,
             exon_end: 0,
             strand: b'.',
@@ -152,16 +145,10 @@ pub struct TranscriptInfo {
 /// merged model, which gives the correct bias and coverage profile values.
 #[derive(Debug, Clone)]
 pub struct MergedGeneModel {
-    /// Gene index (position in the IndexMap).
-    #[allow(dead_code)]
-    pub gene_idx: u32,
     /// Strand ('+', '-', or '.').
-    #[allow(dead_code)]
     pub strand: char,
     /// Merged non-overlapping exon intervals in 0-based half-open coordinates, sorted by start.
     pub exons: Vec<(i32, i32)>,
-    /// Total merged exonic length (sum of merged exon lengths).
-    pub exonic_length: u32,
 }
 
 impl MergedGeneModel {
@@ -170,15 +157,9 @@ impl MergedGeneModel {
     /// Takes all exon intervals (0-based half-open) from all transcripts,
     /// sorts them, and merges overlapping/adjacent intervals into a single
     /// non-redundant set.
-    pub fn from_transcripts(gene_idx: u32, strand: char, all_exons: &[(i32, i32)]) -> Self {
+    pub fn from_transcripts(strand: char, all_exons: &[(i32, i32)]) -> Self {
         let exons = merge_intervals(all_exons);
-        let exonic_length: u32 = exons.iter().map(|(s, e)| (e - s) as u32).sum();
-        Self {
-            gene_idx,
-            strand,
-            exons,
-            exonic_length,
-        }
+        Self { strand, exons }
     }
 }
 
@@ -239,12 +220,6 @@ pub struct QualimapIndex {
     /// Lookup: gene_idx -> range of transcript indices in `transcripts` vec.
     /// `gene_transcript_ranges[gene_idx] = (start, end)` half-open into `transcripts`.
     pub gene_transcript_ranges: Vec<(u32, u32)>,
-    /// Merged gene models: one per gene, indexed by gene_idx.
-    /// Each merges all exons from all transcripts into non-redundant intervals.
-    pub merged_gene_models: Vec<MergedGeneModel>,
-    /// Total number of genes.
-    #[allow(dead_code)]
-    pub num_genes: u32,
 }
 
 impl QualimapIndex {
@@ -298,7 +273,6 @@ impl QualimapIndex {
                         end,
                         ExonMeta {
                             gene_idx,
-                            transcript_idx: tx_idx,
                             exon_start: start,
                             exon_end: end,
                             strand: tx.strand as u8,
@@ -357,7 +331,6 @@ impl QualimapIndex {
 
             // Build merged gene model from all exons across all transcripts
             merged_gene_models.push(MergedGeneModel::from_transcripts(
-                gene_idx,
                 gene.strand,
                 &all_gene_exons,
             ));
@@ -415,11 +388,9 @@ impl QualimapIndex {
             .map(|(chrom, intervals)| (chrom, COITree::new(&intervals)))
             .collect();
 
-        let num_genes = genes.len() as u32;
-
         debug!(
             "Built Qualimap index: {} genes, {} transcripts, {} chromosomes with exons",
-            num_genes,
+            genes.len(),
             transcripts.len(),
             exon_trees.len(),
         );
@@ -430,8 +401,6 @@ impl QualimapIndex {
             intron_trees,
             transcripts,
             gene_transcript_ranges,
-            merged_gene_models,
-            num_genes,
         }
     }
 
@@ -539,7 +508,7 @@ mod tests {
 
         let index = QualimapIndex::from_genes(&genes);
 
-        assert_eq!(index.num_genes, 1);
+        assert_eq!(index.gene_transcript_ranges.len(), 1);
         assert_eq!(index.transcripts.len(), 1);
         assert!(index.exon_tree("chr1").is_some());
         assert!(index.intron_tree("chr1").is_some());
@@ -564,14 +533,14 @@ mod tests {
         // Check that exon tree has entries
         let tree = index.exon_tree("chr1").unwrap();
         let mut hits = Vec::new();
-        tree.query(150, 160, |iv| hits.push(iv.metadata.clone()));
+        tree.query(150, 160, |iv| hits.push(iv.metadata));
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].gene_idx, 0);
 
         // Check intron tree: intron from 200..300
         let itree = index.intron_tree("chr1").unwrap();
         let mut ihits = Vec::new();
-        itree.query(250, 260, |iv| ihits.push(iv.metadata.clone()));
+        itree.query(250, 260, |iv| ihits.push(iv.metadata));
         assert_eq!(ihits.len(), 1);
         assert_eq!(ihits[0].gene_idx, 0);
     }

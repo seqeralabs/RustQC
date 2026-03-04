@@ -1630,7 +1630,7 @@ pub fn count_reads(
         qualimap: match (merged.qualimap, qualimap_index) {
             (Some(mut a), Some(idx)) => {
                 a.flush_unpaired(idx);
-                Some(a.into_result(idx))
+                Some(a.into_result())
             }
             _ => None,
         },

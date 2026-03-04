@@ -52,9 +52,6 @@ pub struct QualimapResult {
     // --- Fragment counters (PE) ---
     /// Total reads counted (PE: each mate counts as 1 read).
     pub read_count: u64,
-    /// Total fragments counted (PE: 1 per paired fragment).
-    #[allow(dead_code)] // populated but not yet consumed in output
-    pub fragment_count: u64,
     /// Left-of-pair reads (first-of-pair in paired mode).
     pub left_proper_in_pair: u64,
     /// Right-of-pair reads (second-of-pair in paired mode).
@@ -69,23 +66,11 @@ pub struct QualimapResult {
     pub junction_motifs: HashMap<String, u64>,
 
     // --- Per-transcript coverage ---
-    /// Per-transcript coverage arrays (transcript_key -> per-base coverage).
-    #[allow(dead_code)] // populated but not yet consumed in output
-    pub transcript_coverage: HashMap<String, Vec<i32>>,
-
     /// Raw per-transcript coverage keyed by flat index (for bias computation).
     /// Retains the internal indexing used during accumulation so that bias
     /// computation can look up transcript metadata (strand, exonic length)
     /// efficiently via the `QualimapIndex`.
     pub transcript_coverage_raw: coverage::TranscriptCoverage,
-
-    // --- Merged gene coverage ---
-    /// Per-gene coverage using merged exon models (gene_idx -> per-base coverage).
-    /// Qualimap's Picard Gene.Transcript merges all exons from all isoforms into
-    /// a single non-redundant exon set per gene. This produces more accurate
-    /// bias and profile values than per-transcript tracking.
-    #[allow(dead_code)] // populated but not yet consumed in output
-    pub merged_gene_coverage: coverage::MergedGeneCoverage,
 
     /// Forward strand estimation count for SSP.
     pub ssp_fwd: u64,
