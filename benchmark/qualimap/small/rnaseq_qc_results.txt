@@ -3,7 +3,7 @@ RNA-Seq QC report
 
 >>>>>>> Input
 
-    bam file = /data/test.bam
+    bam file = /tmp/rustqc_bench/test.namesorted.bam
     gff file = /data/chr6.gtf
     counting algorithm = uniquely-mapped-reads
     protocol = strand-specific-reverse
