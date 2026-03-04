@@ -341,7 +341,7 @@ tin:
 Requires annotation (`--gtf` or `--bed`). The TIN (Transcript Integrity Number)
 measures transcript integrity via Shannon entropy of read coverage uniformity.
 
-### qualimap
+## qualimap
 
 ```yaml
 qualimap:
@@ -354,7 +354,7 @@ read origin classification (exonic/intronic/intergenic), strand-specificity
 estimation, and splice junction motif counting. Produces Qualimap-compatible
 output files parseable by MultiQC.
 
-### preseq
+## preseq
 
 ```yaml
 preseq:
@@ -371,6 +371,8 @@ preseq:
 Runs in both GTF and BED modes (only needs BAM fragment info). The `max_extrap`,
 `step_size`, and `n_bootstraps` can also be set via CLI flags (`--preseq-max-extrap`,
 `--preseq-step-size`, `--preseq-n-bootstraps`). Use `--skip-preseq` to disable entirely.
+
+## samtools
 
 ### flagstat / idxstats / samtools_stats
 
