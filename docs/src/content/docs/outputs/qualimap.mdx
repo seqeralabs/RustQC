@@ -42,6 +42,13 @@ information needed for coverage profiling and read origin classification are
 only available from GTF annotations.
 :::
 
+:::tip[No name-sorted BAM required]
+The original Qualimap requires **name-sorted** BAM files as input, which
+typically means adding an extra `samtools sort -n` step to your pipeline.
+RustQC works directly with **coordinate-sorted** BAM files (the standard
+output of most aligners), so you can skip this sorting step entirely.
+:::
+
 ## Output files
 
 All Qualimap output files are written to a `qualimap/` subdirectory under the
@@ -200,6 +207,8 @@ A self-contained HTML report matching Qualimap's layout and styling, including
 all six chart images, summary tables, and a sidebar table of contents.
 The report uses embedded CSS and base64-encoded assets so it can be viewed
 in any browser without external dependencies.
+
+<a href={`${base}examples/qualimap/qualimapReport.html`} target="_blank">View an example HTML report</a>
 
 ## Interpreting results
 

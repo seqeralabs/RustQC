@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Qualimap report: RNA Seq QC - GM12878_REP1.markdup.sorted</title>
+<style>
+
+/* === agogo.css (Sphinx agogo theme) === */
+* { margin: 0px; padding: 0px; }
+body { font-family: "Verdana", Arial, sans-serif; line-height: 1.4em; color: black; background-color: #eeeeec; }
+a { color: #ce5c00; }
+div.bodywrapper a, div.footer a { text-decoration: underline; }
+.clearer { clear: both; }
+.left { float: left; }
+.right { float: right; }
+img { border: 0; }
+
+/* Header */
+div.header, div.content, div.footer { width: 70em; margin-left: auto; margin-right: auto; }
+div.header-wrapper { background: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAMAAABQCAYAAADcMs/mAAAAAXNSR0IArs4c6QAAAAZiS0dEAFUAVwBTkiHDvwAAAAlwSFlzAAALEwAACxMBAJqcGAAAAAd0SU1FB9kCEwctBZSG9LMAAAAZdEVYdENvbW1lbnQAQ3JlYXRlZCB3aXRoIEdJTVBXgQ4XAAABCUlEQVQ4y12Sy45AIQhDD8Rfn2QyH21nQVG8rhR5lLbx+/cjfJJxEoQASeSuGwAL1HcSCfxYFa3Aki8RkNr1kGDhtq5xjmQEz4/PqmYVSD1D+yZIOU0NFEP6dhMi3O3AUbUOB1b97DG0xlQDAOIAjV67k86cystGI4lsdlTYqiYOatMwUEeneZ9WIS42sZv4YEiiU3NWiGa02eECHUP1puX2HPvgynjYQe7Gji8H6ppdhBSz4U15jFSbhdqW28TfOR928vJuteOIZaqqwQaFYGMVHlNMRlVzrem1JYTpSrEnvfZotAp2fL7ubek1a/R1/Hzk8PiXKmw+xCqaNkSM5aS7zxl6ZJzd/gFE3hujlFg/uwAAAABJRU5ErkJggg==) top left repeat-x; border-bottom: 3px solid #2e3436; }
+div.header { padding-top: 10px; padding-bottom: 10px; }
+div.header .headertitle { font-family: "Georgia", "Times New Roman", serif; font-weight: normal; font-size: 180%; letter-spacing: .08em; margin-bottom: .8em; }
+div.header .headertitle a { color: white; }
+div.sidebar a, div.header a { text-decoration: none; }
+div.sidebar a:hover, div.header a:hover { text-decoration: underline; }
+p.logo { float: right; }
+img.logo { border: 0; }
+
+/* Headings */
+h1, h2, h3, h4 { font-family: "Georgia", "Times New Roman", serif; font-weight: normal; color: #3465a4; margin-bottom: .8em; }
+h1 { color: #204a87; }
+h2 { padding-bottom: .5em; border-bottom: 1px solid #3465a4; }
+a.headerlink { visibility: hidden; color: #dddddd; padding-left: .3em; }
+
+/* Content */
+div.content-wrapper { background-color: white; padding-top: 20px; padding-bottom: 20px; }
+div.document { width: 50em; float: left; }
+div.body { padding-right: 2em; text-align: justify; }
+div.document h1 { line-height: 120%; }
+div.document h2 { margin-top: .7em; }
+div.document .section { margin-top: 1.7em; }
+div.document .section:first-child { margin-top: 0px; }
+img.align-center-qualimap { display: block; margin-left: auto; margin-right: auto; width: 100%; }
+
+/* Sidebar */
+div.sidebar { width: 20em; float: right; font-size: .9em; }
+div.sidebar h3 { color: #2e3436; text-transform: uppercase; font-size: 130%; letter-spacing: .1em; }
+div.sidebar ul { list-style-type: none; }
+div.sidebar li.toctree-l1 a { display: block; padding: 1px; border: 1px solid #dddddd; background-color: #eeeeec; margin-bottom: .4em; padding-left: 3px; color: #2e3436; }
+div.sidebar li.toctree-l1 a:hover { background-color: #dddddd; text-decoration: none; }
+div.sidebar li.toctree-l1.current a { border-right: 5px solid #fcaf3e; font-weight: bold; }
+
+/* Footer */
+div.footer-wrapper { background: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAMAAABQCAYAAADcMs/mAAAAAXNSR0IArs4c6QAAAAZiS0dEANMA1wDPtAtCYgAAAAlwSFlzAAALEwAACxMBAJqcGAAAAAd0SU1FB9kCEwc0ERVcidYAAAAZdEVYdENvbW1lbnQAQ3JlYXRlZCB3aXRoIEdJTVBXgQ4XAAABDUlEQVQ4y22SO5IlMQgEMxXc/2prjDHHYQ0+0nsxbalDoiiS8uf3X9Lf4fk+f+yDWjcKkAQKCQgHBKfGeqetZgJIgFt2BNJ8n5VCVA/rGTptOOY46JsyR0sjkBzsArwjwD5r1445IdK+SzhzKGln7uSMSVMCs2psO67RYeUSzYfBZV0VaY/d4ncLDtHkCyJIjFajqnkEYqDn0MEa9qy4XwuOXGkIt/8TCoWjHyNsKoqb5OWWiNkODpD+HbFqHKPkOmiR3XaNMHHRy9plUHpEPdm4QOagQs5k9CZk+nTZM9ywznzHnoiNU7vPs8Y2CZwG8+S6kxWfAg/4cHf/Rtkv8E+q3uxc6dKI6+xrC/8BSHkzA/8EsJQAAAAASUVORK5CYII=) top left repeat-x; border-top: 4px solid #babdb6; padding-top: 10px; padding-bottom: 10px; min-height: 80px; }
+div.footer, div.footer a { color: #888a85; }
+div.footer .right { text-align: right; }
+div.footer .left { text-transform: uppercase; }
+
+/* === report.css (Qualimap report additions) === */
+table.summary { border: 0; width: 100%; vertical-align: top; }
+div.table-summary { margin-left: auto; margin-right: auto; padding-bottom: 20px; }
+td.column1 { width: 60%; }
+table.hovertable { font-size: 14px; border: 1px solid #999999; border-collapse: collapse; }
+table.hovertable th { background-color: #ffffff; border: 1px solid #a9c6c9; padding: 8px; }
+table.hovertable tr { background-color: #ffffff; }
+table.hovertable td { border: 1px solid #a9c6c9; padding: 8px; }
+
+</style>
+</head>
+<body>
+<div class="header-wrapper">
+<div class="header">
+<p class="logo"><a href="http://qualimap.bioinfo.cipf.es/"><img class="logo" src="data:image/png;base64,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" alt="Logo"/></a></p>
+<div class="headertitle"><a href="">Qualimap Report: RNA Seq QC</a></div>
+<div style="clear: both;"></div>
+</div>
+</div>
+<div class="content-wrapper">
+<div class="content">
+<div class="document">
+<div class="documentwrapper">
+<div class="bodywrapper">
+<div class="body">
+<div class="section">
+<h2>Input data and parameters<a class="headerlink" name="input">&nbsp;</a></h2>
+<p>Report generated by <a href="https://github.com/seqeralabs/RustQC">RustQC</a>, a Rust performance-rewrite of Qualimap. Results should be identical to Qualimap v2.3 output.</p>
+<div class="summary">
+<div class="table-summary">
+<h3>Input</h3>
+<table class="summary hovertable">
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">Analysis date: </td><td class="column2">2026/03/04 18:16:32</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">BAM file: </td><td class="column2">/Users/ewels/GitHub/seqera/RustQC/benchmark/input/large/GM12878_REP1.markdup.sorted.bam</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">Counting algorithm:</td><td class="column2"> uniquely-mapped-reads</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">GTF file: </td><td class="column2">/Users/ewels/GitHub/seqera/RustQC/benchmark/input/large/genes.gtf.gz</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">Number of bases for 5'-3' bias computation:</td><td class="column2"> 100</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">Number of transcripts for 5'-3' bias computation:</td><td class="column2"> 1,000</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">Paired-end sequencing:</td><td class="column2"> yes</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">Protocol: </td><td class="column2">non-strand-specific</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">Sorting performed:</td><td class="column2"> no</td>
+</tr>
+</table>
+</div>
+</div>
+</div>
+<div class="section">
+<h2>Summary<a class="headerlink" name="summary">&nbsp;</a></h2>
+<div class="summary">
+<div class="table-summary">
+<h3>Reads alignment</h3>
+<table class="summary hovertable">
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">Number of mapped reads (left/right):</td><td class="column2">87,559,392 / 87,538,329</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">Number of aligned pairs (without duplicates):</td><td class="column2">174,840,354</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">Total number of alignments:</td><td class="column2">175,097,721</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">Number of secondary alignments:</td><td class="column2">10,620,822</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">Number of non-unique alignments:</td><td class="column2">17,723,193</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">Aligned to genes:</td><td class="column2">9,591,169</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">Ambiguous alignments:</td><td class="column2">332,227</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">No feature assigned:</td><td class="column2">158,071,954</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">Not aligned:</td><td class="column2">0</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">Strand specificity estimation (fwd/rev):</td><td class="column2">33.27% / 66.73%</td>
+</tr>
+</table>
+</div>
+</div>
+<div class="summary">
+<div class="table-summary">
+<h3>Reads genomic origin</h3>
+<table class="summary hovertable">
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">Exonic: </td><td class="column2">9,591,169 / 5.72%</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">Intronic: </td><td class="column2">105,144,042 / 62.71%</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">Intergenic: </td><td class="column2">52,927,912 / 31.57%</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">Intronic/intergenic overlapping exon: </td><td class="column2">6,748,550 / 4.03%</td>
+</tr>
+</table>
+</div>
+</div>
+<div class="summary">
+<div class="table-summary">
+<h3>Transcript coverage profile</h3>
+<table class="summary hovertable">
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">5' bias:</td><td class="column2">0.31</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">3' bias:</td><td class="column2">0.22</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">5'-3' bias:</td><td class="column2">1.40</td>
+</tr>
+</table>
+</div>
+</div>
+<div class="summary">
+<div class="table-summary">
+<h3>Junction analysis</h3>
+<table class="summary hovertable">
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">Reads at junctions:</td><td class="column2">60,467,173</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">ACCT</td><td class="column2">5.69%</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">AGGT</td><td class="column2">5.50%</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">AGGA</td><td class="column2">3.56%</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">TCCT</td><td class="column2">3.25%</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">ATCT</td><td class="column2">3.13%</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">AGGC</td><td class="column2">2.93%</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">AGCT</td><td class="column2">2.89%</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">GCCT</td><td class="column2">2.63%</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">AGGG</td><td class="column2">2.35%</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">CCCT</td><td class="column2">2.31%</td>
+</tr>
+<tr onmouseover="this.style.backgroundColor='#EEEEEC';" onmouseout="this.style.backgroundColor='#FFFFFF';">
+<td class="column1">AGAT</td><td class="column2">2.08%</td>
+</tr>
+</table>
+</div>
+</div>
+</div>
+<div class="section">
+<h2>Reads Genomic Origin<a class="headerlink" name="Reads Genomic Origin">&nbsp;</a></h2>
+<div><img width="100%" src="images_qualimapReport/Reads Genomic Origin.png"></div>
+</div>
+<div class="section">
+<h2>Coverage Profile Along Genes (Total)<a class="headerlink" name="Coverage Profile Along Genes (Total)">&nbsp;</a></h2>
+<div><img width="100%" src="images_qualimapReport/Coverage Profile Along Genes (Total).png"></div>
+</div>
+<div class="section">
+<h2>Coverage Profile Along Genes (Low)<a class="headerlink" name="Coverage Profile Along Genes (Low)">&nbsp;</a></h2>
+<div><img width="100%" src="images_qualimapReport/Coverage Profile Along Genes (Low).png"></div>
+</div>
+<div class="section">
+<h2>Coverage Profile Along Genes (High)<a class="headerlink" name="Coverage Profile Along Genes (High)">&nbsp;</a></h2>
+<div><img width="100%" src="images_qualimapReport/Coverage Profile Along Genes (High).png"></div>
+</div>
+<div class="section">
+<h2>Coverage Histogram (0-50X)<a class="headerlink" name="Transcript coverage histogram">&nbsp;</a></h2>
+<div><img width="100%" src="images_qualimapReport/Transcript coverage histogram.png"></div>
+</div>
+<div class="section">
+<h2>Junction Analysis<a class="headerlink" name="Junction Analysis">&nbsp;</a></h2>
+<div><img width="100%" src="images_qualimapReport/Junction Analysis.png"></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="sidebar">
+<h3>Contents</h3>
+<li class="toctree-l1"><a href="#input">Input data &amp; parameters</a></li>
+<li class="toctree-l1"><a href="#summary">Summary</a></li>
+<li class="toctree-l1"><a href="#Reads Genomic Origin">Reads Genomic Origin</a></li>
+<li class="toctree-l1"><a href="#Coverage Profile Along Genes (Total)">Coverage Profile Along Genes (Total)</a></li>
+<li class="toctree-l1"><a href="#Coverage Profile Along Genes (Low)">Coverage Profile Along Genes (Low)</a></li>
+<li class="toctree-l1"><a href="#Coverage Profile Along Genes (High)">Coverage Profile Along Genes (High)</a></li>
+<li class="toctree-l1"><a href="#Transcript coverage histogram">Coverage Histogram (0-50X)</a></li>
+<li class="toctree-l1"><a href="#Junction Analysis">Junction Analysis</a></li>
+</div>
+<div style="clear: both;"></div>
+</div>
+</div>
+<div class="footer-wrapper">
+<div class="footer">
+<div class="left"><div class="footer">2026/03/04 18:16:32</div></div>
+<div class="right"><div class="footer">Generated by <a href="https://github.com/seqeralabs/RustQC">RustQC</a>, compatible with QualiMap v.2.3</div></div>
+<div class="clearer"></div>
+</div>
+</div>
+</body>
+</html>
