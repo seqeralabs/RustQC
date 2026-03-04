@@ -18,18 +18,26 @@ Unknown fields are silently ignored, so config files remain forward-compatible.
 
 :::note
 Since all analyses run within the `rustqc rna` command, the configuration file
-controls all tools: dupRadar, featureCounts, and all 7 RSeQC tools. Each RSeQC
-tool has an `enabled` toggle and tool-specific parameter overrides.
+controls all tools: dupRadar, featureCounts, all 7 RSeQC tools, TIN, Qualimap,
+preseq, and samtools. Each tool has an `enabled` toggle and tool-specific
+parameter overrides where applicable.
 CLI flags take precedence over config file values.
 :::
 
 ## Full example
 
 ```yaml
+# Library settings
+stranded: 0       # 0=unstranded, 1=forward, 2=reverse
+paired: true      # Paired-end mode
+
 # Chromosome name remapping
 chromosome_prefix: "chr"
 chromosome_mapping:
   chrM: "MT"
+
+# Output directory layout
+flat_output: false  # Set to true to skip subdirectories
 
 # dupRadar output toggles
 dupradar:
@@ -83,6 +91,10 @@ tin:
   sample_size: 100
   min_coverage: 10
 
+# Qualimap RNA-Seq QC
+qualimap:
+  enabled: true
+
 # Library complexity (preseq lc_extrap)
 preseq:
   enabled: true
@@ -101,6 +113,38 @@ idxstats:
   enabled: true
 samtools_stats:
   enabled: true
+```
+
+## Library settings
+
+### `stranded`
+
+Library strandedness for strand-aware read counting:
+
+| Value | Meaning |
+|-------|---------|
+| `0` | Unstranded (count reads on either strand) |
+| `1` | Forward stranded (read 1 maps to the transcript strand) |
+| `2` | Reverse stranded (read 2 maps to the transcript strand) |
+
+**Default:** `0` (unstranded)
+
+This can also be set via the `-s` / `--stranded` CLI flag, which takes
+precedence over the config file value.
+
+### `paired`
+
+Enable paired-end mode. When `true`, read pairs are counted as a single
+fragment.
+
+**Default:** `false` (single-end mode)
+
+This can also be set via the `-p` / `--paired` CLI flag. If either the CLI flag
+or the config file value is `true`, paired-end mode is enabled.
+
+```yaml
+stranded: 2
+paired: true
 ```
 
 ## Chromosome name mapping

@@ -10,11 +10,11 @@ This guide walks you through a basic RustQC analysis from start to finish.
 The `rustqc rna` command runs all analyses in a single pass. It requires:
 
 - A **duplicate-marked** alignment file (BAM, SAM, or CRAM). Duplicates must be flagged with SAM flag 0x400 by a tool like [Picard MarkDuplicates](https://broadinstitute.github.io/picard/), [samblaster](https://github.com/GregoryFaust/samblaster), or [sambamba](https://github.com/biod/sambamba).
-- Either a **GTF annotation** file (`--gtf`) or a **BED12 gene model** file (`--bed`). Both can be plain or gzip-compressed (`.gz`) — compression is detected automatically. With a GTF, all analyses run (dupRadar, featureCounts, and all 7 RSeQC tools). With a BED file, only the 7 RSeQC tools run. The two flags are mutually exclusive.
+- Either a **GTF annotation** file (`--gtf`) or a **BED12 gene model** file (`--bed`). Both can be plain or gzip-compressed (`.gz`) — compression is detected automatically. With a GTF, all analyses run (dupRadar, featureCounts, all 7 RSeQC tools, TIN, Qualimap, preseq, and samtools). With a BED file, RSeQC tools, TIN, preseq, and samtools run, but dupRadar, featureCounts, and Qualimap are skipped. The two flags are mutually exclusive.
 
 ## RNA-seq duplicate analysis
 
-Run all RNA-seq QC analyses (dupRadar, featureCounts, and RSeQC tools) in a single pass:
+Run all RNA-seq QC analyses (dupRadar, featureCounts, RSeQC tools, TIN, Qualimap, preseq, and samtools) in a single pass:
 
 ```bash
 rustqc rna sample.markdup.bam --gtf genes.gtf -p -o results/
@@ -61,14 +61,14 @@ See [dupRadar Outputs](/outputs/dupradar/), [featureCounts Outputs](/outputs/fea
 ## RSeQC quality control tools
 
 RustQC reimplements seven [RSeQC](https://rseqc.sourceforge.net/) tools, all
-integrated into the `rustqc rna` command. They run automatically alongside the
-dupRadar and featureCounts analyses:
+integrated into the `rustqc rna` command. They run automatically alongside
+dupRadar, featureCounts, Qualimap, preseq, and samtools analyses:
 
 ```bash
 # Run everything with a GTF: dupRadar + featureCounts + all 7 RSeQC tools
 rustqc rna sample.markdup.bam --gtf genes.gtf -p -o results/
 
-# Or run RSeQC tools only with a BED file (no dupRadar/featureCounts)
+# Or run with a BED file (RSeQC + TIN + preseq + samtools; no dupRadar/featureCounts/Qualimap)
 rustqc rna sample.markdup.bam --bed genes.bed -p -o results/
 ```
 

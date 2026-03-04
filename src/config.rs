@@ -43,6 +43,25 @@ pub struct Config {
     /// ```
     pub chromosome_mapping: HashMap<String, String>,
 
+    /// Library strandedness for strand-aware read counting.
+    ///
+    /// - `0` = unstranded (count reads on either strand)
+    /// - `1` = forward stranded (read 1 maps to the transcript strand)
+    /// - `2` = reverse stranded (read 2 maps to the transcript strand)
+    ///
+    /// The CLI `-s` / `--stranded` flag takes precedence over this setting.
+    /// **Default:** `0` (unstranded).
+    #[serde(default)]
+    pub stranded: Option<u8>,
+
+    /// Enable paired-end mode.
+    ///
+    /// When `true`, read pairs are counted as a single fragment.
+    /// The CLI `-p` / `--paired` flag takes precedence over this setting.
+    /// **Default:** `false` (single-end mode).
+    #[serde(default)]
+    pub paired: Option<bool>,
+
     /// Write all output files to a flat directory (no subdirectories).
     ///
     /// By default (`false`), output files are organised into subdirectories by
@@ -722,6 +741,9 @@ mod tests {
         let config: Config = serde_yaml_ng::from_str("").unwrap();
         assert!(config.chromosome_mapping.is_empty());
         assert!(!config.has_chromosome_mapping());
+        // stranded/paired default to None (defer to CLI)
+        assert_eq!(config.stranded, None);
+        assert_eq!(config.paired, None);
         // flat_output defaults to false (nested subdirectories)
         assert!(!config.flat_output);
         // Defaults: all outputs enabled
@@ -749,6 +771,26 @@ mod tests {
         assert_eq!(config.preseq.seed, 1);
         assert_eq!(config.preseq.max_terms, 100);
         assert!(!config.preseq.defects);
+    }
+
+    #[test]
+    fn test_stranded_paired_config() {
+        // Defaults: None (defer to CLI)
+        let config: Config = serde_yaml_ng::from_str("").unwrap();
+        assert_eq!(config.stranded, None);
+        assert_eq!(config.paired, None);
+
+        // Explicit values
+        let yaml = "stranded: 2\npaired: true\n";
+        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        assert_eq!(config.stranded, Some(2));
+        assert_eq!(config.paired, Some(true));
+
+        // Zero is a valid explicit value
+        let yaml = "stranded: 0\npaired: false\n";
+        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        assert_eq!(config.stranded, Some(0));
+        assert_eq!(config.paired, Some(false));
     }
 
     #[test]

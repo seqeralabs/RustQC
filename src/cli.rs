@@ -88,11 +88,11 @@ pub struct RnaArgs {
     pub bed: Option<String>,
 
     /// Library strandedness: 0=unstranded, 1=forward, 2=reverse
-    #[arg(short, long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(0..=2))]
-    pub stranded: u8,
+    #[arg(short, long, value_parser = clap::value_parser!(u8).range(0..=2))]
+    pub stranded: Option<u8>,
 
     /// Whether the library is paired-end
-    #[arg(short, long, default_value_t = false)]
+    #[arg(short, long)]
     pub paired: bool,
 
     /// Number of threads for parallel processing
@@ -229,7 +229,7 @@ mod tests {
             Commands::Rna(args) => {
                 assert_eq!(args.input, vec!["test.bam"]);
                 assert_eq!(args.gtf, Some("genes.gtf".to_string()));
-                assert_eq!(args.stranded, 0);
+                assert_eq!(args.stranded, None);
                 assert!(!args.paired);
                 assert_eq!(args.threads, 1);
                 assert_eq!(args.outdir, ".");
@@ -306,7 +306,7 @@ mod tests {
             Commands::Rna(args) => {
                 assert_eq!(args.gtf, Some("genes.gtf".to_string()));
                 assert!(args.bed.is_none());
-                assert_eq!(args.stranded, 2);
+                assert_eq!(args.stranded, Some(2));
                 assert!(args.paired);
                 assert_eq!(args.threads, 4);
                 assert_eq!(args.outdir, "/tmp/out");
@@ -342,7 +342,7 @@ mod tests {
             Commands::Rna(args) => {
                 assert!(args.gtf.is_none());
                 assert_eq!(args.bed, Some("model.bed".to_string()));
-                assert_eq!(args.stranded, 2);
+                assert_eq!(args.stranded, Some(2));
                 assert!(args.paired);
                 assert_eq!(args.threads, 4);
                 assert_eq!(args.outdir, "/tmp/out");

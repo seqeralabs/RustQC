@@ -54,7 +54,9 @@ fn reconstruct_command_line(args: &cli::RnaArgs) -> String {
     if let Some(ref bed) = args.bed {
         parts.push(format!("--bed {}", shell_escape(bed)));
     }
-    parts.push(format!("-s {}", args.stranded));
+    if let Some(s) = args.stranded {
+        parts.push(format!("-s {}", s));
+    }
     if args.paired {
         parts.push("-p".to_string());
     }
@@ -165,16 +167,27 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
     if let Some(ref reference) = args.reference {
         info!("Reference FASTA: {}", reference);
     }
+    // Validate config stranded value if present
+    if let Some(s) = config.stranded {
+        ensure!(
+            s <= 2,
+            "Invalid stranded value in config file: {} (must be 0, 1, or 2)",
+            s
+        );
+    }
+    // Resolve effective stranded/paired early for logging (config loaded above)
+    let effective_stranded = args.stranded.or(config.stranded).unwrap_or(0);
+    let effective_paired = args.paired || config.paired.unwrap_or(false);
     info!(
         "Stranded: {}",
-        match args.stranded {
+        match effective_stranded {
             0 => "unstranded",
             1 => "forward",
             2 => "reverse",
             _ => "unknown",
         }
     );
-    info!("Paired: {}", args.paired);
+    info!("Paired: {}", effective_paired);
     info!("Threads: {}", args.threads);
 
     // Determine biotype attribute name (CLI overrides config, with auto-detection fallback)
@@ -380,8 +393,8 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
 
     // Build the shared parameters struct for process_single_bam
     let shared = SharedParams {
-        stranded: args.stranded,
-        paired: args.paired,
+        stranded: effective_stranded,
+        paired: effective_paired,
         chrom_mapping: &chrom_mapping,
         chrom_prefix: chrom_prefix.as_deref(),
         outdir,
