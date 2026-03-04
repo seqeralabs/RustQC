@@ -4,9 +4,9 @@ RNA-Seq QC report
 >>>>>>> Input
 
     bam file = /Users/ewels/GitHub/seqera/RustQC/benchmark/input/large/GM12878_REP1.markdup.sorted.bam
-    gff file = /Users/ewels/Library/CloudStorage/SeqeraDesktop-Fusion/Amazon S3/nf-core-awsmegatests/testing/rustqc/genes.filtered.gtf
+    gff file = /Users/ewels/GitHub/seqera/RustQC/benchmark/input/large/genes.gtf.gz
     counting algorithm = uniquely-mapped-reads
-    protocol = strand-specific-reverse
+    protocol = non-strand-specific
     5'-3' bias region size = 100
     5'-3' bias number of top transcripts = 1000
 
@@ -18,25 +18,26 @@ RNA-Seq QC report
     total alignments = 185,718,543
     secondary alignments = 10,620,822
     non-unique alignments = 17,723,193
-    aligned to genes  = 126,404,800
-    ambiguous alignments = 2,552,785
-    no feature assigned = 39,037,765
+    aligned to genes  = 9,591,169
+    ambiguous alignments = 332,227
+    no feature assigned = 158,071,954
     not aligned = 0
+    SSP estimation (fwd/rev) = 0.33 / 0.67
 
 
 >>>>>>> Reads genomic origin
 
-    exonic =  126,404,800 (76.4%)
-    intronic = 30,407,985 (18.38%)
-    intergenic = 8,629,780 (5.22%)
-    overlapping exon = 6,853,516 (4.14%)
+    exonic =  9,591,169 (5.72%)
+    intronic = 105,144,042 (62.71%)
+    intergenic = 52,927,912 (31.57%)
+    overlapping exon = 6,748,550 (4.03%)
 
 
 >>>>>>> Transcript coverage profile
 
-    5' bias = 0.87
-    3' bias = 0.78
-    5'-3' bias = 1.11
+    5' bias = 0.31
+    3' bias = 0.22
+    5'-3' bias = 1.4
 
 
 >>>>>>> Junction analysis
