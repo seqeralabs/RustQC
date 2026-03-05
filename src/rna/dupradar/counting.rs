@@ -1421,8 +1421,12 @@ pub fn count_reads(
     // BAM file. We sweep them here so that bam_stat totals, fc_unmapped,
     // and RSeQC accumulators see every record.
     if use_parallel {
-        let mut bam = bam::IndexedReader::from_path(bam_path)
-            .with_context(|| format!("Failed to open indexed BAM for unmapped sweep: {}", bam_path))?;
+        let mut bam = bam::IndexedReader::from_path(bam_path).with_context(|| {
+            format!(
+                "Failed to open indexed BAM for unmapped sweep: {}",
+                bam_path
+            )
+        })?;
         if let Some(ref_path) = reference {
             bam.set_reference(ref_path)
                 .with_context(|| format!("Failed to set reference FASTA: {}", ref_path))?;
