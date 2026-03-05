@@ -213,6 +213,7 @@ pub fn write_infer_experiment<P: AsRef<Path>>(
     match result.library_type.as_str() {
         "PairEnd" => {
             writeln!(writer)?;
+            writeln!(writer)?;
             writeln!(writer, "This is PairEnd Data")?;
             writeln!(
                 writer,
@@ -232,6 +233,7 @@ pub fn write_infer_experiment<P: AsRef<Path>>(
         }
         "SingleEnd" => {
             writeln!(writer)?;
+            writeln!(writer)?;
             writeln!(writer, "This is SingleEnd Data")?;
             writeln!(
                 writer,
@@ -250,6 +252,7 @@ pub fn write_infer_experiment<P: AsRef<Path>>(
             )?;
         }
         _ => {
+            writeln!(writer)?;
             writeln!(writer)?;
             writeln!(writer, "Unknown Data type")?;
         }

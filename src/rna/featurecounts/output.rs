@@ -104,7 +104,7 @@ pub fn write_summary_file(path: &Path, counts: &CountResult, bam_path: &str) -> 
     writeln!(w, "Assigned\t{}", counts.fc_assigned)?;
     writeln!(w, "Unassigned_Unmapped\t{}", counts.fc_unmapped)?;
     writeln!(w, "Unassigned_Read_Type\t0")?;
-    writeln!(w, "Unassigned_Singleton\t0")?;
+    writeln!(w, "Unassigned_Singleton\t{}", counts.fc_singleton)?;
     writeln!(w, "Unassigned_MappingQuality\t0")?;
     writeln!(w, "Unassigned_Chimera\t0")?;
     writeln!(w, "Unassigned_FragmentLength\t0")?;
@@ -329,6 +329,7 @@ mod tests {
             fc_no_features: 10,
             fc_multimapping: 0,
             fc_unmapped: 0,
+            fc_singleton: 0,
             rseqc: None,
             qualimap: None,
         };

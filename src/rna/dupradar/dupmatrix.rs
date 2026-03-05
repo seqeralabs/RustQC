@@ -187,7 +187,7 @@ impl DupMatrix {
         let n_with_dups = self
             .rows
             .iter()
-            .filter(|r| r.dup_rate.is_finite() && r.dup_rate > 0.0)
+            .filter(|r| r.dup_rate > 0.0 || r.dup_rate.is_nan())
             .count();
 
         DupMatStats {

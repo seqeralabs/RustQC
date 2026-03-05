@@ -337,6 +337,8 @@ pub struct CountResult {
     pub fc_multimapping: u64,
     /// Per-read: unmapped reads
     pub fc_unmapped: u64,
+    /// Per-read: singleton reads (unmatched mates after cross-chromosome reconciliation)
+    pub fc_singleton: u64,
 
     // --- RSeQC results (collected during the same BAM pass) ---
     /// Accumulated RSeQC tool results, if RSeQC tools were enabled
@@ -573,6 +575,8 @@ struct ChromResult {
     fc_no_features: u64,
     fc_multimapping: u64,
     fc_unmapped: u64,
+    /// Per-read: singleton reads (mate unmapped or missing)
+    fc_singleton: u64,
     /// Qualimap RNA-Seq QC accumulator (if enabled).
     qualimap: Option<QualimapAccum>,
 }
@@ -600,6 +604,7 @@ impl ChromResult {
             fc_no_features: 0,
             fc_multimapping: 0,
             fc_unmapped: 0,
+            fc_singleton: 0,
             qualimap: None,
         }
     }
@@ -632,6 +637,7 @@ impl ChromResult {
         self.fc_no_features += other.fc_no_features;
         self.fc_multimapping += other.fc_multimapping;
         self.fc_unmapped += other.fc_unmapped;
+        self.fc_singleton += other.fc_singleton;
         // Merge Qualimap accumulator
         if let Some(other_qm) = other.qualimap {
             if let Some(ref mut self_qm) = self.qualimap {
@@ -1576,35 +1582,12 @@ pub fn count_reads(
             }
         }
 
-        // Handle remaining singletons (mates whose partner was filtered out)
-        for (_key, mate_info) in still_unmatched.drain() {
+        // Handle remaining singletons (mates whose partner was never seen).
+        // These are classified as "Unassigned_Singleton" to match featureCounts
+        // behavior — unmatched mates are not assigned to genes.
+        for (_key, _mate_info) in still_unmatched.drain() {
             merged.total_fragments += 1;
-
-            merged.n_multi_dup += 1;
-            if !mate_info.is_secondary {
-                merged.n_unique_dup += 1;
-            }
-            if !mate_info.is_dup {
-                merged.n_multi_nodup += 1;
-                if !mate_info.is_secondary {
-                    merged.n_unique_nodup += 1;
-                }
-            }
-
-            if mate_info.gene_hits.is_empty() {
-                merged.stat_no_features += 1;
-            } else if mate_info.gene_hits.len() > 1 {
-                merged.stat_ambiguous += 1;
-            } else if assign_fragment_to_gene(
-                &mate_info.gene_hits,
-                &mut merged.gene_counts,
-                mate_info.is_dup,
-                mate_info.is_multi,
-            ) {
-                merged.stat_assigned += 1;
-                // Coverage recording skipped here — no aligned blocks available for
-                // cross-chromosome singleton mates (rare edge case).
-            }
+            merged.fc_singleton += 1;
         }
     }
 
@@ -1701,6 +1684,7 @@ pub fn count_reads(
         fc_no_features: merged.fc_no_features,
         fc_multimapping: merged.fc_multimapping,
         fc_unmapped: merged.fc_unmapped,
+        fc_singleton: merged.fc_singleton,
         rseqc: merged_rseqc,
         qualimap: match (merged.qualimap, qualimap_index) {
             (Some(mut a), Some(idx)) => {

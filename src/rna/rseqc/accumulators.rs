@@ -642,12 +642,12 @@ impl InferExpAccum {
 
         let flags = record.flags();
 
-        // Skip QC-fail, dup, secondary, unmapped, supplementary
+        // Skip QC-fail, dup, secondary, unmapped
+        // Note: upstream RSeQC does NOT filter supplementary alignments (0x800)
         if flags & BAM_FQCFAIL != 0
             || flags & BAM_FDUP != 0
             || flags & BAM_FSECONDARY != 0
             || flags & BAM_FUNMAP != 0
-            || flags & BAM_FSUPPLEMENTARY != 0
         {
             return;
         }
@@ -658,7 +658,8 @@ impl InferExpAccum {
 
         let map_strand = if record.is_reverse() { '-' } else { '+' };
 
-        // Compute query alignment length (M+I+=+X) to match RSeQC's qlen
+        // Compute query length (M+I+=+X+S) to match upstream RSeQC's `qlen`
+        // which includes soft clips (pysam's `query_length` = sum of M/I/S/=/X).
         let read_start = record.pos() as u64;
         let qalen: u64 = record
             .cigar()
@@ -666,7 +667,9 @@ impl InferExpAccum {
             .filter_map(|op| {
                 use rust_htslib::bam::record::Cigar::*;
                 match op {
-                    Match(len) | Ins(len) | Equal(len) | Diff(len) => Some(*len as u64),
+                    Match(len) | Ins(len) | Equal(len) | Diff(len) | SoftClip(len) => {
+                        Some(*len as u64)
+                    }
                     _ => None,
                 }
             })
@@ -700,7 +703,11 @@ impl InferExpAccum {
         self.count += 1;
     }
 
-    /// Merge another accumulator into this one.
+    /// Merge another accumulator into this one, enforcing the global sample size cap.
+    ///
+    /// Each parallel worker independently caps at `sample_size`. When merging,
+    /// the total can exceed `sample_size`. We proportionally scale down all
+    /// counts so the merged total equals `sample_size`.
     pub fn merge(&mut self, other: InferExpAccum) {
         for (key, count) in other.p_strandness {
             *self.p_strandness.entry(key).or_insert(0) += count;
@@ -709,6 +716,23 @@ impl InferExpAccum {
             *self.s_strandness.entry(key).or_insert(0) += count;
         }
         self.count += other.count;
+
+        // Enforce global sample size cap by proportionally scaling down
+        if self.count > self.sample_size {
+            let scale = self.sample_size as f64 / self.count as f64;
+            let mut new_total: u64 = 0;
+            for count in self.p_strandness.values_mut() {
+                let scaled = (*count as f64 * scale).round() as u64;
+                *count = scaled;
+                new_total += scaled;
+            }
+            for count in self.s_strandness.values_mut() {
+                let scaled = (*count as f64 * scale).round() as u64;
+                *count = scaled;
+                new_total += scaled;
+            }
+            self.count = new_total;
+        }
     }
 }
 

@@ -5,7 +5,7 @@
 //! method, matching the behavior of preseq v3.
 
 use anyhow::{bail, Context, Result};
-use log::{debug, info, warn};
+use log::{debug, info};
 use rand_distr::{Binomial, Distribution};
 use rand_mt::Mt;
 use std::collections::HashMap;
@@ -425,14 +425,12 @@ fn evaluate_cf(cf_coeffs: &[f64], t: f64, degree: usize) -> Option<f64> {
 /// The optimal degree, or None if no suitable degree is found.
 fn select_degree(
     cf_coeffs: &[f64],
-    total_reads: u64,
+    _total_reads: u64,
     max_terms: usize,
-    max_extrap: f64,
+    _max_extrap: f64,
 ) -> Option<usize> {
-    let n = total_reads as f64;
-
-    // preseq uses search_max = min(max_extrap/n, 100), step = 0.05
-    let search_max = (max_extrap / n).min(100.0);
+    // preseq uses search_max = 100, step = 0.05
+    let search_max = 100.0;
     let search_step = 0.05f64;
     let n_test = (search_max / search_step).ceil() as usize;
 
@@ -570,11 +568,9 @@ fn extrapolate(
 /// Power series coefficients for the defects model.
 fn power_series_coeffs_defects(
     histogram: &[(u64, u64)],
-    total_reads: u64,
+    _total_reads: u64,
     max_terms: usize,
 ) -> Vec<f64> {
-    let n = total_reads as f64;
-
     // Build lookup
     let max_j = histogram.iter().map(|&(j, _)| j).max().unwrap_or(0) as usize;
     let mut nj = vec![0u64; max_j + 2];
@@ -595,9 +591,7 @@ fn power_series_coeffs_defects(
             0.0
         };
         let sign = if j % 2 == 0 { 1.0 } else { -1.0 };
-        // Adjust coefficient by (j+1)/N factor for defects model
-        let adjusted = sign * n_val * ((freq + 1) as f64) / n;
-        coeffs.push(adjusted);
+        coeffs.push(sign * n_val);
     }
     coeffs
 }
@@ -943,11 +937,10 @@ fn compute_curve(
         .context("Failed to compute continued fraction coefficients via QD algorithm")?;
 
     // Select optimal degree
-    let degree =
-        select_degree(&cf_coeffs, total_reads, max_terms, max_extrap).unwrap_or_else(|| {
-            warn!("Could not find optimal CF degree, using max available");
-            cf_coeffs.len().min(max_terms)
-        });
+    let degree = match select_degree(&cf_coeffs, total_reads, max_terms, max_extrap) {
+        Some(d) => d,
+        None => return Ok(Vec::new()),
+    };
 
     // Evaluate the curve
     let mut curve = Vec::with_capacity(targets.len());
@@ -1028,7 +1021,7 @@ pub fn write_output(
     )?;
 
     // Write first row of zeros
-    writeln!(f, "0.0\t0.0\t0.0\t0.0")?;
+    writeln!(f, "0\t0\t0\t0")?;
 
     // Write curve
     for &(total, expected, lower, upper) in &result.curve {
