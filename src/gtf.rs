@@ -151,6 +151,8 @@ struct TranscriptBuilder {
     exons: Vec<(u64, u64)>,
     /// CDS intervals: (start, end), 1-based inclusive
     cds: Vec<(u64, u64)>,
+    /// stop_codon intervals: (start, end), 1-based inclusive
+    stop_codons: Vec<(u64, u64)>,
 }
 
 /// Parse a GTF file and return a map of gene_id -> Gene.
@@ -192,7 +194,7 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
         let feature_type = fields[2];
 
         // We care about exon and CDS features
-        if feature_type != "exon" && feature_type != "CDS" {
+        if feature_type != "exon" && feature_type != "CDS" && feature_type != "stop_codon" {
             continue;
         }
 
@@ -269,11 +271,13 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
             strand,
             exons: Vec::new(),
             cds: Vec::new(),
+            stop_codons: Vec::new(),
         });
 
         match feature_type {
             "exon" => builder.exons.push((start, end)),
             "CDS" => builder.cds.push((start, end)),
+            "stop_codon" => builder.stop_codons.push((start, end)),
             _ => unreachable!(),
         }
     }
@@ -304,8 +308,14 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
         let (cds_start, cds_end) = if builder.cds.is_empty() {
             (None, None)
         } else {
-            let cs = builder.cds.iter().map(|c| c.0).min().unwrap_or(0);
-            let ce = builder.cds.iter().map(|c| c.1).max().unwrap_or(0);
+            let mut cs = builder.cds.iter().map(|c| c.0).min().unwrap_or(0);
+            let mut ce = builder.cds.iter().map(|c| c.1).max().unwrap_or(0);
+            // Extend CDS range to include stop codon (GTF CDS features exclude
+            // the stop codon, but BED12 thickStart/thickEnd includes it)
+            for &(s, e) in &builder.stop_codons {
+                cs = cs.min(s);
+                ce = ce.max(e);
+            }
             (Some(cs), Some(ce))
         };
 
@@ -558,5 +568,58 @@ chr2\ttest\texon\t700\t800\t.\t-\t.\tgene_id \"G2\"; transcript_id \"T2\";\n",
         assert_eq!(g2.transcripts[0].exons, vec![(500, 600), (700, 800)]);
         assert_eq!(g2.transcripts[0].strand, '-');
         assert_eq!(g2.transcripts[0].cds_start, None);
+    }
+
+    #[test]
+    fn test_stop_codon_extends_cds_range_forward_strand() {
+        // On + strand, stop_codon comes after the last CDS
+        let (path, _f) = write_temp_gtf(
+            "\
+chr1\ttest\texon\t1000\t2000\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\texon\t3000\t4000\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\tCDS\t1200\t2000\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\tCDS\t3000\t3500\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\tstop_codon\t3501\t3503\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n",
+        );
+
+        let genes = parse_gtf(path.to_str().unwrap(), &[]).unwrap();
+        let t1 = &genes["G1"].transcripts[0];
+        // CDS start unchanged, CDS end extended to include stop codon
+        assert_eq!(t1.cds_start, Some(1200));
+        assert_eq!(t1.cds_end, Some(3503));
+    }
+
+    #[test]
+    fn test_stop_codon_extends_cds_range_reverse_strand() {
+        // On - strand, stop_codon comes before the first CDS
+        let (path, _f) = write_temp_gtf(
+            "\
+chr1\ttest\texon\t1000\t2000\t.\t-\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\texon\t3000\t4000\t.\t-\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\tCDS\t1500\t2000\t.\t-\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\tCDS\t3000\t3800\t.\t-\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\tstop_codon\t1497\t1499\t.\t-\t.\tgene_id \"G1\"; transcript_id \"T1\";\n",
+        );
+
+        let genes = parse_gtf(path.to_str().unwrap(), &[]).unwrap();
+        let t1 = &genes["G1"].transcripts[0];
+        // CDS start extended to include stop codon, CDS end unchanged
+        assert_eq!(t1.cds_start, Some(1497));
+        assert_eq!(t1.cds_end, Some(3800));
+    }
+
+    #[test]
+    fn test_stop_codon_without_cds_does_not_create_coding() {
+        // stop_codon without CDS features should not make a non-coding transcript coding
+        let (path, _f) = write_temp_gtf(
+            "\
+chr1\ttest\texon\t1000\t2000\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\tstop_codon\t1500\t1502\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n",
+        );
+
+        let genes = parse_gtf(path.to_str().unwrap(), &[]).unwrap();
+        let t1 = &genes["G1"].transcripts[0];
+        assert_eq!(t1.cds_start, None);
+        assert_eq!(t1.cds_end, None);
     }
 }
