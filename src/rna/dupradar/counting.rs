@@ -17,7 +17,7 @@ use coitrees::{COITree, Interval, IntervalTree};
 use indexmap::IndexMap;
 use log::{debug, info, warn};
 use rayon::prelude::*;
-use rust_htslib::bam::{self, Read as BamRead};
+use rust_htslib::bam::{self, FetchDefinition, Read as BamRead};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -919,23 +919,13 @@ fn process_chromosome_batch(
                     result.n_unique_nodup += 1;
                 }
 
-                // Qualimap uses intersection: a gene must appear in BOTH mates' strand-filtered
-                // gene hits to be considered. If either mate has no hits the fragment is
-                // no-feature. This matches HTSeq / Qualimap behaviour for paired-end mode.
+                // featureCounts union-with-both-end-preference voting: each gene
+                // gets +1 per mate that overlaps it (max 2).  Genes hit by both
+                // mates (score 2) beat genes hit by only one (score 1).  If
+                // multiple genes tie at the highest score the fragment is
+                // ambiguous.  This matches Rsubread::featureCounts behaviour.
                 let combined_genes: Vec<GeneIdx> =
-                    if mate_info.gene_hits.is_empty() || gene_hits.is_empty() {
-                        Vec::new()
-                    } else {
-                        // Intersect: keep only genes present in both mates
-                        let mut intersection: Vec<GeneIdx> = mate_info
-                            .gene_hits
-                            .iter()
-                            .filter(|g| gene_hits.contains(g))
-                            .copied()
-                            .collect();
-                        intersection.sort_unstable();
-                        intersection
-                    };
+                    merge_gene_hits(&mate_info.gene_hits, &gene_hits);
 
                 if combined_genes.is_empty() {
                     result.stat_no_features += 1;
@@ -1074,7 +1064,7 @@ pub fn count_reads(
 
     // Build gene_idx → biotype_id lookup for per-read featureCounts counting.
     // When featureCounts runs with `-g gene_biotype`, exons are grouped by their
-    let (mut merged, merged_rseqc) = if use_parallel {
+    let (mut merged, mut merged_rseqc) = if use_parallel {
         // --- Parallel chromosome processing ---
         //
         // Divide chromosomes into batches (one per thread) and process each
@@ -1389,20 +1379,10 @@ pub fn count_reads(
                     result.n_unique_nodup += 1;
                 }
 
-                // Intersection: gene must appear in BOTH mates (Qualimap behaviour)
+                // featureCounts union-with-both-end-preference voting
+                // (same logic as parallel path — see merge_gene_hits)
                 let combined_genes: Vec<GeneIdx> =
-                    if mate_info.gene_hits.is_empty() || gene_hits.is_empty() {
-                        Vec::new()
-                    } else {
-                        let mut intersection: Vec<GeneIdx> = mate_info
-                            .gene_hits
-                            .iter()
-                            .filter(|g| gene_hits.contains(g))
-                            .copied()
-                            .collect();
-                        intersection.sort_unstable();
-                        intersection
-                    };
+                    merge_gene_hits(&mate_info.gene_hits, &gene_hits);
 
                 if combined_genes.is_empty() {
                     result.stat_no_features += 1;
@@ -1433,6 +1413,66 @@ pub fn count_reads(
         result.qualimap = qualimap_accum;
         (result, rseqc_accums)
     };
+
+    // --- Sweep unmapped reads (parallel path only) ---
+    //
+    // The parallel path uses IndexedReader.fetch(tid) per chromosome, which
+    // never visits reads in the unmapped segment (tid=-1) at the end of the
+    // BAM file. We sweep them here so that bam_stat totals, fc_unmapped,
+    // and RSeQC accumulators see every record.
+    if use_parallel {
+        let mut bam = bam::IndexedReader::from_path(bam_path)
+            .with_context(|| format!("Failed to open indexed BAM for unmapped sweep: {}", bam_path))?;
+        if let Some(ref_path) = reference {
+            bam.set_reference(ref_path)
+                .with_context(|| format!("Failed to set reference FASTA: {}", ref_path))?;
+        }
+        bam.fetch(FetchDefinition::Unmapped)
+            .context("Failed to seek to unmapped segment")?;
+
+        let mut record = bam::Record::new();
+        let mut unmapped_count: u64 = 0;
+
+        while let Some(read_result) = bam.read(&mut record) {
+            read_result.context("Error reading unmapped record")?;
+            unmapped_count += 1;
+            merged.total_reads += 1;
+
+            // RSeQC dispatch — empty chromosome strings for unplaced reads
+            if let (Some(ref mut accums), Some(annots), Some(cfg)) =
+                (&mut merged_rseqc, rseqc_annotations, rseqc_config)
+            {
+                accums.process_read(&record, "", "", annots, cfg);
+            }
+
+            // Qualimap dispatch — qualimap will skip internally since tid < 0
+            if let Some(ref mut qm) = merged.qualimap {
+                // tid < 0 for unmapped reads, so qualimap cannot resolve a
+                // chromosome name. Skip rather than panic on out-of-bounds.
+                let tid = record.tid();
+                if tid >= 0 {
+                    // Shouldn't happen in the unmapped segment, but be safe
+                    if let Some(qm_index) = qualimap_index {
+                        if (tid as usize) < tid_to_name.len() {
+                            qm.process_read(&record, &tid_to_name[tid as usize], qm_index);
+                        }
+                    }
+                }
+            }
+
+            let flags = record.flags();
+            if flags & BAM_FUNMAP != 0 {
+                merged.fc_unmapped += 1;
+            }
+        }
+
+        if unmapped_count > 0 {
+            info!(
+                "Parallel unmapped sweep: processed {} unmapped reads",
+                unmapped_count
+            );
+        }
+    }
 
     // --- Cross-chromosome mate reconciliation ---
     //

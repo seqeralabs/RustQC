@@ -7,6 +7,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
+use indexmap::IndexMap;
 use rust_htslib::bam;
 
 use super::bam_stat::BamStatResult;
@@ -937,7 +938,7 @@ impl ReadDistAccum {
 #[derive(Debug, Default)]
 pub struct JuncAnnotAccum {
     /// Per-junction read counts and classification.
-    pub junction_counts: HashMap<Junction, (u64, JunctionClass)>,
+    pub junction_counts: IndexMap<Junction, (u64, JunctionClass)>,
     pub total_events: u64,
     pub known_events: u64,
     pub partial_novel_events: u64,
@@ -1292,11 +1293,24 @@ impl InnerDistAccum {
         self.distances.push(inner_dist);
     }
 
-    /// Merge another accumulator into this one.
+    /// Merge another accumulator into this one, respecting the sample size limit.
+    ///
+    /// In parallel mode each worker accumulates pairs independently.  After
+    /// merging all workers the total may exceed `sample_size`, so we truncate
+    /// to the limit.  This matches the upstream RSeQC behaviour of sampling
+    /// at most `sample_size` pairs regardless of processing order.
     pub fn merge(&mut self, other: InnerDistAccum) {
         self.pairs.extend(other.pairs);
         self.distances.extend(other.distances);
         self.pair_num += other.pair_num;
+
+        // Enforce the sampling limit after merging
+        if self.pair_num > self.sample_size {
+            let limit = self.sample_size as usize;
+            self.pairs.truncate(limit);
+            self.distances.truncate(limit);
+            self.pair_num = self.sample_size;
+        }
     }
 }
 

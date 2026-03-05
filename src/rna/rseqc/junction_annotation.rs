@@ -5,11 +5,11 @@
 //! partial novel, or complete novel by comparing against a reference gene model
 //! (BED12 or GTF).
 
-use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use indexmap::IndexMap;
 
 // ===================================================================
 // Data types
@@ -60,8 +60,12 @@ pub struct Junction {
 /// Aggregated results from junction annotation.
 #[derive(Debug)]
 pub struct JunctionResults {
-    /// Per-junction read counts and classification.
-    pub junctions: HashMap<Junction, (u64, JunctionClass)>,
+    /// Per-junction read counts and classification, in BAM encounter order.
+    ///
+    /// Uses `IndexMap` to preserve insertion order, matching the output of
+    /// upstream RSeQC's Python `defaultdict` (which preserves insertion order
+    /// in Python 3.7+).
+    pub junctions: IndexMap<Junction, (u64, JunctionClass)>,
     /// Total splicing events (per-read N-operations, includes short introns).
     pub total_events: u64,
     /// Events classified as known.
@@ -132,16 +136,9 @@ pub fn write_junction_xls(results: &JunctionResults, path: &Path) -> Result<()> 
         "chrom\tintron_st(0-based)\tintron_end(1-based)\tread_count\tannotation"
     )?;
 
-    // Sort junctions for deterministic output (RSeQC output order is non-deterministic)
-    let mut sorted_junctions: Vec<_> = results.junctions.iter().collect();
-    sorted_junctions.sort_by(|(a, _), (b, _)| {
-        a.chrom
-            .cmp(&b.chrom)
-            .then(a.intron_start.cmp(&b.intron_start))
-            .then(a.intron_end.cmp(&b.intron_end))
-    });
-
-    for (junction, (count, class)) in &sorted_junctions {
+    // Output junctions in BAM encounter order (IndexMap preserves insertion order,
+    // matching upstream RSeQC's Python defaultdict behaviour).
+    for (junction, (count, class)) in &results.junctions {
         // RSeQC output has a tab then space before the annotation label
         writeln!(
             f,
@@ -165,16 +162,8 @@ pub fn write_junction_bed(results: &JunctionResults, path: &Path) -> Result<()> 
     let mut f = std::fs::File::create(path)
         .with_context(|| format!("Failed to create file: {}", path.display()))?;
 
-    // Sort for deterministic output
-    let mut sorted_junctions: Vec<_> = results.junctions.iter().collect();
-    sorted_junctions.sort_by(|(a, _), (b, _)| {
-        a.chrom
-            .cmp(&b.chrom)
-            .then(a.intron_start.cmp(&b.intron_start))
-            .then(a.intron_end.cmp(&b.intron_end))
-    });
-
-    for (junction, (count, class)) in &sorted_junctions {
+    // Output junctions in BAM encounter order (IndexMap preserves insertion order)
+    for (junction, (count, class)) in &results.junctions {
         let chrom = format_chrom(&junction.chrom);
         // BED coordinates: 1bp block before intron and 1bp block after
         let bed_start = junction.intron_start.saturating_sub(1); // 1bp before intron
@@ -326,7 +315,7 @@ fn write_summary_to<W: std::io::Write>(results: &JunctionResults, f: &mut W) -> 
 mod tests {
     use super::*;
     use crate::rna::rseqc::common::ReferenceJunctions;
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
 
     /// Classify a junction as annotated, partial novel, or complete novel.
     /// Kept in test module — production classification is in accumulators.rs.
