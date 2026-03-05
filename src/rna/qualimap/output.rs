@@ -263,7 +263,7 @@ fn median(values: &mut [f64]) -> f64 {
     // Rust's f64::total_cmp provides the same IEEE 754 total ordering.
     values.sort_by(|a, b| a.total_cmp(b));
     let n = values.len();
-    if n % 2 == 0 {
+    if n.is_multiple_of(2) {
         let a = values[n / 2 - 1];
         let b = values[n / 2];
         // If either value is NaN, the average would be NaN. This matches
