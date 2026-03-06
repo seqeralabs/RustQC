@@ -455,7 +455,7 @@ fn write_ffq_lfq<W: std::io::Write>(
     Ok(())
 }
 
-/// Write GCF or GCL section (GC content distribution, 101 buckets 0-100%).
+/// Write GCF or GCL section (GC content distribution, 200-bin cumulative step function).
 fn write_gc_content<W: std::io::Write>(
     out: &mut W,
     tag: &str,

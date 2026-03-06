@@ -813,8 +813,9 @@ impl BamStatAccum {
             // COV: Coverage distribution via round-buffer pileup.
             // Walk CIGAR M/=/X ops, increment depth at each covered
             // reference position. Flush positions behind the read start.
+            // Only for mapped reads (CIGAR is meaningless for unmapped).
             // =============================================================
-            {
+            if is_mapped {
                 let tid = record.tid();
                 let pos = record.pos(); // 0-based
                 let buf_size = self.cov_buf.len();
@@ -871,8 +872,8 @@ impl BamStatAccum {
                         C::Ins(_) | C::SoftClip(_) | C::HardClip(_) | C::Pad(_) => {}
                     }
                 }
-            }
-        }
+            } // if is_mapped (COV)
+        } // if is_primary
 
         // =================================================================
         // RSeQC bam_stat cascade (original logic, with early returns)
