@@ -511,6 +511,15 @@ impl BamStatAccum {
             if is_mapped && is_paired && !is_qcfail && !mate_unmapped {
                 self.reads_mapped_and_paired += 1;
             }
+            // Cache CIGAR once per mapped read — reused for bases_mapped_cigar,
+            // indel distribution (ID/IC), and coverage pileup (COV).
+            use rust_htslib::bam::record::Cigar as C;
+            let cached_cigar = if is_mapped {
+                Some(record.cigar())
+            } else {
+                None
+            };
+
             if is_mapped {
                 self.primary_mapped += 1;
                 self.bases_mapped += seq_len;
@@ -522,12 +531,12 @@ impl BamStatAccum {
                     self.reads_mq0 += 1;
                 }
 
+                let cigar = cached_cigar.as_ref().unwrap();
+
                 // CIGAR-based mapped bases (M/I/=/X operations).
                 // Upstream samtools stats counts BAM_CMATCH, BAM_CINS, BAM_CEQUAL,
                 // BAM_CDIFF in nbases_mapped_cigar (stats.c:1336-1340).
-                use rust_htslib::bam::record::Cigar as C;
-                let cigar_mapped: u64 = record
-                    .cigar()
+                let cigar_mapped: u64 = cigar
                     .iter()
                     .map(|op| match op {
                         C::Match(n) | C::Ins(n) | C::Equal(n) | C::Diff(n) => u64::from(*n),
@@ -756,9 +765,8 @@ impl BamStatAccum {
             // check but does NOT exclude duplicates or qcfail.
             // =============================================================
             if is_mapped {
-                use rust_htslib::bam::record::Cigar as C;
                 let is_reverse = flags & BAM_FREVERSE != 0;
-                let cigar = record.cigar();
+                let cigar = cached_cigar.as_ref().unwrap();
                 let mut cycle: usize = 0;
 
                 for op in cigar.iter() {
@@ -840,10 +848,9 @@ impl BamStatAccum {
                 }
 
                 // Walk CIGAR and increment depth for M/=/X ops
-                let cigar = record.cigar();
+                let cigar = cached_cigar.as_ref().unwrap();
                 let mut ref_pos = pos;
                 for op in cigar.iter() {
-                    use rust_htslib::bam::record::Cigar as C;
                     match op {
                         C::Match(n) | C::Equal(n) | C::Diff(n) => {
                             for _ in 0..*n {
