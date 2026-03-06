@@ -234,10 +234,11 @@ pub struct BamStatAccum {
     pub ffq: Vec<[u64; 64]>,
     /// Per-cycle quality for last fragments.
     pub lfq: Vec<[u64; 64]>,
-    /// GC content distribution for first fragments (0-100%), 101 buckets.
-    pub gcf: [u64; 101],
-    /// GC content distribution for last fragments (0-100%), 101 buckets.
-    pub gcl: [u64; 101],
+    /// GC content step-function for first fragments, 200 bins (matching samtools ngc=200).
+    /// Each bin i stores the number of reads with gc_count * 199 / seq_len <= i.
+    pub gcf: [u64; 200],
+    /// GC content step-function for last fragments, 200 bins.
+    pub gcl: [u64; 200],
     /// Per-cycle base composition for first fragments (primary, mapped, !qcfail, !dup).
     /// [A, C, G, T, N, Other] per cycle.
     pub fbc: Vec<[u64; 6]>,
@@ -256,6 +257,19 @@ pub struct BamStatAccum {
     pub id_hist: HashMap<u64, [u64; 2]>,
     /// Indels per cycle: cycle → [ins_fwd, ins_rev, del_fwd, del_rev].
     pub ic: Vec<[u64; 4]>,
+    /// CRC32 checksum sums: [names, sequences, qualities].
+    /// Each is the wrapping u32 sum of per-read CRC32 values.
+    pub chk: [u32; 3],
+    /// Coverage distribution: depth → number of reference positions at that depth.
+    /// Populated from a round buffer pileup during sorted BAM processing.
+    pub cov_hist: HashMap<u32, u64>,
+    /// Round buffer for coverage pileup: tracks depth at reference positions.
+    /// buf[pos % ROUND_BUF_SIZE] = depth at that position.
+    cov_buf: Vec<u32>,
+    /// Current left-most unflushed position in the round buffer.
+    cov_buf_start: i64,
+    /// Current chromosome tid for round buffer tracking.
+    cov_buf_tid: i32,
 }
 
 impl Default for BamStatAccum {
@@ -318,8 +332,8 @@ impl Default for BamStatAccum {
             mapq_hist: [0u64; 256],
             ffq: Vec::new(),
             lfq: Vec::new(),
-            gcf: [0u64; 101],
-            gcl: [0u64; 101],
+            gcf: [0u64; 200],
+            gcl: [0u64; 200],
             fbc: Vec::new(),
             lbc: Vec::new(),
             fbc_ro: Vec::new(),
@@ -328,6 +342,11 @@ impl Default for BamStatAccum {
             ltc: [0u64; 5],
             id_hist: HashMap::new(),
             ic: Vec::new(),
+            chk: [0u32; 3],
+            cov_hist: HashMap::new(),
+            cov_buf: vec![0u32; 1 << 16], // 65536 positions round buffer
+            cov_buf_start: 0,
+            cov_buf_tid: -1,
         }
     }
 }
@@ -418,6 +437,36 @@ impl BamStatAccum {
         } else if tid >= 0 {
             // Mapped read
             self.chrom_counts.entry(tid).or_insert((0, 0)).0 += 1;
+        }
+
+        // =================================================================
+        // CHK checksums: computed on ALL reads (including secondary and
+        // supplementary). Matches samtools stats.c update_checksum() which
+        // is called before the secondary-read early return.
+        // =================================================================
+        {
+            let qname = record.qname();
+            let name_crc = crc32fast::hash(qname);
+            self.chk[0] = self.chk[0].wrapping_add(name_crc);
+
+            let seq_len = record.seq_len();
+            if seq_len > 0 {
+                // Raw BAM 4-bit encoded sequence: (seq_len+1)/2 bytes.
+                // Access via the raw bam1_t data pointer.
+                let seq_bytes = unsafe {
+                    let inner = record.inner();
+                    let data = (*inner).data;
+                    let seq_offset = (*inner).core.l_qname as isize;
+                    let seq_nbytes = (seq_len + 1) / 2;
+                    std::slice::from_raw_parts(data.offset(seq_offset), seq_nbytes)
+                };
+                let seq_crc = crc32fast::hash(seq_bytes);
+                self.chk[1] = self.chk[1].wrapping_add(seq_crc);
+
+                let qual = record.qual();
+                let qual_crc = crc32fast::hash(qual);
+                self.chk[2] = self.chk[2].wrapping_add(qual_crc);
+            }
         }
 
         // =================================================================
@@ -684,11 +733,19 @@ impl BamStatAccum {
                     }
                 }
 
-                // GC content: percentage rounded to integer bucket 0-100
+                // GC content: cumulative step function with ngc=200 bins.
+                // Matches samtools stats.c:925-941. For a read with gc_count G/C
+                // bases out of read_len total, increment bins gc_idx_min..gc_idx_max.
                 if read_len > 0 {
-                    let gc_pct = ((gc_count as f64 / read_len as f64) * 100.0).round() as usize;
-                    let gc_pct = gc_pct.min(100);
-                    gc_arr[gc_pct] += 1;
+                    let ngc: usize = 200;
+                    let gc_idx_min = gc_count as usize * (ngc - 1) / read_len;
+                    let mut gc_idx_max = (gc_count as usize + 1) * (ngc - 1) / read_len;
+                    if gc_idx_max >= ngc {
+                        gc_idx_max = ngc - 1;
+                    }
+                    for i in gc_idx_min..gc_idx_max {
+                        gc_arr[i] += 1;
+                    }
                 }
             }
 
@@ -748,6 +805,70 @@ impl BamStatAccum {
                             // D does NOT advance cycle
                         }
                         C::RefSkip(_) | C::HardClip(_) | C::Pad(_) => {}
+                    }
+                }
+            }
+
+            // =============================================================
+            // COV: Coverage distribution via round-buffer pileup.
+            // Walk CIGAR M/=/X ops, increment depth at each covered
+            // reference position. Flush positions behind the read start.
+            // =============================================================
+            {
+                let tid = record.tid();
+                let pos = record.pos(); // 0-based
+                let buf_size = self.cov_buf.len();
+                let buf_mask = buf_size - 1; // assumes power-of-2
+
+                // Flush if chromosome changed
+                if tid != self.cov_buf_tid {
+                    self.flush_cov_buf_all();
+                    self.cov_buf_tid = tid;
+                    self.cov_buf_start = pos;
+                }
+
+                // Flush positions before this read's start
+                while self.cov_buf_start < pos {
+                    let idx = (self.cov_buf_start as usize) & buf_mask;
+                    let depth = self.cov_buf[idx];
+                    if depth > 0 {
+                        *self.cov_hist.entry(depth).or_insert(0) += 1;
+                        self.cov_buf[idx] = 0;
+                    }
+                    self.cov_buf_start += 1;
+                }
+
+                // Walk CIGAR and increment depth for M/=/X ops
+                let cigar = record.cigar();
+                let mut ref_pos = pos;
+                for op in cigar.iter() {
+                    use rust_htslib::bam::record::Cigar as C;
+                    match op {
+                        C::Match(n) | C::Equal(n) | C::Diff(n) => {
+                            for _ in 0..*n {
+                                // Check buffer capacity
+                                if (ref_pos - self.cov_buf_start) as usize >= buf_size {
+                                    // Need to flush some old positions
+                                    let flush_to = ref_pos - buf_size as i64 + 1;
+                                    while self.cov_buf_start < flush_to {
+                                        let idx = (self.cov_buf_start as usize) & buf_mask;
+                                        let depth = self.cov_buf[idx];
+                                        if depth > 0 {
+                                            *self.cov_hist.entry(depth).or_insert(0) += 1;
+                                            self.cov_buf[idx] = 0;
+                                        }
+                                        self.cov_buf_start += 1;
+                                    }
+                                }
+                                let idx = (ref_pos as usize) & buf_mask;
+                                self.cov_buf[idx] += 1;
+                                ref_pos += 1;
+                            }
+                        }
+                        C::Del(n) | C::RefSkip(n) => {
+                            ref_pos += *n as i64;
+                        }
+                        C::Ins(_) | C::SoftClip(_) | C::HardClip(_) | C::Pad(_) => {}
                     }
                 }
             }
@@ -820,6 +941,21 @@ impl BamStatAccum {
                 self.proper_pair_diff_chrom += 1;
             }
         }
+    }
+
+    /// Flush all remaining positions in the coverage round buffer into cov_hist.
+    /// Must be called after processing all reads (or when switching chromosomes).
+    pub fn flush_cov_buf_all(&mut self) {
+        let buf_size = self.cov_buf.len();
+        for i in 0..buf_size {
+            let depth = self.cov_buf[i];
+            if depth > 0 {
+                *self.cov_hist.entry(depth).or_insert(0) += 1;
+                self.cov_buf[i] = 0;
+            }
+        }
+        self.cov_buf_start = 0;
+        self.cov_buf_tid = -1;
     }
 
     /// Merge another accumulator into this one.
@@ -916,8 +1052,8 @@ impl BamStatAccum {
         merge_vec_arrays_64(&mut self.ffq, other.ffq);
         merge_vec_arrays_64(&mut self.lfq, other.lfq);
 
-        // GC content distributions
-        for i in 0..101 {
+        // GC content distributions (200 bins)
+        for i in 0..200 {
             self.gcf[i] += other.gcf[i];
             self.gcl[i] += other.gcl[i];
         }
@@ -943,6 +1079,16 @@ impl BamStatAccum {
 
         // Indels per cycle
         merge_vec_arrays_4(&mut self.ic, other.ic);
+
+        // CHK checksums (wrapping u32 addition)
+        for i in 0..3 {
+            self.chk[i] = self.chk[i].wrapping_add(other.chk[i]);
+        }
+
+        // COV histogram (additive merge)
+        for (depth, count) in other.cov_hist {
+            *self.cov_hist.entry(depth).or_insert(0) += count;
+        }
     }
 }
 
@@ -2028,7 +2174,9 @@ fn merge_vec_arrays_4(target: &mut Vec<[u64; 4]>, source: Vec<[u64; 4]>) {
 
 impl BamStatAccum {
     /// Convert accumulated counters into a `BamStatResult` for output.
-    pub fn into_result(self) -> BamStatResult {
+    pub fn into_result(mut self) -> BamStatResult {
+        // Flush remaining positions in the coverage round buffer
+        self.flush_cov_buf_all();
         BamStatResult {
             // RSeQC bam_stat fields
             total_records: self.total_records,
@@ -2102,6 +2250,8 @@ impl BamStatAccum {
             ltc: self.ltc,
             id_hist: self.id_hist,
             ic: self.ic,
+            chk: self.chk,
+            cov_hist: self.cov_hist,
         }
     }
 }

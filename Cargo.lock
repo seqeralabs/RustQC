@@ -1440,6 +1440,7 @@ dependencies = [
  "cc",
  "clap",
  "coitrees",
+ "crc32fast",
  "env_logger",
  "flate2",
  "indexmap",

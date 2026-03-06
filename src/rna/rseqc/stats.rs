@@ -3,6 +3,7 @@
 //! Produces the Summary Numbers (SN) section and all histogram/distribution
 //! sections from `samtools stats`, compatible with MultiQC and plot-bamstats.
 
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 
@@ -366,6 +367,20 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
     // IC — indels per cycle
     write_indel_cycle(&mut out, &result.ic)?;
 
+    // COV — coverage distribution
+    write_coverage_dist(&mut out, &result.cov_hist)?;
+
+    // CHK — CRC32 checksums
+    writeln!(
+        out,
+        "# CHK, Pair of checksum values for read names, sequences and qualities, calculated using a CRC32 algorithm."
+    )?;
+    writeln!(
+        out,
+        "CHK\t{:08x}\t{:08x}\t{:08x}",
+        result.chk[0], result.chk[1], result.chk[2]
+    )?;
+
     info!("Wrote samtools stats output to {}", output_path.display());
     Ok(())
 }
@@ -445,14 +460,29 @@ fn write_gc_content<W: std::io::Write>(
     out: &mut W,
     tag: &str,
     desc: &str,
-    data: &[u64; 101],
+    data: &[u64; 200],
 ) -> Result<()> {
     writeln!(
         out,
         "# {tag}, GC content of {desc}. Use `plot-bamstats -p <outdir> <file>` to generate plots"
     )?;
-    for (i, &count) in data.iter().enumerate() {
-        writeln!(out, "{tag}\t{:.2}\t{count}", i as f64)?;
+    // Output the cumulative step function with run-length encoding.
+    // Matches samtools stats.c:1633-1640: skip bins with unchanged count,
+    // print midpoint GC% between previous and current bin index.
+    let ngc: usize = 200;
+    let mut ibase_prev: usize = 0;
+    for ibase in 0..ngc {
+        if data[ibase] == data[ibase_prev] {
+            continue;
+        }
+        let gc_pct = (ibase + ibase_prev) as f64 * 0.5 * 100.0 / (ngc - 1) as f64;
+        writeln!(out, "{tag}\t{gc_pct:.2}\t{}", data[ibase_prev])?;
+        ibase_prev = ibase;
+    }
+    // Print the last plateau if it has any counts
+    if data[ibase_prev] > 0 {
+        let gc_pct = ((ngc - 1) + ibase_prev) as f64 * 0.5 * 100.0 / (ngc - 1) as f64;
+        writeln!(out, "{tag}\t{gc_pct:.2}\t{}", data[ibase_prev])?;
     }
     Ok(())
 }
@@ -691,6 +721,60 @@ fn write_indel_cycle<W: std::io::Write>(out: &mut W, ic: &[[u64; 4]]) -> Result<
             )?;
         }
     }
+    Ok(())
+}
+
+/// Write COV section (coverage distribution).
+///
+/// Uses default samtools stats parameters: cov_min=1, cov_max=1000, cov_step=1.
+/// Format: `COV\t[range]\t<depth>\t<count>`
+fn write_coverage_dist<W: std::io::Write>(out: &mut W, cov_hist: &HashMap<u32, u64>) -> Result<()> {
+    writeln!(
+        out,
+        "# COV, Coverage distribution. Use `plot-bamstats -p <outdir> <file>` to generate plots"
+    )?;
+
+    let cov_min: u32 = 1;
+    let cov_max: u32 = 1000;
+    let cov_step: u32 = 1;
+
+    // Count positions below cov_min
+    let below_min: u64 = cov_hist
+        .iter()
+        .filter(|(&d, _)| d < cov_min)
+        .map(|(_, &c)| c)
+        .sum();
+
+    if below_min > 0 {
+        writeln!(out, "COV\t[<{cov_min}]\t{}\t{below_min}", cov_min - 1)?;
+    }
+
+    // Regular bins
+    let mut depth = cov_min;
+    while depth <= cov_max {
+        let end = depth + cov_step - 1;
+        // Sum counts in this bin range
+        let count: u64 = (depth..=end).filter_map(|d| cov_hist.get(&d)).sum();
+        if count > 0 {
+            if cov_step == 1 {
+                writeln!(out, "COV\t[{depth}-{depth}]\t{depth}\t{count}")?;
+            } else {
+                writeln!(out, "COV\t[{depth}-{end}]\t{depth}\t{count}")?;
+            }
+        }
+        depth += cov_step;
+    }
+
+    // Overflow bin (> cov_max)
+    let above_max: u64 = cov_hist
+        .iter()
+        .filter(|(&d, _)| d > cov_max)
+        .map(|(_, &c)| c)
+        .sum();
+    if above_max > 0 {
+        writeln!(out, "COV\t[{cov_max}<]\t{cov_max}\t{above_max}")?;
+    }
+
     Ok(())
 }
 

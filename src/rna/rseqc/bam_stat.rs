@@ -146,10 +146,10 @@ pub struct BamStatResult {
     pub ffq: Vec<[u64; 64]>,
     /// Per-cycle quality for last fragments: outer = cycle, inner = quality bucket counts.
     pub lfq: Vec<[u64; 64]>,
-    /// GC content distribution for first fragments (0-100%), 101 buckets.
-    pub gcf: [u64; 101],
-    /// GC content distribution for last fragments (0-100%), 101 buckets.
-    pub gcl: [u64; 101],
+    /// GC content step-function for first fragments, 200 bins (samtools ngc=200).
+    pub gcf: [u64; 200],
+    /// GC content step-function for last fragments, 200 bins (samtools ngc=200).
+    pub gcl: [u64; 200],
     /// Per-cycle base composition for first fragments: [A, C, G, T, N, Other] per cycle.
     pub fbc: Vec<[u64; 6]>,
     /// Per-cycle base composition for last fragments: [A, C, G, T, N, Other] per cycle.
@@ -166,6 +166,10 @@ pub struct BamStatResult {
     pub id_hist: HashMap<u64, [u64; 2]>,
     /// Indels per cycle: cycle → [ins_fwd, ins_rev, del_fwd, del_rev].
     pub ic: Vec<[u64; 4]>,
+    /// CRC32 checksum sums: [names, sequences, qualities].
+    pub chk: [u32; 3],
+    /// Coverage distribution: depth → number of reference positions at that depth.
+    pub cov_hist: HashMap<u32, u64>,
 }
 
 impl Default for BamStatResult {
@@ -228,8 +232,8 @@ impl Default for BamStatResult {
             mapq_hist: [0u64; 256],
             ffq: Vec::new(),
             lfq: Vec::new(),
-            gcf: [0u64; 101],
-            gcl: [0u64; 101],
+            gcf: [0u64; 200],
+            gcl: [0u64; 200],
             fbc: Vec::new(),
             lbc: Vec::new(),
             fbc_ro: Vec::new(),
@@ -238,6 +242,8 @@ impl Default for BamStatResult {
             ltc: [0u64; 5],
             id_hist: HashMap::new(),
             ic: Vec::new(),
+            chk: [0u32; 3],
+            cov_hist: HashMap::new(),
         }
     }
 }
