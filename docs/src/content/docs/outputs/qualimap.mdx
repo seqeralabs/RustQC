@@ -3,7 +3,7 @@ title: Qualimap Outputs
 description: Output files produced by RustQC's Qualimap rnaseq-compatible RNA-Seq quality control analysis.
 ---
 
-import { Card, CardGrid, FileTree } from '@astrojs/starlight/components';
+import { Card, CardGrid, FileTree } from "@astrojs/starlight/components";
 
 export const base = import.meta.env.BASE_URL;
 
@@ -55,20 +55,18 @@ All Qualimap output files are written to a `qualimap/` subdirectory under the
 output directory, matching the directory structure that MultiQC expects.
 
 <FileTree>
-- qualimap/
-  - qualimapReport.html Self-contained HTML report
-  - rnaseq_qc_results.txt Qualimap-compatible QC report
-  - raw_data_qualimapReport/
-    - coverage_profile_along_genes_(total).txt Coverage profile -- all genes
-    - coverage_profile_along_genes_(high).txt Coverage profile -- highly expressed genes
-    - coverage_profile_along_genes_(low).txt Coverage profile -- lowly expressed genes
-  - images_qualimapReport/
-    - Coverage Profile Along Genes (Total).png Gene body coverage chart
-    - Coverage Profile Along Genes (High).png Coverage chart -- highly expressed genes
-    - Coverage Profile Along Genes (Low).png Coverage chart -- lowly expressed genes
-    - Transcript coverage histogram.png Coverage depth histogram (0-50X)
-    - Reads Genomic Origin.png Exonic/intronic/intergenic pie chart
-    - Junction Analysis.png Known/novel junction pie chart
+  - qualimap/ - qualimapReport.html Self-contained HTML report -
+  rnaseq_qc_results.txt Qualimap-compatible QC report - raw_data_qualimapReport/
+  - coverage_profile_along_genes_(total).txt Coverage profile -- all genes -
+  coverage_profile_along_genes_(high).txt Coverage profile -- highly expressed
+  genes - coverage_profile_along_genes_(low).txt Coverage profile -- lowly
+  expressed genes - images_qualimapReport/ - Coverage Profile Along Genes
+  (Total).png Gene body coverage chart - Coverage Profile Along Genes (High).png
+  Coverage chart -- highly expressed genes - Coverage Profile Along Genes
+  (Low).png Coverage chart -- lowly expressed genes - Transcript coverage
+  histogram.png Coverage depth histogram (0-50X) - Reads Genomic Origin.png
+  Exonic/intronic/intergenic pie chart - Junction Analysis.png Known/novel
+  junction pie chart
 </FileTree>
 
 ### QC results
@@ -104,17 +102,17 @@ Alignment-level statistics for all primary reads:
      SSP estimation (fwd/rev) = 0.04 / 0.96
 ```
 
-| Field | Description |
-|-------|-------------|
-| reads aligned | Total primary alignments (excluding secondary, supplementary, QC-fail) |
-| total alignments | All mapped reads (primary + secondary) |
-| secondary alignments | Alignments flagged as secondary (0x100) |
-| non-unique alignments | Multi-mappers (NH tag > 1) |
-| aligned to genes | Reads assigned to exactly one gene (exonic) |
-| ambiguous alignments | Reads enclosed by multiple genes |
-| no feature assigned | Reads with no enclosing gene annotation |
-| not aligned | Unmapped reads encountered in the BAM |
-| SSP estimation | Strand-specificity proportions (forward / reverse) |
+| Field                 | Description                                                            |
+| --------------------- | ---------------------------------------------------------------------- |
+| reads aligned         | Total primary alignments (excluding secondary, supplementary, QC-fail) |
+| total alignments      | All mapped reads (primary + secondary)                                 |
+| secondary alignments  | Alignments flagged as secondary (0x100)                                |
+| non-unique alignments | Multi-mappers (NH tag > 1)                                             |
+| aligned to genes      | Reads assigned to exactly one gene (exonic)                            |
+| ambiguous alignments  | Reads enclosed by multiple genes                                       |
+| no feature assigned   | Reads with no enclosing gene annotation                                |
+| not aligned           | Unmapped reads encountered in the BAM                                  |
+| SSP estimation        | Strand-specificity proportions (forward / reverse)                     |
 
 #### Reads genomic origin
 
@@ -129,11 +127,11 @@ against the annotation:
      overlapping exon = 6,853,516 (4.14%)
 ```
 
-| Field | Description |
-|-------|-------------|
-| exonic | Reads fully enclosed by a single gene's exons |
-| intronic | Reads overlapping introns but not exons |
-| intergenic | Reads in regions with no gene annotation |
+| Field            | Description                                            |
+| ---------------- | ------------------------------------------------------ |
+| exonic           | Reads fully enclosed by a single gene's exons          |
+| intronic         | Reads overlapping introns but not exons                |
+| intergenic       | Reads in regions with no gene annotation               |
 | overlapping exon | Reads partially overlapping exons (not fully enclosed) |
 
 #### Transcript coverage profile
@@ -147,11 +145,11 @@ Coverage bias metrics computed from the gene body coverage profile:
      5'-3' bias = 1.11
 ```
 
-| Metric | Description |
-|--------|-------------|
-| 5' bias | Ratio of median coverage in the 5' region (first 100bp) to the median of the middle 80% |
-| 3' bias | Ratio of median coverage in the 3' region (last 100bp) to the median of the middle 80% |
-| 5'-3' bias | Ratio of 5' median to 3' median |
+| Metric     | Description                                                                             |
+| ---------- | --------------------------------------------------------------------------------------- |
+| 5' bias    | Ratio of median coverage in the 5' region (first 100bp) to the median of the middle 80% |
+| 3' bias    | Ratio of median coverage in the 3' region (last 100bp) to the median of the middle 80%  |
+| 5'-3' bias | Ratio of 5' median to 3' median                                                         |
 
 Bias values close to 1.0 indicate uniform coverage. Values significantly above
 1.0 for 5' bias or below 1.0 for 3' bias suggest degradation or protocol issues.
@@ -163,18 +161,18 @@ Bias values close to 1.0 indicate uniform coverage. Values significantly above
 Tab-separated files with 100 rows, one per percentile bin (0-99), showing the
 normalized coverage depth at each position along the gene body:
 
-| Column | Description |
-|--------|-------------|
+| Column   | Description                                       |
+| -------- | ------------------------------------------------- |
 | Position | Percentile position along gene body (0.0 to 99.0) |
-| Coverage | Normalized coverage depth at this position |
+| Coverage | Normalized coverage depth at this position        |
 
 Three tiers are produced:
 
-| Tier | File | Description |
-|------|------|-------------|
-| Total | `coverage_profile_along_genes_(total).txt` | All expressed genes |
-| High | `coverage_profile_along_genes_(high).txt` | Top 500 genes by mean coverage |
-| Low | `coverage_profile_along_genes_(low).txt` | Bottom 500 genes by mean coverage |
+| Tier  | File                                       | Description                       |
+| ----- | ------------------------------------------ | --------------------------------- |
+| Total | `coverage_profile_along_genes_(total).txt` | All expressed genes               |
+| High  | `coverage_profile_along_genes_(high).txt`  | Top 500 genes by mean coverage    |
+| Low   | `coverage_profile_along_genes_(low).txt`   | Bottom 500 genes by mean coverage |
 
 The **total** profile is the one parsed by MultiQC for the gene body coverage
 plot.
@@ -186,16 +184,32 @@ produced by Qualimap's HTML report:
 
 <CardGrid>
   <Card title="Coverage Profile Along Genes (Total)">
-    <img src={`${base}examples/qualimap/Coverage Profile Along Genes (Total).png`} alt="Coverage Profile Along Genes (Total)" style={{width: "100%"}} />
+    <img
+      src={`${base}examples/qualimap/Coverage Profile Along Genes (Total).png`}
+      alt="Coverage Profile Along Genes (Total)"
+      style={{ width: "100%" }}
+    />
   </Card>
   <Card title="Transcript coverage histogram">
-    <img src={`${base}examples/qualimap/Transcript coverage histogram.png`} alt="Coverage Histogram (0-50X)" style={{width: "100%"}} />
+    <img
+      src={`${base}examples/qualimap/Transcript coverage histogram.png`}
+      alt="Coverage Histogram (0-50X)"
+      style={{ width: "100%" }}
+    />
   </Card>
   <Card title="Reads Genomic Origin">
-    <img src={`${base}examples/qualimap/Reads Genomic Origin.png`} alt="Reads Genomic Origin" style={{width: "100%"}} />
+    <img
+      src={`${base}examples/qualimap/Reads Genomic Origin.png`}
+      alt="Reads Genomic Origin"
+      style={{ width: "100%" }}
+    />
   </Card>
   <Card title="Junction Analysis">
-    <img src={`${base}examples/qualimap/Junction Analysis.png`} alt="Junction Analysis" style={{width: "100%"}} />
+    <img
+      src={`${base}examples/qualimap/Junction Analysis.png`}
+      alt="Junction Analysis"
+      style={{ width: "100%" }}
+    />
   </Card>
 </CardGrid>
 
@@ -208,37 +222,39 @@ all six chart images, summary tables, and a sidebar table of contents.
 The report uses embedded CSS and base64-encoded assets so it can be viewed
 in any browser without external dependencies.
 
-<a href={`${base}examples/qualimap/qualimapReport.html`} target="_blank">View an example HTML report</a>
+<a href={`${base}examples/qualimap/qualimapReport.html`} target="_blank">
+  View an example HTML report
+</a>
 
 ## Interpreting results
 
 ### Gene body coverage shape
 
-| Pattern | Interpretation |
-|---------|---------------|
-| Flat/uniform | Good library quality -- even coverage across transcripts |
-| 3' bias (rising right) | RNA degradation or oligo-dT priming bias |
-| 5' bias (rising left) | Incomplete reverse transcription or random-priming protocol |
-| Both-end dropout | Short fragment library or size-selection issue |
+| Pattern                | Interpretation                                              |
+| ---------------------- | ----------------------------------------------------------- |
+| Flat/uniform           | Good library quality -- even coverage across transcripts    |
+| 3' bias (rising right) | RNA degradation or oligo-dT priming bias                    |
+| 5' bias (rising left)  | Incomplete reverse transcription or random-priming protocol |
+| Both-end dropout       | Short fragment library or size-selection issue              |
 
 ### Bias metrics
 
-| Metric | Good | Problematic |
-|--------|------|-------------|
-| 5'-3' bias | 0.8 -- 1.2 | < 0.5 or > 2.0 |
-| 5' bias | 0.8 -- 1.2 | > 2.0 (enrichment) or < 0.5 (depletion) |
-| 3' bias | 0.8 -- 1.2 | > 2.0 (enrichment) or < 0.5 (depletion) |
+| Metric     | Good       | Problematic                             |
+| ---------- | ---------- | --------------------------------------- |
+| 5'-3' bias | 0.8 -- 1.2 | < 0.5 or > 2.0                          |
+| 5' bias    | 0.8 -- 1.2 | > 2.0 (enrichment) or < 0.5 (depletion) |
+| 3' bias    | 0.8 -- 1.2 | > 2.0 (enrichment) or < 0.5 (depletion) |
 
 ### Strand specificity
 
 For strand-specific libraries, one of the SSP values should be close to 1.0
 and the other close to 0.0. Common patterns:
 
-| Library type | Expected fwd | Expected rev |
-|-------------|-------------|-------------|
-| Unstranded | ~0.5 | ~0.5 |
-| dUTP / Illumina TruSeq Stranded | ~0.02-0.05 | ~0.95-0.98 |
-| Ligation (e.g. SMARTer) | ~0.95-0.98 | ~0.02-0.05 |
+| Library type                    | Expected fwd | Expected rev |
+| ------------------------------- | ------------ | ------------ |
+| Unstranded                      | ~0.5         | ~0.5         |
+| dUTP / Illumina TruSeq Stranded | ~0.02-0.05   | ~0.95-0.98   |
+| Ligation (e.g. SMARTer)         | ~0.95-0.98   | ~0.02-0.05   |
 
 ## Configuration
 
@@ -246,7 +262,7 @@ and the other close to 0.0. Common patterns:
 
 ```yaml
 qualimap:
-  enabled: true    # Whether to run the Qualimap analysis
+  enabled: true # Whether to run the Qualimap analysis
 ```
 
 When Qualimap is enabled (the default), the analysis runs in the same BAM pass
@@ -265,10 +281,12 @@ formats match Qualimap's output. Key differences from the Java implementation:
   (Picard Gene.Transcript model) for accurate non-redundant coverage
 - **Multi-threading**: Coverage is accumulated per chromosome in parallel and
   merged, producing identical results to the original's single-threaded approach
+- **Upstream match**: Aligned pairs count and 5'-3' coverage bias values now
+  match upstream Qualimap exactly
 
 ## References
 
 - **Qualimap:** Garcia-Alcalde F, Okonechnikov K, Carbonell J, et al. Qualimap:
-  evaluating next-generation sequencing alignment data. *Bioinformatics*.
+  evaluating next-generation sequencing alignment data. _Bioinformatics_.
   2012;28(20):2678-2679.
   [Qualimap website](http://qualimap.conesalab.org/)

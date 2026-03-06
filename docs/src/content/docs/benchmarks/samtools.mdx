@@ -5,9 +5,10 @@ description: Comparison of RustQC's samtools-compatible outputs (flagstat, idxst
 
 export const base = import.meta.env.BASE_URL;
 
-RustQC produces samtools-compatible output files (flagstat, idxstats, stats SN section)
-as part of its single-pass BAM processing. This page compares the output of each tool
-against the originals on a 10 GB paired-end BAM file (GM12878, ENCODE).
+RustQC produces samtools-compatible output files (flagstat, idxstats, and full stats
+output including SN and all histogram sections) as part of its single-pass BAM
+processing. This page compares the output of each tool against the originals on a
+10 GB paired-end BAM file (GM12878, ENCODE).
 
 ## Performance
 
@@ -15,12 +16,12 @@ All samtools-compatible outputs run together in the same single-pass BAM reading
 that also produces dupRadar, featureCounts, RSeQC, preseq, TIN, and gene body
 coverage output.
 
-| Tool | Traditional | RustQC |
-| --- | ---: | ---: |
-| samtools flagstat | ~1m | -- |
-| samtools idxstats | ~1s | -- |
-| samtools stats | ~5m | -- |
-| **All outputs (single pass)** | -- | **5m 13s** |
+| Tool                          | Traditional |     RustQC |
+| ----------------------------- | ----------: | ---------: |
+| samtools flagstat             |         ~1m |         -- |
+| samtools idxstats             |         ~1s |         -- |
+| samtools stats                |         ~5m |         -- |
+| **All outputs (single pass)** |          -- | **5m 13s** |
 
 ## flagstat
 
@@ -28,24 +29,24 @@ coverage output.
 
 All 16 flagstat metrics match exactly between `samtools flagstat` and RustQC:
 
-| Metric | samtools | RustQC |
-| --- | ---: | ---: |
-| Total reads | 185,718,543 | 185,718,543 |
-| Primary | 175,097,721 | 175,097,721 |
-| Secondary | 10,620,822 | 10,620,822 |
-| Supplementary | 0 | 0 |
-| Duplicates | 133,912,519 | 133,912,519 |
-| Primary duplicates | 133,912,519 | 133,912,519 |
-| Mapped | 185,718,543 (100.00%) | 185,718,543 (100.00%) |
-| Primary mapped | 175,097,721 (100.00%) | 175,097,721 (100.00%) |
-| Paired in sequencing | 175,097,721 | 175,097,721 |
-| Read 1 | 87,559,392 | 87,559,392 |
-| Read 2 | 87,538,329 | 87,538,329 |
-| Properly paired | 174,840,354 (99.85%) | 174,840,354 (99.85%) |
-| With itself and mate mapped | 174,840,354 | 174,840,354 |
-| Singletons | 257,367 (0.15%) | 257,367 (0.15%) |
-| Mate on different chr | 0 | 0 |
-| Mate on different chr (mapQ>=5) | 0 | 0 |
+| Metric                          |              samtools |                RustQC |
+| ------------------------------- | --------------------: | --------------------: |
+| Total reads                     |           185,718,543 |           185,718,543 |
+| Primary                         |           175,097,721 |           175,097,721 |
+| Secondary                       |            10,620,822 |            10,620,822 |
+| Supplementary                   |                     0 |                     0 |
+| Duplicates                      |           133,912,519 |           133,912,519 |
+| Primary duplicates              |           133,912,519 |           133,912,519 |
+| Mapped                          | 185,718,543 (100.00%) | 185,718,543 (100.00%) |
+| Primary mapped                  | 175,097,721 (100.00%) | 175,097,721 (100.00%) |
+| Paired in sequencing            |           175,097,721 |           175,097,721 |
+| Read 1                          |            87,559,392 |            87,559,392 |
+| Read 2                          |            87,538,329 |            87,538,329 |
+| Properly paired                 |  174,840,354 (99.85%) |  174,840,354 (99.85%) |
+| With itself and mate mapped     |           174,840,354 |           174,840,354 |
+| Singletons                      |       257,367 (0.15%) |       257,367 (0.15%) |
+| Mate on different chr           |                     0 |                     0 |
+| Mate on different chr (mapQ>=5) |                     0 |                     0 |
 
 The output format is fully compatible with MultiQC and other tools that parse
 samtools flagstat output.
@@ -58,48 +59,50 @@ Per-chromosome read counts match exactly across all 25 reference sequences.
 Both files include the same reference names, lengths, mapped counts, and
 unmapped counts, plus the `*` row for unplaced reads.
 
-## stats (Summary Numbers)
+## stats
 
 **Result: Core counts identical, derived metrics have minor differences**
 
-RustQC produces the `SN` (Summary Numbers) section of `samtools stats`, which
-is the section parsed by MultiQC for key alignment statistics.
+RustQC produces the full `samtools stats` output, including the SN (Summary
+Numbers) section and all histogram sections (FFQ, LFQ, GCF, GCL, GCC, GCT,
+FBC, LBC, FTC, LTC, IS, RL, FRL, LRL, MAPQ, ID, IC, COV, CHK). The SN
+section is the portion parsed by MultiQC for key alignment statistics.
 
 ### Exact matches (26 of 33 fields)
 
 All primary count fields match exactly:
 
-| Metric | Value |
-| --- | ---: |
-| raw total sequences | 175,097,721 |
-| filtered sequences | 0 |
-| sequences | 175,097,721 |
-| 1st fragments | 87,559,392 |
-| last fragments | 87,538,329 |
-| reads mapped | 175,097,721 |
-| reads mapped and paired | 174,840,354 |
-| reads properly paired | 174,840,354 |
-| reads paired | 175,097,721 |
-| reads duplicated | 133,912,519 |
-| reads MQ0 | 345,072 |
-| non-primary alignments | 10,620,822 |
-| total length | 17,319,219,330 |
-| bases mapped | 17,319,219,330 |
-| bases duplicated | 13,211,215,206 |
-| mismatches | 53,181,882 |
+| Metric                  |          Value |
+| ----------------------- | -------------: |
+| raw total sequences     |    175,097,721 |
+| filtered sequences      |              0 |
+| sequences               |    175,097,721 |
+| 1st fragments           |     87,559,392 |
+| last fragments          |     87,538,329 |
+| reads mapped            |    175,097,721 |
+| reads mapped and paired |    174,840,354 |
+| reads properly paired   |    174,840,354 |
+| reads paired            |    175,097,721 |
+| reads duplicated        |    133,912,519 |
+| reads MQ0               |        345,072 |
+| non-primary alignments  |     10,620,822 |
+| total length            | 17,319,219,330 |
+| bases mapped            | 17,319,219,330 |
+| bases duplicated        | 13,211,215,206 |
+| mismatches              |     53,181,882 |
 
 ### Minor differences
 
-| Metric | samtools | RustQC | Notes |
-| --- | ---: | ---: | --- |
+| Metric               |       samtools |         RustQC | Notes                                   |
+| -------------------- | -------------: | -------------: | --------------------------------------- |
 | bases mapped (cigar) | 17,220,065,351 | 17,218,285,734 | 0.01% difference in CIGAR base counting |
-| average length | 99 | 98 | Rounding (true average ~98.9) |
-| average quality | 36.4 | 36.3 | Rounding difference |
-| insert size average | 1553.3 | 3084.6 | Different outlier filtering strategy |
-| insert size stdev | 2276.6 | 15028.6 | Different outlier filtering strategy |
+| average length       |             99 |             98 | Rounding (true average ~98.9)           |
+| average quality      |           36.4 |           36.3 | Rounding difference                     |
+| insert size average  |         1553.3 |         3084.6 | Different outlier filtering strategy    |
+| insert size stdev    |         2276.6 |        15028.6 | Different outlier filtering strategy    |
 
 The insert size differences are due to samtools applying iterative outlier
-filtering (removing pairs beyond mean +/- N*stdev, then recomputing), while
+filtering (removing pairs beyond mean +/- N\*stdev, then recomputing), while
 RustQC uses all properly paired reads. Both approaches are valid; the insert
 size statistics are informational rather than used for downstream analysis.
 

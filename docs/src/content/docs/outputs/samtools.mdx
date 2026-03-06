@@ -3,7 +3,7 @@ title: Samtools Outputs
 description: Output files produced by RustQC's samtools-compatible flagstat, idxstats, and stats outputs.
 ---
 
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree } from "@astrojs/starlight/components";
 
 RustQC produces output files compatible with three core
 [samtools](http://www.htslib.org/) commands: `flagstat`, `idxstats`, and
@@ -21,10 +21,9 @@ written to a `samtools/` subdirectory under the output directory. Use
 `--flat-output` to write all files directly to the output directory instead.
 
 <FileTree>
-- samtools/
-  - sample.flagstat Alignment flag summary statistics
-  - sample.idxstats Per-chromosome read counts
-  - sample.stats Summary numbers (SN section)
+  - samtools/ - sample.flagstat Alignment flag summary statistics -
+  sample.idxstats Per-chromosome read counts - sample.stats Full samtools stats
+  output (SN, histograms, checksums)
 </FileTree>
 
 ## flagstat
@@ -34,24 +33,24 @@ written to a `samtools/` subdirectory under the output directory. Use
 A text file matching the `samtools flagstat` output format. Each line reports a
 count with the format `<count> + 0 <description>`. The 16 standard metrics are:
 
-| Line | Description |
-|------|-------------|
-| 1 | Total reads (QC-passed + QC-failed) |
-| 2 | Primary reads |
-| 3 | Secondary reads |
-| 4 | Supplementary reads |
-| 5 | Duplicates |
-| 6 | Primary duplicates |
-| 7 | Mapped (with percentage of total) |
-| 8 | Primary mapped (with percentage of primary) |
-| 9 | Paired in sequencing |
-| 10 | Read 1 |
-| 11 | Read 2 |
-| 12 | Properly paired (with percentage of paired) |
-| 13 | With itself and mate mapped |
-| 14 | Singletons (with percentage of paired) |
-| 15 | With mate mapped to a different chr |
-| 16 | With mate mapped to a different chr (mapQ>=5) |
+| Line | Description                                   |
+| ---- | --------------------------------------------- |
+| 1    | Total reads (QC-passed + QC-failed)           |
+| 2    | Primary reads                                 |
+| 3    | Secondary reads                               |
+| 4    | Supplementary reads                           |
+| 5    | Duplicates                                    |
+| 6    | Primary duplicates                            |
+| 7    | Mapped (with percentage of total)             |
+| 8    | Primary mapped (with percentage of primary)   |
+| 9    | Paired in sequencing                          |
+| 10   | Read 1                                        |
+| 11   | Read 2                                        |
+| 12   | Properly paired (with percentage of paired)   |
+| 13   | With itself and mate mapped                   |
+| 14   | Singletons (with percentage of paired)        |
+| 15   | With mate mapped to a different chr           |
+| 16   | With mate mapped to a different chr (mapQ>=5) |
 
 The QC-failed column is always 0 (RustQC does not separate QC-pass/fail counts).
 
@@ -75,12 +74,12 @@ Example:
 A tab-separated file matching `samtools idxstats` output format. Each line has
 four columns:
 
-| Column | Description |
-|--------|-------------|
-| `ref_name` | Reference sequence name |
+| Column       | Description               |
+| ------------ | ------------------------- |
+| `ref_name`   | Reference sequence name   |
 | `seq_length` | Reference sequence length |
-| `mapped` | Number of mapped reads |
-| `unmapped` | Number of unmapped reads |
+| `mapped`     | Number of mapped reads    |
+| `unmapped`   | Number of unmapped reads  |
 
 All reference sequences from the BAM header are included, even those with zero
 reads. A final line with `*` as the reference name reports unplaced unmapped reads.
@@ -98,29 +97,57 @@ Example:
 
 **File:** `<sample>.stats`
 
-Produces the Summary Numbers (SN) section of `samtools stats` output. This is
-the section parsed by MultiQC for key alignment statistics. The file includes
-a comment header that MultiQC uses for format detection.
+Produces the full `samtools stats` output format, including the Summary Numbers
+(SN) section and all histogram sections. The file includes a comment header
+that MultiQC uses for format detection.
+
+### SN (Summary Numbers)
 
 Key SN fields include:
 
-| Metric | Description |
-|--------|-------------|
-| `raw total sequences` | Primary reads (excluding supplementary/secondary) |
-| `reads mapped` | Mapped primary reads |
-| `reads duplicated` | Duplicate-flagged reads |
-| `reads properly paired` | Properly paired reads |
-| `total length` | Sum of all read lengths |
-| `bases mapped (cigar)` | Bases consumed by M/I/=X CIGAR operations |
-| `mismatches` | Mismatches from NM auxiliary tags |
-| `error rate` | Mismatches / bases mapped (cigar) |
-| `average length` | Mean read length |
-| `average quality` | Mean base quality |
-| `insert size average` | Mean insert size (from TLEN) |
-| `insert size standard deviation` | Insert size standard deviation |
-| `inward oriented pairs` | FR-oriented read pairs |
-| `outward oriented pairs` | RF-oriented read pairs |
-| `pairs on different chromosomes` | Inter-chromosomal pairs |
+| Metric                           | Description                                       |
+| -------------------------------- | ------------------------------------------------- |
+| `raw total sequences`            | Primary reads (excluding supplementary/secondary) |
+| `reads mapped`                   | Mapped primary reads                              |
+| `reads duplicated`               | Duplicate-flagged reads                           |
+| `reads properly paired`          | Properly paired reads                             |
+| `total length`                   | Sum of all read lengths                           |
+| `bases mapped (cigar)`           | Bases consumed by M/I/=X CIGAR operations         |
+| `mismatches`                     | Mismatches from NM auxiliary tags                 |
+| `error rate`                     | Mismatches / bases mapped (cigar)                 |
+| `average length`                 | Mean read length                                  |
+| `average quality`                | Mean base quality                                 |
+| `insert size average`            | Mean insert size (from TLEN)                      |
+| `insert size standard deviation` | Insert size standard deviation                    |
+| `inward oriented pairs`          | FR-oriented read pairs                            |
+| `outward oriented pairs`         | RF-oriented read pairs                            |
+| `pairs on different chromosomes` | Inter-chromosomal pairs                           |
+
+### Histogram sections
+
+In addition to SN, RustQC produces all standard histogram sections:
+
+| Section | Description                                              |
+| ------- | -------------------------------------------------------- |
+| FFQ     | First Fragment Quality per cycle                         |
+| LFQ     | Last Fragment Quality per cycle                          |
+| GCF     | GC content distribution for first fragments              |
+| GCL     | GC content distribution for last fragments               |
+| GCC     | ACGT content per cycle                                   |
+| GCT     | ACGT content per cycle (last fragment)                   |
+| FBC     | ACGT base content per cycle (first fragment percentages) |
+| LBC     | ACGT base content per cycle (last fragment percentages)  |
+| FTC     | ACGT total counts (first fragment)                       |
+| LTC     | ACGT total counts (last fragment)                        |
+| IS      | Insert size distribution                                 |
+| RL      | Read length distribution                                 |
+| FRL     | First fragment read length distribution                  |
+| LRL     | Last fragment read length distribution                   |
+| MAPQ    | Mapping quality distribution                             |
+| ID      | Indel size distribution                                  |
+| IC      | Indel per cycle                                          |
+| COV     | Coverage depth distribution                              |
+| CHK     | CRC32 checksums                                          |
 
 Example:
 
@@ -130,14 +157,12 @@ SN	raw total sequences:	175097721
 SN	filtered sequences:	0
 SN	sequences:	175097721
 SN	reads mapped:	175097721
+...
+FFQ	1	0	0	0	0	...
+GCC	1	26.90	21.38	29.47	22.25
+IS	0	0	0.000000
+CHK	1a2b3c4d	5e6f7a8b	9c0d1e2f
 ```
-
-:::note
-RustQC produces only the SN (Summary Numbers) section, not the full samtools
-stats output (which includes histograms for quality, GC content, insert size,
-coverage, etc.). The SN section is the portion that MultiQC parses for its
-samtools stats module.
-:::
 
 ## Configuration
 
@@ -147,13 +172,13 @@ Each samtools-compatible output can be individually enabled or disabled:
 
 ```yaml
 flagstat:
-  enabled: true    # Generate samtools flagstat output
+  enabled: true # Generate samtools flagstat output
 
 idxstats:
-  enabled: true    # Generate samtools idxstats output
+  enabled: true # Generate samtools idxstats output
 
 samtools_stats:
-  enabled: true    # Generate samtools stats SN output
+  enabled: true # Generate samtools stats output (SN + all histogram sections)
 ```
 
 All three are enabled by default. The underlying BAM statistics accumulator runs
@@ -173,5 +198,5 @@ RustQC handle edge cases in CIGAR parsing and pair orientation classification.
 ## References
 
 - **samtools:** Danecek P, Bonfield JK, et al. Twelve years of SAMtools and
-  BCFtools. *GigaScience*. 2021;10(2):giab008.
+  BCFtools. _GigaScience_. 2021;10(2):giab008.
   [samtools website](http://www.htslib.org/)

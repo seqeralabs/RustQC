@@ -14,9 +14,12 @@ new molecules?**
 
 RustQC reimplements the `preseq lc_extrap` command, matching the behavior of
 preseq v3.2.0 (the version used by [nf-core/rnaseq](https://nf-co.re/rnaseq)).
-The analysis runs automatically as part of `rustqc rna` at zero additional BAM
-reading cost -- fragment counting happens in the same single-pass BAM scan as all
-other analyses.
+On Linux, the output is **byte-identical** to upstream preseq. On macOS, minor
+differences may occur due to different `std::binomial_distribution` implementations
+between libstdc++ (Linux) and libc++ (macOS) — see [Compatibility](#compatibility)
+below. The analysis runs automatically as part of `rustqc rna` at zero additional
+BAM reading cost -- fragment counting happens in the same single-pass BAM scan as
+all other analyses.
 
 ### Why it matters
 
@@ -168,6 +171,16 @@ via a small FFI shim (`cpp/rng_shim.cpp`) compiled at build time by the
 
 The result is **byte-identical** bootstrap output when RustQC and preseq are
 compiled with the same C++ standard library and use the same seed.
+
+### Platform summary
+
+| Platform          | Match level                    | Notes                                                                       |
+| ----------------- | ------------------------------ | --------------------------------------------------------------------------- |
+| Linux (libstdc++) | **Byte-identical**             | Same Devroye algorithm, same glibc math functions                           |
+| macOS (libc++)    | Minor differences (~0.02-1.8%) | Kemp algorithm differs; Apple's `exp()` may differ from glibc by a few ULPs |
+
+Linux arm64 and x86_64 produce identical results — glibc math functions (`exp`,
+`lgamma`, etc.) are consistent across architectures.
 
 ## References
 

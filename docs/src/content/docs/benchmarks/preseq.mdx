@@ -38,9 +38,15 @@ preseq lc_extrap -bam -pe -seed 1 -seg_len 100000000 \
 
 ### Complexity curve
 
-RustQC's extrapolation matches preseq v3.2.0 within **0.1%** across the entire
-range, from 1M to 10B reads. The difference is consistent with expected
-stochastic variation from the bootstrap confidence interval estimation.
+On Linux, RustQC produces **byte-identical output** to preseq v3.2.0 — every
+value in every column matches exactly. This is achieved by using the same C++
+standard library's `std::mt19937` and `std::binomial_distribution` via FFI,
+which guarantees identical random number sequences given the same seed.
+
+On macOS, minor differences (~0.02-1.8%) may occur because Apple's libc++
+implements `std::binomial_distribution` with a different algorithm (Kemp's
+modal method) than Linux's libstdc++ (Devroye's BTPE + waiting method). The
+point estimates remain within 0.1% for large datasets.
 
 |   Total reads | preseq v3.2.0 |      RustQC | Difference |
 | ------------: | ------------: | ----------: | ---------: |

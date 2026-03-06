@@ -12,7 +12,7 @@
 > - **TIN** (Transcript Integrity Number) analysis (reimplementation of RSeQC `tin.py`)
 > - **preseq** library complexity extrapolation (reimplementation of
 >   [preseq](https://github.com/smithlabcode/preseq) `lc_extrap`)
-> - **samtools-compatible** flagstat, idxstats, and stats SN outputs
+> - **samtools-compatible** flagstat, idxstats, and full stats output
 > - **Gene body coverage** profiling with Qualimap-compatible output
 >
 > Binary crate (`rustqc`), Rust edition 2021.
@@ -84,7 +84,7 @@ src/
       plots.rs              — RSeQC plot generation (duplication, junctions, etc.)
       read_distribution.rs  — read_distribution.py reimplementation
       read_duplication.rs   — read_duplication.py reimplementation
-      stats.rs              — samtools stats SN-section compatible output
+      stats.rs              — samtools stats full output (SN + all histogram sections)
       tin.rs                — TIN (Transcript Integrity Number) analysis
 tests/
   integration_test.rs  — 13 integration tests vs R dupRadar reference output

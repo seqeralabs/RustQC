@@ -33,6 +33,23 @@
 - **preseq**: Remove incorrect `(j+1)/N` scaling in defects mode PS coefficients
 - **preseq**: First output row uses integers (`0\t0\t0\t0`) matching upstream
 - **preseq**: `search_max_val` always 100.0 matching upstream
+- **preseq**: `interpolate()` uses dense histogram with `i32` accumulator matching upstream's `std::accumulate(..., 0)` integer truncation
+- **preseq**: `evaluate_cf()` returns `f64` unconditionally (no validity checks), matching upstream
+- **preseq**: `extrapolate()` returns `f64` unconditionally; removed `target<=n` guard and finite/non-negative checks
+- **preseq**: `compute_curve()` no longer breaks early on extrapolation failure; no `.max(0.0)` clamping
+- **preseq**: Added `check_yield_estimates_stability()` matching upstream's stability validation (non-negative, finite, monotonically increasing, concave)
+- **preseq**: Bootstrap loop uses `check_yield_estimates_stability` on full yield vector instead of simple `all(finite && >=0)` check
+- **qualimap**: Aligned pairs count and 5'-3' bias now match upstream Qualimap exactly
+- **dupradar**: RPKM calculation now matches upstream R dupRadar exactly
+- **read_duplication**: Added `DupRate_plot.r` R script output matching RSeQC format
+- **samtools stats**: Full output with all histogram sections (FFQ, LFQ, GCF, GCL, GCC, GCT, FBC, LBC, FTC, LTC, IS, RL, FRL, LRL, MAPQ, ID, IC, COV, CHK) matching upstream format
+- **samtools stats**: Fixed cycle numbering to be 1-based matching samtools
+- **samtools stats**: Fixed FBC/LBC sections to output percentages (not raw counts)
+- **samtools stats**: Fixed GCC columns to match samtools column order
+- **samtools stats**: Fixed GCF/GCL sections to use non-uniform binning matching samtools
+- **samtools stats**: Fixed COV section depth distribution
+- **samtools stats**: Added CHK section with CRC32 checksums
+- **samtools stats**: CIGAR operation caching for performance
 - **samtools stats**: MQ0 counts primary mapped reads only
 - **samtools stats**: Insert size uses paired+both-mapped filter (not proper-pair), 99th percentile truncation, capped at 8000
 - **samtools stats**: Orientation uses upstream `is_fst*pos_fst` algorithm, counts both mates, divides by 2

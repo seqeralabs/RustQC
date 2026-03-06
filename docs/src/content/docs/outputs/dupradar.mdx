@@ -3,7 +3,7 @@ title: dupRadar Outputs
 description: Comprehensive guide to RustQC's dupRadar output files, including the duplication matrix, fitted model parameters, diagnostic plots, and how to interpret them.
 ---
 
-import { Card, CardGrid, FileTree } from '@astrojs/starlight/components';
+import { Card, CardGrid, FileTree } from "@astrojs/starlight/components";
 
 export const base = import.meta.env.BASE_URL;
 
@@ -50,29 +50,25 @@ where `x` is `log10(reads per kilobase)`.
 - Very high slope values with a low intercept indicate a well-prepared library where duplication is driven by expression level rather than PCR artifacts.
 - A low slope combined with a high intercept suggests uniform over-amplification.
 
-| Intercept | Slope | Interpretation |
-|-----------|-------|----------------|
-| Low (~0) | Moderate-high | Good library. Duplicates are expression-dependent. |
-| High (>0.5) | Low | Over-amplified. Duplicates everywhere. |
-| High (>0.5) | High | Over-amplified, but expression signal still visible. |
-| Low (~0) | Very low | Good complexity, very little duplication at any level. |
+| Intercept   | Slope         | Interpretation                                         |
+| ----------- | ------------- | ------------------------------------------------------ |
+| Low (~0)    | Moderate-high | Good library. Duplicates are expression-dependent.     |
+| High (>0.5) | Low           | Over-amplified. Duplicates everywhere.                 |
+| High (>0.5) | High          | Over-amplified, but expression signal still visible.   |
+| Low (~0)    | Very low      | Good complexity, very little duplication at any level. |
 
 ## Output files
 
 All dupRadar output files use the BAM file stem as a prefix (e.g., `sample.bam` produces `sample_dupMatrix.txt`) and are written to a `dupradar/` subdirectory under the output directory. Use `--flat-output` to write all files directly to the output directory instead. Each output can be individually enabled or disabled via the [configuration file](/usage/configuration/).
 
 <FileTree>
-- dupradar/
-  - sample_dupMatrix.txt Duplication matrix (core data table)
-  - sample_intercept_slope.txt Fitted model intercept and slope
-  - sample_duprateExpDens.png Density scatter plot
-  - sample_duprateExpDens.svg
-  - sample_duprateExpBoxplot.png Duplication rate boxplot
-  - sample_duprateExpBoxplot.svg
-  - sample_expressionHist.png Expression histogram
-  - sample_expressionHist.svg
-  - sample_intercept_slope_mqc.tsv MultiQC general statistics
-  - sample_duprateExpDensCurve_mqc.txt MultiQC fitted curve data
+  - dupradar/ - sample_dupMatrix.txt Duplication matrix (core data table) -
+  sample_intercept_slope.txt Fitted model intercept and slope -
+  sample_duprateExpDens.png Density scatter plot - sample_duprateExpDens.svg -
+  sample_duprateExpBoxplot.png Duplication rate boxplot -
+  sample_duprateExpBoxplot.svg - sample_expressionHist.png Expression histogram
+  - sample_expressionHist.svg - sample_intercept_slope_mqc.tsv MultiQC general
+  statistics - sample_duprateExpDensCurve_mqc.txt MultiQC fitted curve data
 </FileTree>
 
 ### Duplication matrix
@@ -81,24 +77,24 @@ All dupRadar output files use the BAM file stem as a prefix (e.g., `sample.bam` 
 
 A tab-separated file with one row per gene and 14 columns. This is the core data table from which all other dupRadar outputs are derived.
 
-| Column | Description |
-|--------|-------------|
-| `ID` | Gene identifier from the GTF |
-| `geneLength` | Gene length in base pairs (non-overlapping exon bases) |
-| `allCountsMulti` | Total read count including multi-mappers |
-| `filteredCountsMulti` | Read count excluding duplicates, including multi-mappers |
-| `dupRateMulti` | Duplication rate with multi-mappers: `(all - filtered) / all` |
-| `dupsPerIdMulti` | Number of duplicate reads (multi-mapper inclusive) |
-| `RPKMulti` | Reads per kilobase (multi-mapper inclusive) |
-| `RPKMMulti` | Reads per kilobase per million mapped reads (multi-mapper inclusive) |
-| `allCounts` | Total read count (unique mappers only) |
-| `filteredCounts` | Read count excluding duplicates (unique mappers only) |
-| `dupRate` | Duplication rate (unique mappers only) |
-| `dupsPerIdUnique` | Number of duplicate reads (unique mappers only) |
-| `RPK` | Reads per kilobase (unique mappers only) |
-| `RPKM` | Reads per kilobase per million mapped reads (unique mappers only) |
+| Column                | Description                                                          |
+| --------------------- | -------------------------------------------------------------------- |
+| `ID`                  | Gene identifier from the GTF                                         |
+| `geneLength`          | Gene length in base pairs (non-overlapping exon bases)               |
+| `allCountsMulti`      | Total read count including multi-mappers                             |
+| `filteredCountsMulti` | Read count excluding duplicates, including multi-mappers             |
+| `dupRateMulti`        | Duplication rate with multi-mappers: `(all - filtered) / all`        |
+| `dupsPerIdMulti`      | Number of duplicate reads (multi-mapper inclusive)                   |
+| `RPKMulti`            | Reads per kilobase (multi-mapper inclusive)                          |
+| `RPKMMulti`           | Reads per kilobase per million mapped reads (multi-mapper inclusive) |
+| `allCounts`           | Total read count (unique mappers only)                               |
+| `filteredCounts`      | Read count excluding duplicates (unique mappers only)                |
+| `dupRate`             | Duplication rate (unique mappers only)                               |
+| `dupsPerIdUnique`     | Number of duplicate reads (unique mappers only)                      |
+| `RPK`                 | Reads per kilobase (unique mappers only)                             |
+| `RPKM`                | Reads per kilobase per million mapped reads (unique mappers only)    |
 
-Genes with zero reads have a duplication rate of `0` and RPK/RPKM values of `0`. The format is identical to R dupRadar's `_dupMatrix.txt` output.
+Genes with zero reads have a duplication rate of `0` and RPK/RPKM values of `0`. The format and values are identical to R dupRadar's `_dupMatrix.txt` output, including RPKM calculations which now match upstream exactly.
 
 ### Intercept and slope
 
@@ -202,12 +198,12 @@ Duplication rates near zero across all expression levels, including highly expre
 
 ### Normal vs. problematic libraries
 
-| Indicator | Good library | Problematic library |
-|-----------|-------------|-------------------|
-| Intercept | Close to 0 | Above 0.5 |
-| Low-expression genes | Near-zero dup rate | Elevated dup rate |
-| Curve shape | Gradual rise | Flat and high, or steep early rise |
-| Boxplot spread | Tight boxes at low expression | Wide boxes everywhere |
+| Indicator            | Good library                  | Problematic library                |
+| -------------------- | ----------------------------- | ---------------------------------- |
+| Intercept            | Close to 0                    | Above 0.5                          |
+| Low-expression genes | Near-zero dup rate            | Elevated dup rate                  |
+| Curve shape          | Gradual rise                  | Flat and high, or steep early rise |
+| Boxplot spread       | Tight boxes at low expression | Wide boxes everywhere              |
 
 ## Configuring outputs
 
@@ -226,5 +222,5 @@ dupradar:
 
 ## References
 
-- **dupRadar:** Sayols S, Scherzinger D, Klein H. dupRadar: a Bioconductor package for the assessment of PCR artifacts in RNA-Seq data. *BMC Bioinformatics*. 2016;17(1):428. [Bioconductor page](https://bioconductor.org/packages/dupRadar/)
-- **featureCounts:** Liao Y, Smyth GK, Shi W. featureCounts: an efficient general purpose program for assigning sequence reads to genomic features. *Bioinformatics*. 2014;30(7):923-930. [Subread/featureCounts](http://subread.sourceforge.net/)
+- **dupRadar:** Sayols S, Scherzinger D, Klein H. dupRadar: a Bioconductor package for the assessment of PCR artifacts in RNA-Seq data. _BMC Bioinformatics_. 2016;17(1):428. [Bioconductor page](https://bioconductor.org/packages/dupRadar/)
+- **featureCounts:** Liao Y, Smyth GK, Shi W. featureCounts: an efficient general purpose program for assigning sequence reads to genomic features. _Bioinformatics_. 2014;30(7):923-930. [Subread/featureCounts](http://subread.sourceforge.net/)
