@@ -1,4 +1,4 @@
-pdf('/tmp/rustqc_small_run/rseqc/junction_saturation/test.junctionSaturation_plot.pdf')
+pdf('rustqc/rseqc/junction_saturation/test.junctionSaturation_plot.pdf')
 x=c(5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100)
 y=c(534,865,1136,1360,1550,1723,1873,1996,2117,2240,2341,2430,2507,2586,2655,2720,2774,2833,2887,2944)
 z=c(576,931,1212,1461,1663,1851,2019,2159,2293,2429,2541,2648,2739,2834,2918,2996,3056,3126,3193,3261)

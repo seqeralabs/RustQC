@@ -3,8 +3,8 @@ RNA-Seq QC report
 
 >>>>>>> Input
 
-    bam file = /tmp/rustqc_bench/test.namesorted.bam
-    gff file = /data/chr6.gtf
+    bam file = test.namesorted.bam
+    gff file = chr6.gtf
     counting algorithm = uniquely-mapped-reads
     protocol = strand-specific-reverse
     5'-3' bias region size = 100

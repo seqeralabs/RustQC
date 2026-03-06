@@ -9,10 +9,10 @@ known 91%
 </text>
 <polygon opacity="0.85" fill="#CD0000" points="240,250 392,252 392,249 392,246 392,243 392,240 392,236 392,233 391,230 391,227 "/>
 <text x="430" y="231" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="8.064516129032258" opacity="1" fill="#000000">
-partial_novel 3%
+partial_novel 2%
 </text>
 <polygon opacity="0.85" fill="#00CD00" points="240,250 391,227 390,224 390,221 389,218 388,215 387,211 387,208 386,205 385,202 384,200 383,197 382,194 380,191 379,188 378,185 376,182 375,179 374,177 372,174 "/>
 <text x="420" y="181" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="8.064516129032258" opacity="1" fill="#000000">
-complete_novel 6%
+complete_novel 5%
 </text>
 </svg>

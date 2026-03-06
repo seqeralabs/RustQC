@@ -1,3 +1,0 @@
-Get exon regions from /data/input.bed ...
-Load BAM file ...  Done
-Total read pairs  used 20861
