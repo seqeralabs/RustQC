@@ -39,8 +39,6 @@ rayon = "1.11"
 # Random number generation
 rand = "0.10"
 rand_chacha = "0.10"
-rand_distr = "0.5"
-rand_mt = { version = "5", features = ["rand-traits"] }
 
 # Gzip decompression for .gz annotation files
 flate2 = "1"
@@ -50,6 +48,9 @@ anyhow = "1"
 log = "0.4"
 env_logger = "0.11"
 indexmap = "2"
+
+[build-dependencies]
+cc = "1"
 
 [profile.release]
 opt-level = 3

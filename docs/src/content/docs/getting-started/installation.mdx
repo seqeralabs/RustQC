@@ -3,7 +3,7 @@ title: Installation
 description: How to install RustQC from pre-compiled binaries, Docker, or by building from source with platform-specific instructions.
 ---
 
-import { Tabs, TabItem } from '@astrojs/starlight/components';
+import { Tabs, TabItem } from "@astrojs/starlight/components";
 
 ## Pre-compiled binaries
 
@@ -11,40 +11,30 @@ Pre-built binaries are available from the [GitHub Releases page](https://github.
 
 <Tabs>
   <TabItem label="macOS Apple Silicon" icon="apple">
-    ```bash
-    curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-macos-aarch64.tar.gz | tar xz
-    chmod +x ./rustqc
-    sudo mv ./rustqc /usr/local/bin/
-    rustqc --version
+    ```bash curl -fsSL
+    https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-macos-aarch64.tar.gz
+    | tar xz chmod +x ./rustqc sudo mv ./rustqc /usr/local/bin/ rustqc --version
     ```
   </TabItem>
   <TabItem label="macOS Intel" icon="apple">
-    ```bash
-    curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-macos-x86_64.tar.gz | tar xz
-    chmod +x ./rustqc
-    sudo mv ./rustqc /usr/local/bin/
-    rustqc --version
+    ```bash curl -fsSL
+    https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-macos-x86_64.tar.gz
+    | tar xz chmod +x ./rustqc sudo mv ./rustqc /usr/local/bin/ rustqc --version
     ```
   </TabItem>
   <TabItem label="Linux x86_64" icon="linux">
-    ```bash
-    curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-linux-x86_64.tar.gz | tar xz
-    chmod +x ./rustqc
-    sudo mv ./rustqc /usr/local/bin/
-    rustqc --version
+    ```bash curl -fsSL
+    https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-linux-x86_64.tar.gz
+    | tar xz chmod +x ./rustqc sudo mv ./rustqc /usr/local/bin/ rustqc --version
     ```
   </TabItem>
   <TabItem label="Linux aarch64" icon="linux">
-    ```bash
-    curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-linux-aarch64.tar.gz | tar xz
-    chmod +x ./rustqc
-    sudo mv ./rustqc /usr/local/bin/
-    rustqc --version
+    ```bash curl -fsSL
+    https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-linux-aarch64.tar.gz
+    | tar xz chmod +x ./rustqc sudo mv ./rustqc /usr/local/bin/ rustqc --version
     ```
   </TabItem>
 </Tabs>
-
-
 
 ## Docker
 
@@ -56,11 +46,9 @@ docker run -v $(pwd):/data ghcr.io/seqeralabs/rustqc:latest \
   rna /data/sample.bam --gtf /data/genes.gtf --bed /data/genes.bed -p -o /data/output/
 ```
 
-
-
 ## Build from source
 
-Building from source requires the Rust toolchain and a few system libraries needed by [rust-htslib](https://github.com/rust-bio/rust-htslib) for SAM/BAM/CRAM I/O.
+Building from source requires the Rust toolchain, a C++ compiler, and a few system libraries needed by [rust-htslib](https://github.com/rust-bio/rust-htslib) for SAM/BAM/CRAM I/O. The C++ compiler is used both by rust-htslib and by RustQC's preseq FFI shim (a small C++ wrapper that links against the host's `std::mt19937` and `std::binomial_distribution` for exact bootstrap compatibility with upstream preseq).
 
 Select your operating system for the complete build instructions:
 
@@ -81,6 +69,7 @@ Select your operating system for the complete build instructions:
     # Binary is at target/release/rustqc
     ./target/release/rustqc --version
     ```
+
   </TabItem>
   <TabItem label="Ubuntu / Debian" icon="linux">
     ```bash
@@ -97,6 +86,7 @@ Select your operating system for the complete build instructions:
     cargo build --release
     ./target/release/rustqc --version
     ```
+
   </TabItem>
   <TabItem label="Fedora / RHEL" icon="linux">
     ```bash
@@ -113,12 +103,13 @@ Select your operating system for the complete build instructions:
     cargo build --release
     ./target/release/rustqc --version
     ```
+
   </TabItem>
 </Tabs>
 
 The compiled binary is at `target/release/rustqc`. You can copy it to a directory on your `PATH` for convenient access. Release builds use link-time optimization (LTO) and symbol stripping for maximum performance and a small binary size.
 
-In summary, the system dependencies you need are: **cmake**, **zlib**, **bz2**, **lzma**, **curl**, **ssl**, and **clang**.
+In summary, the system dependencies you need are: **cmake**, **zlib**, **bz2**, **lzma**, **curl**, **ssl**, and a **C++ compiler** (clang or g++).
 
 ### Extra performance
 

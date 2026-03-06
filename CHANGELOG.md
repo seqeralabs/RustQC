@@ -19,6 +19,10 @@
 - **htslib threading support**: Multi-threaded BAM I/O via htslib thread pool
 - **coitrees interval tree**: Fast overlap queries using cache-oblivious interval trees
 
+### Changed
+
+- **preseq**: Bootstrap RNG now uses C++ FFI shim (`std::mt19937` + `std::binomial_distribution`) instead of Rust `rand_mt`/`rand_distr`, producing byte-identical bootstrap samples when compiled with the same C++ standard library as upstream preseq
+
 ### Fixed
 
 - **preseq**: Use `tid>=0` filter matching upstream (not flag-based filtering)

@@ -6,11 +6,11 @@
 
 use anyhow::{bail, Context, Result};
 use log::{debug, info};
-use rand_distr::{Binomial, Distribution};
-use rand_mt::Mt;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
+
+use super::cpp_rng::CppMt19937;
 
 use crate::config::PreseqConfig;
 
@@ -616,7 +616,10 @@ fn power_series_coeffs_defects(
 /// # Returns
 /// A new histogram from the bootstrap sample, along with the total reads and
 /// number of distinct molecules in the resample.
-fn bootstrap_resample(histogram: &[(u64, u64)], rng: &mut Mt) -> (Vec<(u64, u64)>, u64, u64) {
+fn bootstrap_resample(
+    histogram: &[(u64, u64)],
+    rng: &mut CppMt19937,
+) -> (Vec<(u64, u64)>, u64, u64) {
     // Build parallel vectors of histogram indices and their counts (n_j values).
     let mut hist_indices: Vec<u64> = Vec::new();
     let mut hist_weights: Vec<u64> = Vec::new();
@@ -650,10 +653,7 @@ fn bootstrap_resample(histogram: &[(u64, u64)], rng: &mut Mt) -> (Vec<(u64, u64)
         let drawn = if p >= 1.0 {
             remaining_trials
         } else {
-            match Binomial::new(remaining_trials, p) {
-                Ok(dist) => dist.sample(rng),
-                Err(_) => 0,
-            }
+            rng.binomial(remaining_trials, p)
         };
         sample[i] = drawn;
         remaining_trials -= drawn;
@@ -797,7 +797,7 @@ pub fn estimate_complexity(
     let boot_defects = config.defects;
     let n_targets = targets.len();
 
-    let mut rng = Mt::new(config.seed as u32);
+    let mut rng = CppMt19937::new(config.seed as u32);
     let mut bootstrap_curves: Vec<Vec<f64>> = vec![Vec::new(); n_targets];
     let mut successful_bootstraps = 0u32;
     let max_iter = 100 * n_bootstraps as u64;
@@ -1316,10 +1316,10 @@ mod tests {
         let hist = vec![(1, 100), (2, 50), (3, 25)];
         let _total_reads = 225;
 
-        let mut rng1 = Mt::new(42);
+        let mut rng1 = CppMt19937::new(42);
         let (h1, t1, d1) = bootstrap_resample(&hist, &mut rng1);
 
-        let mut rng2 = Mt::new(42);
+        let mut rng2 = CppMt19937::new(42);
         let (h2, t2, d2) = bootstrap_resample(&hist, &mut rng2);
 
         assert_eq!(t1, t2, "Same seed should give same total");

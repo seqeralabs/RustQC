@@ -4,6 +4,7 @@
 //! and RSeQC tool reimplementations.
 
 pub mod bam_flags;
+pub mod cpp_rng;
 pub mod dupradar;
 pub mod featurecounts;
 pub mod preseq;
