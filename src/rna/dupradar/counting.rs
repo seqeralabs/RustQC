@@ -1265,6 +1265,10 @@ pub fn count_reads(
                 if tid >= 0 && (tid as usize) < tid_to_rseqc_chrom.len() {
                     let chrom = &tid_to_rseqc_chrom[tid as usize];
                     qm_accum.process_read(&record, chrom, qm_index);
+                } else if flags & BAM_FUNMAP != 0 {
+                    // Truly unmapped read (tid=-1): no chromosome to resolve,
+                    // but count it as not_aligned (matches upstream Qualimap).
+                    qm_accum.counters.not_aligned += 1;
                 }
             }
 
@@ -1495,18 +1499,22 @@ pub fn count_reads(
                 accums.process_read(&record, "", "", annots, cfg);
             }
 
-            // Qualimap dispatch — qualimap will skip internally since tid < 0
+            // Qualimap dispatch — count unmapped reads for not_aligned
             if let Some(ref mut qm) = merged.qualimap {
-                // tid < 0 for unmapped reads, so qualimap cannot resolve a
-                // chromosome name. Skip rather than panic on out-of-bounds.
                 let tid = record.tid();
                 if tid >= 0 {
-                    // Shouldn't happen in the unmapped segment, but be safe
+                    // Mapped read in the unmapped segment (placed at mate's position).
+                    // Pass to process_read() for full Qualimap processing.
                     if let Some(qm_index) = qualimap_index {
                         if (tid as usize) < tid_to_name.len() {
                             qm.process_read(&record, &tid_to_name[tid as usize], qm_index);
                         }
                     }
+                } else if record.flags() & BAM_FUNMAP != 0 {
+                    // Truly unmapped read (tid=-1): no chromosome to resolve,
+                    // but we must count it as not_aligned. This is all that
+                    // process_read() does for unmapped reads (see accumulator.rs).
+                    qm.counters.not_aligned += 1;
                 }
             }
 
