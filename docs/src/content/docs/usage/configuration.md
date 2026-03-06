@@ -102,7 +102,7 @@ preseq:
   step_size: 1000000
   n_bootstraps: 100
   confidence_level: 0.95
-  seed: 1
+  seed: 408
   max_terms: 100
   defects: false
 
@@ -363,7 +363,7 @@ preseq:
   step_size: 1000000 # Step size between extrapolation points (default: 1e6)
   n_bootstraps: 100 # Bootstrap replicates for confidence intervals (default: 100)
   confidence_level: 0.95 # CI confidence level (default: 0.95)
-  seed: 1 # Random seed for reproducibility (default: 1)
+  seed: 408 # Random seed for reproducibility (default: 408, matching upstream preseq)
   max_terms: 100 # Maximum terms in power series (default: 100)
   defects: false # Use defects model for problematic histograms (default: false)
 ```

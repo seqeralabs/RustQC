@@ -1148,12 +1148,20 @@ pub fn expression_histogram(
 // File output helpers
 // ============================================================================
 
-/// Write the intercept and slope values (matching R's `label\tvalue` format).
-pub fn write_intercept_slope(fit: &FitResult, path: &std::path::Path) -> Result<()> {
+/// Write the intercept and slope values (matching R dupRadar output format).
+pub fn write_intercept_slope(
+    fit: &FitResult,
+    sample_name: &str,
+    path: &std::path::Path,
+) -> Result<()> {
     use std::io::Write;
     let mut f = std::fs::File::create(path)?;
-    writeln!(f, "intercept\t{}", fit.intercept)?;
-    writeln!(f, "slope\t{}", fit.slope)?;
+    write!(
+        f,
+        "{sample_name} - dupRadar Int (duprate at low read counts): {} \n\
+         {sample_name} - dupRadar Sl (progression of the duplication rate): {} \n",
+        fit.intercept, fit.slope
+    )?;
     Ok(())
 }
 

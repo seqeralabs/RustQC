@@ -92,12 +92,20 @@ fn parse_intercept_slope(path: &str) -> (f64, f64) {
     let mut intercept = 0.0;
     let mut slope = 0.0;
     for line in content.lines() {
-        let parts: Vec<&str> = line.split('\t').collect();
-        if parts.len() == 2 {
-            match parts[0] {
-                "intercept" => intercept = parts[1].parse().unwrap(),
-                "slope" => slope = parts[1].parse().unwrap(),
-                _ => {}
+        let line = line.trim();
+        if let Some(val) = line.strip_prefix("intercept\t") {
+            // Legacy tab-separated format
+            intercept = val.trim().parse().unwrap();
+        } else if let Some(val) = line.strip_prefix("slope\t") {
+            slope = val.trim().parse().unwrap();
+        } else if line.contains("dupRadar Int") {
+            // Upstream R dupRadar format: "sample - dupRadar Int (...): <value>"
+            if let Some(val) = line.rsplit(": ").next() {
+                intercept = val.trim().parse().unwrap();
+            }
+        } else if line.contains("dupRadar Sl") {
+            if let Some(val) = line.rsplit(": ").next() {
+                slope = val.trim().parse().unwrap();
             }
         }
     }

@@ -316,29 +316,28 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
     // GCL — GC content of last fragments
     write_gc_content(&mut out, "GCL", "last fragments", &result.gcl)?;
 
-    // GCC — ACGT content per cycle (derived from FBC+LBC as percentages)
+    // GCC — ACGT content per cycle, read-oriented (derived from FBC_ro+LBC_ro as percentages)
     write_gcc(
         &mut out,
         "GCC",
         "ACGT content per cycle",
-        &result.fbc,
-        &result.lbc,
-    )?;
-
-    // GCT — ACGT content per cycle, read-oriented
-    write_gcc(
-        &mut out,
-        "GCT",
-        "ACGT content per cycle, read-oriented (reversed for reverse reads)",
         &result.fbc_ro,
         &result.lbc_ro,
     )?;
 
-    // FBC — ACGT raw counts per cycle, first fragments
-    write_base_counts(&mut out, "FBC", "first fragments", &result.fbc)?;
+    // GCT — ACGT content per cycle, read-oriented with reverse-complemented bases
+    write_gct(
+        &mut out,
+        "GCT",
+        "ACGT content per cycle, read-oriented (display complement of bases of reverse reads)",
+        &result.gcc_rc,
+    )?;
 
-    // LBC — ACGT raw counts per cycle, last fragments
-    write_base_counts(&mut out, "LBC", "last fragments", &result.lbc)?;
+    // FBC — ACGT base content per cycle, first fragments (read-oriented)
+    write_base_counts(&mut out, "FBC", "first fragments", &result.fbc_ro)?;
+
+    // LBC — ACGT base content per cycle, last fragments (read-oriented)
+    write_base_counts(&mut out, "LBC", "last fragments", &result.lbc_ro)?;
 
     // FTC — total base counters, first fragments
     write_total_base_counts(&mut out, "FTC", &result.ftc)?;
@@ -517,9 +516,51 @@ fn write_gcc<W: std::io::Write>(
             }
         }
         let total: u64 = combined.iter().sum();
-        // 1-based cycle numbering; only output A%, C%, G%, T% (4 columns, matching upstream)
+        // 1-based cycle numbering; output A%, C%, G%, T%, N%, O% (6 columns, matching upstream)
         if total > 0 {
             let pcts: Vec<f64> = combined
+                .iter()
+                .map(|&c| 100.0 * c as f64 / total as f64)
+                .collect();
+            writeln!(
+                out,
+                "{tag}\t{}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}",
+                cycle + 1,
+                pcts[0],
+                pcts[1],
+                pcts[2],
+                pcts[3],
+                pcts[4],
+                pcts[5]
+            )?;
+        } else {
+            writeln!(
+                out,
+                "{tag}\t{}\t0.00\t0.00\t0.00\t0.00\t0.00\t0.00",
+                cycle + 1
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// Write GCT section — ACGT content per cycle with reverse-complemented bases
+/// for reverse-strand reads. Combined first+last fragments. Only 4 value columns
+/// (A%, C%, G%, T%), matching upstream samtools stats format.
+fn write_gct<W: std::io::Write>(
+    out: &mut W,
+    tag: &str,
+    desc: &str,
+    gcc_rc: &[[u64; 4]],
+) -> std::io::Result<()> {
+    writeln!(
+        out,
+        "# {desc}. Use `grep ^{tag} | cut -f 2-` to extract this part."
+    )?;
+    for (cycle, bases) in gcc_rc.iter().enumerate() {
+        let total: u64 = bases.iter().sum();
+        if total > 0 {
+            let pcts: Vec<f64> = bases
                 .iter()
                 .map(|&c| 100.0 * c as f64 / total as f64)
                 .collect();
@@ -670,8 +711,11 @@ fn write_mapq_hist<W: std::io::Write>(out: &mut W, mapq_hist: &[u64; 256]) -> Re
         .map(|(i, _)| i)
         .unwrap_or(0);
 
+    // Sparse format: only output non-zero entries (matching upstream samtools)
     for (q, &count) in mapq_hist.iter().enumerate().take(max_mapq + 1) {
-        writeln!(out, "MAPQ\t{q}\t{count}")?;
+        if count > 0 {
+            writeln!(out, "MAPQ\t{q}\t{count}")?;
+        }
     }
     Ok(())
 }

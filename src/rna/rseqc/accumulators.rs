@@ -249,6 +249,9 @@ pub struct BamStatAccum {
     pub fbc_ro: Vec<[u64; 6]>,
     /// Per-cycle base composition (read-oriented) for last fragments.
     pub lbc_ro: Vec<[u64; 6]>,
+    /// Per-cycle base composition (reverse-complemented for reverse-strand reads,
+    /// combined first+last fragments). Used for GCT output. [A, C, G, T] only.
+    pub gcc_rc: Vec<[u64; 4]>,
     /// Total base counters for first fragments: [A, C, G, T, N].
     pub ftc: [u64; 5],
     /// Total base counters for last fragments: [A, C, G, T, N].
@@ -338,6 +341,7 @@ impl Default for BamStatAccum {
             lbc: Vec::new(),
             fbc_ro: Vec::new(),
             lbc_ro: Vec::new(),
+            gcc_rc: Vec::new(),
             ftc: [0u64; 5],
             ltc: [0u64; 5],
             id_hist: HashMap::new(),
@@ -704,14 +708,21 @@ impl BamStatAccum {
                 if read_len > base_ro_arr.len() {
                     base_ro_arr.resize(read_len, [0u64; 6]);
                 }
+                if read_len > self.gcc_rc.len() {
+                    self.gcc_rc.resize(read_len, [0u64; 4]);
+                }
 
                 let mut gc_count: u64 = 0;
 
                 for i in 0..read_len {
-                    // Per-cycle quality
+                    // Read-oriented cycle: reversed for reverse-strand reads,
+                    // matching upstream samtools stats collect_orig_read_stats
+                    let ro_cycle = if is_reverse { read_len - 1 - i } else { i };
+
+                    // Per-cycle quality (read-oriented order)
                     let q = quals[i] as usize;
                     let q_clamped = q.min(63);
-                    qual_arr[i][q_clamped] += 1;
+                    qual_arr[ro_cycle][q_clamped] += 1;
 
                     // Base index: A=0, C=1, G=2, T=3, N=4, Other=5
                     let base = seq.encoded_base(i);
@@ -724,12 +735,25 @@ impl BamStatAccum {
                         _ => 5,  // Other
                     };
 
-                    // Per-cycle base composition (alignment order)
+                    // Per-cycle base composition (alignment order — retained for
+                    // any consumers that need genome-position-order data)
                     base_arr[i][base_idx] += 1;
 
                     // Per-cycle base composition (read-oriented: reversed for reverse strand)
-                    let ro_cycle = if is_reverse { read_len - 1 - i } else { i };
                     base_ro_arr[ro_cycle][base_idx] += 1;
+
+                    // Per-cycle base composition for GCT (reverse-complemented for
+                    // reverse-strand reads, combined first+last fragments).
+                    // Only ACGT (base_idx 0-3), skip N and Other.
+                    if base_idx < 4 {
+                        let rc_idx = if is_reverse {
+                            // Reverse complement: A(0)→T(3), C(1)→G(2), G(2)→C(1), T(3)→A(0)
+                            3 - base_idx
+                        } else {
+                            base_idx
+                        };
+                        self.gcc_rc[ro_cycle][rc_idx] += 1;
+                    }
 
                     // GC counting for GCF/GCL
                     if base_idx == 1 || base_idx == 2 {
@@ -1071,6 +1095,7 @@ impl BamStatAccum {
         merge_vec_arrays_6(&mut self.lbc, other.lbc);
         merge_vec_arrays_6(&mut self.fbc_ro, other.fbc_ro);
         merge_vec_arrays_6(&mut self.lbc_ro, other.lbc_ro);
+        merge_vec_arrays_4(&mut self.gcc_rc, other.gcc_rc);
 
         // Total base counters
         for i in 0..5 {
@@ -2254,6 +2279,7 @@ impl BamStatAccum {
             lbc: self.lbc,
             fbc_ro: self.fbc_ro,
             lbc_ro: self.lbc_ro,
+            gcc_rc: self.gcc_rc,
             ftc: self.ftc,
             ltc: self.ltc,
             id_hist: self.id_hist,

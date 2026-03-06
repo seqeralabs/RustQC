@@ -905,7 +905,7 @@ fn process_single_bam(
                         );
                         if config.dupradar.intercept_slope {
                             let fit_path = dr_dir.join(format!("{}_intercept_slope.txt", bam_stem));
-                            rna::dupradar::plots::write_intercept_slope(fit, &fit_path)?;
+                            rna::dupradar::plots::write_intercept_slope(fit, &bam_stem, &fit_path)?;
                             info!(
                                 "[{}] Fit results written to {}",
                                 bam_stem,

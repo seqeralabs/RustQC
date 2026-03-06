@@ -1,2 +1,2 @@
-intercept	0.597277876400675
-slope	0.967140186993884
+test - dupRadar Int (duprate at low read counts): 0.597277876400675 
+test - dupRadar Sl (progression of the duplication rate): 0.967140186993884 

@@ -158,6 +158,9 @@ pub struct BamStatResult {
     pub fbc_ro: Vec<[u64; 6]>,
     /// Per-cycle base composition (read-oriented) for last fragments.
     pub lbc_ro: Vec<[u64; 6]>,
+    /// Per-cycle base composition (reverse-complemented for reverse-strand reads,
+    /// combined first+last fragments). Used for GCT output. [A, C, G, T] only.
+    pub gcc_rc: Vec<[u64; 4]>,
     /// Total base counters for first fragments: [A, C, G, T, N].
     pub ftc: [u64; 5],
     /// Total base counters for last fragments: [A, C, G, T, N].
@@ -238,6 +241,7 @@ impl Default for BamStatResult {
             lbc: Vec::new(),
             fbc_ro: Vec::new(),
             lbc_ro: Vec::new(),
+            gcc_rc: Vec::new(),
             ftc: [0u64; 5],
             ltc: [0u64; 5],
             id_hist: HashMap::new(),

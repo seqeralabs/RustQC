@@ -28,7 +28,7 @@
 ### Fixed
 
 - **preseq**: Use `tid>=0` filter matching upstream (not flag-based filtering)
-- **preseq**: Default seed changed to 1 matching upstream default
+- **preseq**: Default seed set to 408 matching upstream preseq v3.2.0 default
 - **preseq**: Discard bootstrap on failed degree selection instead of using max_terms
 - **preseq**: Remove incorrect `(j+1)/N` scaling in defects mode PS coefficients
 - **preseq**: First output row uses integers (`0\t0\t0\t0`) matching upstream
