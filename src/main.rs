@@ -651,6 +651,7 @@ fn process_single_bam(
         tin_sample_size: params.tin_sample_size,
         tin_min_coverage: params.tin_min_coverage,
         preseq_enabled: config.preseq.enabled,
+        preseq_max_segment_length: config.preseq.max_segment_length,
     };
 
     let rseqc_annotations = RseqcAnnotations {
@@ -1395,7 +1396,7 @@ fn write_rseqc_outputs(
     }
 
     // --- preseq (library complexity) ---
-    if let Some(accum) = accums.preseq {
+    if let Some(mut accum) = accums.preseq {
         let preseq_dir = if flat {
             outdir.to_path_buf()
         } else {
@@ -1403,6 +1404,7 @@ fn write_rseqc_outputs(
         };
         std::fs::create_dir_all(&preseq_dir)?;
         let output_path = preseq_dir.join(format!("{}.lc_extrap.txt", bam_stem));
+        accum.finalize();
         let total_reads = accum.total_fragments;
         let n_distinct = accum.n_distinct();
         let histogram = accum.into_histogram();
@@ -1501,6 +1503,7 @@ fn run_rseqc_single_pass(
         tin_sample_size: params.tin_sample_size,
         tin_min_coverage: params.tin_min_coverage,
         preseq_enabled: params.config.preseq.enabled,
+        preseq_max_segment_length: params.config.preseq.max_segment_length,
     };
 
     let annotations = RseqcAnnotations {

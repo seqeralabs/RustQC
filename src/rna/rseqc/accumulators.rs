@@ -95,6 +95,8 @@ pub struct RseqcConfig {
     pub tin_min_coverage: u32,
     /// Whether preseq library complexity estimation is enabled.
     pub preseq_enabled: bool,
+    /// Maximum merged PE fragment length for preseq (preseq's `-seg_len`).
+    pub preseq_max_segment_length: i64,
 }
 
 // ===================================================================
@@ -1819,7 +1821,7 @@ impl RseqcAccumulators {
                 None
             },
             preseq: if config.preseq_enabled {
-                Some(PreseqAccum::new())
+                Some(PreseqAccum::new(config.preseq_max_segment_length))
             } else {
                 None
             },
@@ -1906,18 +1908,17 @@ impl RseqcAccumulators {
             accum.process_read(record, chrom_upper, tin_index);
         }
 
-        // preseq: counts unique read fingerprints for library complexity.
+        // preseq: counts unique fragments for library complexity estimation.
         //
-        // Matches upstream preseq's load_counts_BAM_pe behavior:
-        //   - Only skip reads where get_tid(aln) == -1 (unmapped / no reference).
-        //   - Does NOT filter on any BAM flags — secondary (0x100), supplementary
-        //     (0x800), duplicate (0x400), QC-fail (0x200) are all counted.
-        //   - ALL qualifying reads are counted with key (tid, pos, mtid, mpos).
-        //     Both mates of a pair contribute independently.
+        // Matches preseq v3.2.0's load_counts_BAM_pe behavior:
+        //   - Only primary, mapped reads are processed.
+        //   - Paired reads are merged by read name into genomic intervals.
+        //   - Unpaired reads counted as individual fragments.
+        //
+        // Filtering (primary + mapped, no secondary/supplementary) is handled
+        // inside PreseqAccum::process_read().
         if let Some(ref mut accum) = self.preseq {
-            if record.tid() >= 0 {
-                accum.process_read(record.tid(), record.pos(), record.mtid(), record.mpos());
-            }
+            accum.process_read(record);
         }
     }
 

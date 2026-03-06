@@ -21,7 +21,9 @@
 
 ### Changed
 
+- **preseq**: Rewritten PE fragment counting to match preseq v3.2.0 — mates are now merged by read name into genomic intervals `(chrom, min_start, max_end)` instead of counting individual reads with `(tid, pos, mtid, mpos)` keys. Fragment counts now match upstream exactly.
 - **preseq**: Bootstrap RNG now uses C++ FFI shim (`std::mt19937` + `std::binomial_distribution`) instead of Rust `rand_mt`/`rand_distr`, producing byte-identical bootstrap samples when compiled with the same C++ standard library as upstream preseq
+- **preseq**: Added `max_segment_length` config option (default 100M, matching nf-core's `-seg_len` setting) to control maximum merged PE fragment length
 
 ### Fixed
 

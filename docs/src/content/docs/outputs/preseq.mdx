@@ -116,8 +116,9 @@ preseq:
   step_size: 1.0e6 # Step size between points
   n_bootstraps: 100 # Bootstrap replicates
   confidence_level: 0.95 # CI confidence level (e.g. 0.95 for 95%)
-  seed: 1 # Random seed for reproducibility
+  seed: 408 # Random seed for reproducibility
   max_terms: 100 # Maximum terms in power series
+  max_segment_length: 100000000 # Max merged PE fragment length (preseq -seg_len)
   defects: false # Use defects model for problematic histograms
 ```
 
@@ -127,10 +128,18 @@ The output file format is identical to `preseq lc_extrap` output and is
 compatible with downstream tools that parse preseq output, including
 [MultiQC](https://multiqc.info/).
 
-RustQC's implementation matches preseq v3.2.0's PE BAM counting behavior:
-fragment keys use `(chromosome, fragment_start, fragment_end)` derived from
-CIGAR alignment coordinates. The Good-Toulmin extrapolation, continued fraction
-evaluation, and bootstrap resampling all follow the preseq v3.2.0 algorithm.
+RustQC's implementation matches preseq v3.2.0's `load_counts_BAM_pe` behavior:
+
+- **PE mate merging**: Both mates of a paired-end read are collated by read
+  name and merged into a single genomic interval `(chrom, min_start, max_end)`.
+  Merged fragments exceeding `max_segment_length` are split back into individual
+  reads, matching preseq's `-seg_len` behavior.
+- **Fragment counting**: Unique fragments are identified by their `(chrom, start,
+end)` tuple. Duplicate fragments (same interval) are counted for the
+  frequency-of-frequencies histogram that drives the extrapolation.
+- **Extrapolation**: Good-Toulmin rational function approximation via continued
+  fractions, with degree selection and bootstrap confidence intervals, all
+  matching the preseq v3.2.0 algorithm.
 
 ### C++ FFI for exact bootstrap matching
 

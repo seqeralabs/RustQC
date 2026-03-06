@@ -6,6 +6,7 @@
 
 use anyhow::{bail, Context, Result};
 use log::{debug, info};
+use rust_htslib::bam;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
@@ -41,79 +42,220 @@ const TOLERANCE: f64 = 1e-20;
 /// Minimum number of observed distinct molecules for analysis.
 const MIN_DISTINCT: u64 = 10;
 
+/// Default maximum merged fragment length for PE reads (effectively unlimited).
+///
+/// Corresponds to preseq's `-seg_len` option. The nf-core preseq module
+/// typically uses a very large value (e.g., 100000000) to avoid rejecting
+/// legitimate long-insert PE fragments. Used in tests.
+#[cfg(test)]
+const DEFAULT_MAX_SEGMENT_LENGTH: i64 = 100_000_000;
+
 // ============================================================================
-// PreseqAccum — fragment counting accumulator
+// PreseqAccum — fragment counting accumulator (preseq v3.2.0 compatible)
 // ============================================================================
+
+/// Information about a single read's alignment, used for mate merging.
+#[derive(Debug, Clone)]
+struct MateInfo {
+    /// Target (chromosome) ID.
+    tid: i32,
+    /// Alignment start position (0-based).
+    start: i64,
+    /// Alignment end position (exclusive, derived from CIGAR).
+    end: i64,
+}
 
 /// Accumulator that counts fragment occurrences for library complexity estimation.
 ///
-/// Counts how many times each distinct fragment is observed in the BAM file.
-/// Matching preseq behavior: only unmapped reads (tid == -1) are skipped.
-/// Secondary, supplementary, and QC-fail reads are all counted.
+/// Matches preseq v3.2.0's `load_counts_BAM_pe` behavior:
 ///
-/// Uses a hash table to count ALL occurrences of each fragment globally. This
-/// correctly groups duplicates regardless of their order in the BAM file.
-/// Multi-thread safe (accumulators can be merged).
+/// 1. Only primary, mapped reads are processed (secondary/supplementary excluded).
+/// 2. Paired reads are collated by read name. When both mates are found on the
+///    same chromosome, they are merged into a single genomic interval
+///    `(chrom, min_start, max_end)`. If the merged length exceeds
+///    [`MAX_SEGMENT_LENGTH`] (5000), or if mates are on different chromosomes,
+///    both reads are counted as individual fragments.
+/// 3. Unpaired reads are counted as individual fragments.
+/// 4. Duplicate fragments are identified by identical `(tid, start, end)` tuples.
 ///
-/// For paired-end data, each read is identified by `(tid, pos, mtid, mpos)` —
-/// no strand, no normalization. Both mates of a pair contribute independently.
-/// For single-end data, the key is `(tid, pos, -1, -1)`.
+/// Thread-safe via per-chromosome accumulators that are merged after parallel
+/// processing. During merge, dangling mates from different chromosomes are
+/// matched and merged or promoted to individual fragments.
 #[derive(Debug)]
 pub struct PreseqAccum {
-    /// Maps fragment key (hash) to observation count.
+    /// Maps fragment key `(tid, start, end)` hash to observation count.
     fragment_counts: HashMap<u64, u32>,
-    /// Total number of fragments counted.
+    /// Total number of fragments (merged pairs + unpaired) counted so far.
     pub total_fragments: u64,
+    /// Reads waiting for their mate. Keyed by read name.
+    /// When both mates are seen, they are merged into a fragment immediately.
+    dangling_mates: HashMap<Vec<u8>, MateInfo>,
+    /// Number of successfully merged PE pairs.
+    n_paired: u64,
+    /// Number of reads counted as individual fragments (unpaired or failed merge).
+    n_unpaired: u64,
+    /// Total mates (primary + mapped reads) processed.
+    n_mates_processed: u64,
+    /// Maximum merged PE fragment length. Fragments longer than this are split.
+    max_segment_length: i64,
 }
 
 impl PreseqAccum {
-    /// Create a new accumulator.
-    pub fn new() -> Self {
+    /// Create a new accumulator with the given maximum segment length.
+    pub fn new(max_segment_length: i64) -> Self {
         Self {
             fragment_counts: HashMap::new(),
             total_fragments: 0,
+            dangling_mates: HashMap::new(),
+            n_paired: 0,
+            n_unpaired: 0,
+            n_mates_processed: 0,
+            max_segment_length,
         }
     }
 
-    /// Process a read for library complexity estimation.
+    /// Process a BAM record for library complexity estimation.
     ///
-    /// Matches upstream preseq's `load_counts_BAM_pe` behavior: every
-    /// non-secondary, mapped read is counted with key `(tid, pos, mtid, mpos)`.
-    /// Both mates of a pair contribute independently.
-    ///
-    /// The caller must filter to `tid >= 0` (matching upstream preseq's
-    /// `get_tid(aln) == -1` check). No flag-based filtering is applied —
-    /// secondary, supplementary, duplicate, and QC-fail reads are all counted.
+    /// Matches preseq v3.2.0's `load_counts_BAM_pe` behavior:
+    /// - Only primary, mapped reads are counted.
+    /// - Paired reads are merged by read name into genomic intervals.
+    /// - Unpaired reads are counted as individual fragments.
     ///
     /// # Arguments
-    /// * `tid` - Target (chromosome) ID (must be >= 0).
-    /// * `pos` - Alignment position.
-    /// * `mtid` - Mate target ID.
-    /// * `mpos` - Mate position.
-    pub fn process_read(&mut self, tid: i32, pos: i64, mtid: i32, mpos: i64) {
-        // Safety guard: caller should ensure tid >= 0 (matching upstream preseq's
-        // get_tid(aln) == -1 check). Return early if not.
-        if tid < 0 {
+    /// * `record` - The BAM record to process.
+    pub fn process_read(&mut self, record: &bam::Record) {
+        // Filter: primary + mapped only (matches preseq v3.2.0 `is_primary && is_mapped`)
+        if record.tid() < 0 {
             return;
         }
+        if record.is_secondary() || record.is_supplementary() {
+            return;
+        }
+        self.n_mates_processed += 1;
 
-        let key = compute_hash(tid as u64, pos as u64, mtid as u64, mpos as u64);
+        let tid = record.tid();
+        let start = record.pos();
+        let end = record.cigar().end_pos();
+
+        let info = MateInfo { tid, start, end };
+
+        // Check if this read is part of a pair
+        if record.is_paired() {
+            let qname = record.qname().to_vec();
+
+            if let Some(mate) = self.dangling_mates.remove(&qname) {
+                // Found the mate — try to merge
+                if mate.tid == tid {
+                    // Same chromosome: merge into genomic interval
+                    let merged_start = mate.start.min(start);
+                    let merged_end = mate.end.max(end);
+                    let frag_len = merged_end - merged_start;
+
+                    if frag_len >= 0 && frag_len <= self.max_segment_length {
+                        // Successful merge
+                        self.add_fragment(tid, merged_start, merged_end);
+                        self.n_paired += 1;
+                    } else {
+                        // Fragment too long or invalid — split into individual reads
+                        self.add_fragment(mate.tid, mate.start, mate.end);
+                        self.add_fragment(tid, start, end);
+                        self.n_unpaired += 2;
+                    }
+                } else {
+                    // Different chromosomes — cannot merge, count individually
+                    self.add_fragment(mate.tid, mate.start, mate.end);
+                    self.add_fragment(tid, start, end);
+                    self.n_unpaired += 2;
+                }
+            } else {
+                // First mate seen — store for later
+                self.dangling_mates.insert(qname, info);
+            }
+        } else {
+            // Unpaired read — count as individual fragment
+            self.add_fragment(tid, start, end);
+            self.n_unpaired += 1;
+        }
+    }
+
+    /// Add a fragment to the counting table.
+    #[cfg_attr(test, allow(dead_code))]
+    pub(crate) fn add_fragment(&mut self, tid: i32, start: i64, end: i64) {
+        let key = fragment_hash(tid, start, end);
         *self.fragment_counts.entry(key).or_insert(0) += 1;
         self.total_fragments += 1;
     }
 
-    /// Merge another accumulator into this one by combining hash tables.
+    /// Merge another accumulator into this one.
+    ///
+    /// First resolves cross-chromosome mate pairs: if a read name appears in
+    /// both accumulators' dangling mates, the mates are merged (or split if
+    /// on different chromosomes / too long). Remaining dangling mates are
+    /// combined into a single map.
     pub fn merge(&mut self, other: PreseqAccum) {
+        // Merge fragment counts
         for (key, count) in other.fragment_counts {
             *self.fragment_counts.entry(key).or_insert(0) += count;
         }
         self.total_fragments += other.total_fragments;
+        self.n_paired += other.n_paired;
+        self.n_unpaired += other.n_unpaired;
+        self.n_mates_processed += other.n_mates_processed;
+
+        // Resolve cross-accumulator mate pairs
+        for (qname, other_mate) in other.dangling_mates {
+            if let Some(self_mate) = self.dangling_mates.remove(&qname) {
+                // Found mate in both accumulators — try to merge
+                if self_mate.tid == other_mate.tid {
+                    let merged_start = self_mate.start.min(other_mate.start);
+                    let merged_end = self_mate.end.max(other_mate.end);
+                    let frag_len = merged_end - merged_start;
+
+                    if frag_len >= 0 && frag_len <= self.max_segment_length {
+                        self.add_fragment(self_mate.tid, merged_start, merged_end);
+                        self.n_paired += 1;
+                    } else {
+                        self.add_fragment(self_mate.tid, self_mate.start, self_mate.end);
+                        self.add_fragment(other_mate.tid, other_mate.start, other_mate.end);
+                        self.n_unpaired += 2;
+                    }
+                } else {
+                    // Different chromosomes — count individually
+                    self.add_fragment(self_mate.tid, self_mate.start, self_mate.end);
+                    self.add_fragment(other_mate.tid, other_mate.start, other_mate.end);
+                    self.n_unpaired += 2;
+                }
+            } else {
+                // No match yet — keep as dangling
+                self.dangling_mates.insert(qname, other_mate);
+            }
+        }
+    }
+
+    /// Finalize the accumulator by flushing all remaining dangling mates
+    /// as individual (unpaired) fragments.
+    ///
+    /// Must be called after all merges are complete, before `into_histogram()`.
+    pub fn finalize(&mut self) {
+        let n_dangling = self.dangling_mates.len();
+        let dangling: Vec<MateInfo> = self.dangling_mates.drain().map(|(_, v)| v).collect();
+        for mate in dangling {
+            self.add_fragment(mate.tid, mate.start, mate.end);
+            self.n_unpaired += 1;
+        }
+        debug!(
+            "preseq finalize: mates_processed={}, n_paired={}, n_unpaired={}, dangling_flushed={}, total_fragments={}, n_distinct={}",
+            self.n_mates_processed, self.n_paired, self.n_unpaired, n_dangling, self.total_fragments, self.fragment_counts.len()
+        );
     }
 
     /// Convert fragment counts into a frequency-of-frequencies histogram.
     ///
     /// Returns a sorted `Vec<(u64, u64)>` where each entry is `(j, n_j)`:
     /// `n_j` distinct molecules were observed exactly `j` times.
+    ///
+    /// **Important**: Call [`finalize()`](Self::finalize) before this method
+    /// to flush any remaining dangling mates.
     pub fn into_histogram(self) -> Vec<(u64, u64)> {
         let mut freq_of_freq: HashMap<u64, u64> = HashMap::new();
         for &count in self.fragment_counts.values() {
@@ -130,13 +272,15 @@ impl PreseqAccum {
     }
 }
 
-/// Compute a hash for a fragment key.
+/// Compute a hash for a fragment key `(tid, start, end)`.
 ///
-/// Uses FNV-1a hashing for speed with small keys.
-fn compute_hash(a: u64, b: u64, c: u64, d: u64) -> u64 {
+/// Uses FNV-1a hashing for speed with small keys. This matches preseq v3.2.0's
+/// GenomicRegion comparison: two fragments are duplicates iff they have the
+/// same chromosome, start, and end positions.
+fn fragment_hash(tid: i32, start: i64, end: i64) -> u64 {
     let mut h: u64 = 0xcbf29ce484222325; // FNV offset basis
     let prime: u64 = 0x100000001b3; // FNV prime
-    for val in [a, b, c, d] {
+    for val in [tid as u64, start as u64, end as u64] {
         for byte in val.to_le_bytes() {
             h ^= byte as u64;
             h = h.wrapping_mul(prime);
@@ -1091,38 +1235,32 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_hash_deterministic() {
-        let h1 = compute_hash(1, 100, 200, 0);
-        let h2 = compute_hash(1, 100, 200, 0);
+    fn test_fragment_hash_deterministic() {
+        let h1 = fragment_hash(1, 200, 300);
+        let h2 = fragment_hash(1, 200, 300);
         assert_eq!(h1, h2);
 
         // Different inputs should (almost certainly) give different hashes
-        let h3 = compute_hash(1, 100, 200, 1);
+        let h3 = fragment_hash(1, 100, 300);
         assert_ne!(h1, h3);
     }
 
     #[test]
     fn test_histogram_construction() {
-        let mut accum = PreseqAccum::new();
+        let mut accum = PreseqAccum::new(DEFAULT_MAX_SEGMENT_LENGTH);
 
         // Simulate fragments: 3 seen once, 2 seen twice, 1 seen three times
-        // Key is (tid, pos, mtid, mpos)
-        // Fragment A: 1 time
-        accum.process_read(0, 100, 0, 100);
-        // Fragment B: 1 time
-        accum.process_read(0, 200, 0, 200);
-        // Fragment C: 1 time
-        accum.process_read(0, 300, 0, 300);
-        // Fragment D: 2 times
-        accum.process_read(0, 400, 0, 400);
-        accum.process_read(0, 400, 0, 400);
-        // Fragment E: 2 times
-        accum.process_read(0, 500, 0, 500);
-        accum.process_read(0, 500, 0, 500);
-        // Fragment F: 3 times
-        accum.process_read(0, 600, 0, 600);
-        accum.process_read(0, 600, 0, 600);
-        accum.process_read(0, 600, 0, 600);
+        // Key is (tid, start, end)
+        accum.add_fragment(0, 100, 200); // A: 1 time
+        accum.add_fragment(0, 200, 300); // B: 1 time
+        accum.add_fragment(0, 300, 400); // C: 1 time
+        accum.add_fragment(0, 400, 500); // D: 2 times
+        accum.add_fragment(0, 400, 500);
+        accum.add_fragment(0, 500, 600); // E: 2 times
+        accum.add_fragment(0, 500, 600);
+        accum.add_fragment(0, 600, 700); // F: 3 times
+        accum.add_fragment(0, 600, 700);
+        accum.add_fragment(0, 600, 700);
 
         assert_eq!(accum.total_fragments, 10);
         assert_eq!(accum.n_distinct(), 6);
@@ -1135,57 +1273,36 @@ mod tests {
     }
 
     #[test]
-    fn test_accumulator_filters() {
-        let mut accum = PreseqAccum::new();
+    fn test_fragment_counting() {
+        let mut accum = PreseqAccum::new(DEFAULT_MAX_SEGMENT_LENGTH);
 
-        // Mapped read — should be counted
-        accum.process_read(0, 100, 0, 100);
+        // Fragment at (tid=0, start=100, end=200)
+        accum.add_fragment(0, 100, 200);
         assert_eq!(accum.total_fragments, 1);
 
-        // Unmapped (tid == -1) — should be skipped
-        accum.process_read(-1, 200, 0, 200);
-        assert_eq!(accum.total_fragments, 1);
-
-        // Another mapped read at different position — should be counted
-        accum.process_read(0, 300, 0, 300);
+        // Different fragment
+        accum.add_fragment(0, 300, 400);
         assert_eq!(accum.total_fragments, 2);
 
         // Duplicate at same position — should be counted (whole point!)
-        accum.process_read(0, 300, 0, 300);
+        accum.add_fragment(0, 300, 400);
         assert_eq!(accum.total_fragments, 3);
-    }
-
-    #[test]
-    fn test_pe_accumulator() {
-        let mut accum = PreseqAccum::new();
-
-        // PE read: (tid=0, pos=100, mtid=0, mpos=200)
-        accum.process_read(0, 100, 0, 200);
-        assert_eq!(accum.total_fragments, 1);
-
-        // Same read again (PCR duplicate) — same key
-        accum.process_read(0, 100, 0, 200);
-        assert_eq!(accum.total_fragments, 2);
-
-        // Different read (same pos, different mpos)
-        accum.process_read(0, 100, 0, 300);
-        assert_eq!(accum.total_fragments, 3);
-        assert_eq!(accum.n_distinct(), 2); // Two distinct reads
+        assert_eq!(accum.n_distinct(), 2); // Two distinct fragments
     }
 
     #[test]
     fn test_interleaved_fragments_grouped_correctly() {
         // Simulate fragments at the same start but different ends (different insert sizes):
-        //   (0, 100, 0, 200) — read A
-        //   (0, 100, 0, 300) — read B (different mpos)
-        //   (0, 100, 0, 200) — read A duplicate
+        //   (0, 100, 200) — fragment A
+        //   (0, 100, 300) — fragment B (different end)
+        //   (0, 100, 200) — fragment A duplicate
         //
         // Hash-based counting correctly groups A (count 2), B (count 1) → 2 distinct
 
-        let mut accum = PreseqAccum::new();
-        accum.process_read(0, 100, 0, 200); // A
-        accum.process_read(0, 100, 0, 300); // B (different mpos)
-        accum.process_read(0, 100, 0, 200); // A duplicate
+        let mut accum = PreseqAccum::new(DEFAULT_MAX_SEGMENT_LENGTH);
+        accum.add_fragment(0, 100, 200); // A
+        accum.add_fragment(0, 100, 300); // B (different end)
+        accum.add_fragment(0, 100, 200); // A duplicate
 
         assert_eq!(accum.total_fragments, 3);
         assert_eq!(accum.n_distinct(), 2, "2 distinct (A and B)");
@@ -1198,18 +1315,135 @@ mod tests {
     }
 
     #[test]
-    fn test_accumulator_merge() {
-        let mut accum1 = PreseqAccum::new();
-        accum1.process_read(0, 100, 0, 100);
-        accum1.process_read(0, 200, 0, 200);
+    fn test_accumulator_merge_fragment_counts() {
+        let mut accum1 = PreseqAccum::new(DEFAULT_MAX_SEGMENT_LENGTH);
+        accum1.add_fragment(0, 100, 200);
+        accum1.add_fragment(0, 200, 300);
 
-        let mut accum2 = PreseqAccum::new();
-        accum2.process_read(0, 100, 0, 100); // Same read as accum1
-        accum2.process_read(0, 300, 0, 300);
+        let mut accum2 = PreseqAccum::new(DEFAULT_MAX_SEGMENT_LENGTH);
+        accum2.add_fragment(0, 100, 200); // Same fragment as accum1
+        accum2.add_fragment(0, 300, 400);
 
         accum1.merge(accum2);
         assert_eq!(accum1.total_fragments, 4);
-        assert_eq!(accum1.n_distinct(), 3); // 100, 200, 300
+        assert_eq!(accum1.n_distinct(), 3); // (100,200), (200,300), (300,400)
+    }
+
+    #[test]
+    fn test_finalize_flushes_dangling_mates() {
+        let mut accum = PreseqAccum::new(DEFAULT_MAX_SEGMENT_LENGTH);
+
+        // Manually insert a dangling mate
+        accum.dangling_mates.insert(
+            b"read1".to_vec(),
+            MateInfo {
+                tid: 0,
+                start: 100,
+                end: 200,
+            },
+        );
+
+        assert_eq!(accum.total_fragments, 0);
+        accum.finalize();
+        assert_eq!(accum.total_fragments, 1);
+        assert_eq!(accum.n_unpaired, 1);
+        assert!(accum.dangling_mates.is_empty());
+    }
+
+    #[test]
+    fn test_merge_resolves_cross_chromosome_mates() {
+        let mut accum1 = PreseqAccum::new(DEFAULT_MAX_SEGMENT_LENGTH);
+        let mut accum2 = PreseqAccum::new(DEFAULT_MAX_SEGMENT_LENGTH);
+
+        // Mate 1 on chr0 (in accum1's dangling)
+        accum1.dangling_mates.insert(
+            b"read1".to_vec(),
+            MateInfo {
+                tid: 0,
+                start: 100,
+                end: 200,
+            },
+        );
+
+        // Mate 2 on chr1 (in accum2's dangling) — different chromosome
+        accum2.dangling_mates.insert(
+            b"read1".to_vec(),
+            MateInfo {
+                tid: 1,
+                start: 300,
+                end: 400,
+            },
+        );
+
+        accum1.merge(accum2);
+        // Different chromosomes → both counted as individual fragments
+        assert_eq!(accum1.total_fragments, 2);
+        assert_eq!(accum1.n_unpaired, 2);
+        assert!(accum1.dangling_mates.is_empty());
+    }
+
+    #[test]
+    fn test_merge_resolves_same_chromosome_mates() {
+        let mut accum1 = PreseqAccum::new(DEFAULT_MAX_SEGMENT_LENGTH);
+        let mut accum2 = PreseqAccum::new(DEFAULT_MAX_SEGMENT_LENGTH);
+
+        // Mate 1 on chr0
+        accum1.dangling_mates.insert(
+            b"read1".to_vec(),
+            MateInfo {
+                tid: 0,
+                start: 100,
+                end: 200,
+            },
+        );
+
+        // Mate 2 also on chr0, nearby
+        accum2.dangling_mates.insert(
+            b"read1".to_vec(),
+            MateInfo {
+                tid: 0,
+                start: 150,
+                end: 350,
+            },
+        );
+
+        accum1.merge(accum2);
+        // Same chromosome, merged into (0, 100, 350), len=250 < 5000
+        assert_eq!(accum1.total_fragments, 1);
+        assert_eq!(accum1.n_paired, 1);
+        assert!(accum1.dangling_mates.is_empty());
+    }
+
+    #[test]
+    fn test_merge_rejects_long_fragments() {
+        let mut accum1 = PreseqAccum::new(5000); // Small limit to trigger rejection
+        let mut accum2 = PreseqAccum::new(5000);
+
+        // Mate 1 on chr0
+        accum1.dangling_mates.insert(
+            b"read1".to_vec(),
+            MateInfo {
+                tid: 0,
+                start: 0,
+                end: 100,
+            },
+        );
+
+        // Mate 2 also on chr0 but far away (merged len > 5000)
+        accum2.dangling_mates.insert(
+            b"read1".to_vec(),
+            MateInfo {
+                tid: 0,
+                start: 6000,
+                end: 6100,
+            },
+        );
+
+        accum1.merge(accum2);
+        // Fragment length 6100 > MAX_SEGMENT_LENGTH (5000) → split
+        assert_eq!(accum1.total_fragments, 2);
+        assert_eq!(accum1.n_unpaired, 2);
+        assert!(accum1.dangling_mates.is_empty());
     }
 
     #[test]
@@ -1353,6 +1587,7 @@ mod tests {
             confidence_level: 0.95,
             seed: 1,
             max_terms: 100,
+            max_segment_length: 100_000_000,
             defects: false,
         };
 
@@ -1386,6 +1621,7 @@ mod tests {
             confidence_level: 0.95,
             seed: 1,
             max_terms: 50,
+            max_segment_length: 100_000_000,
             defects: false,
         };
 

@@ -622,6 +622,7 @@ impl Default for SamtoolsStatsConfig {
 ///   confidence_level: 0.95
 ///   seed: 408
 ///   max_terms: 100
+///   max_segment_length: 100000000
 ///   defects: false
 /// ```
 #[derive(Debug, Deserialize)]
@@ -648,6 +649,11 @@ pub struct PreseqConfig {
     /// Maximum number of terms in the power series / continued fraction. Defaults to 100.
     pub max_terms: usize,
 
+    /// Maximum merged PE fragment length (bp). Defaults to 100000000 (effectively
+    /// unlimited). Merged PE fragments longer than this are split back into
+    /// individual reads. Corresponds to preseq's `-seg_len` option.
+    pub max_segment_length: i64,
+
     /// Use the defects model for extrapolation. Defaults to false.
     ///
     /// When true, uses a modified rational function approximation that can
@@ -665,6 +671,7 @@ impl Default for PreseqConfig {
             confidence_level: 0.95,
             seed: 408,
             max_terms: 100,
+            max_segment_length: 100_000_000,
             defects: false,
         }
     }
