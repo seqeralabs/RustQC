@@ -91,6 +91,61 @@ pub fn write_read_duplication(
         seq_path.display()
     );
 
+    // Write the R plotting script (matching upstream read_duplication.py output)
+    let r_path = outdir.join(format!("{}.DupRate_plot.r", stem));
+    write_r_script(&result.pos_histogram, &result.seq_histogram, stem, &r_path)
+        .with_context(|| format!("Failed to write duplication R script: {}", r_path.display()))?;
+    info!(
+        "Wrote duplication R plotting script to {}",
+        r_path.display()
+    );
+
+    Ok(())
+}
+
+/// Write the R plotting script matching upstream RSeQC read_duplication.py.
+fn write_r_script(
+    pos_hist: &BTreeMap<u64, u64>,
+    seq_hist: &BTreeMap<u64, u64>,
+    stem: &str,
+    path: &Path,
+) -> Result<()> {
+    use std::io::Write;
+    let mut f = std::fs::File::create(path)?;
+
+    writeln!(f, "pdf('{stem}.DupRate_plot.pdf')")?;
+    writeln!(f, "par(mar=c(5,4,4,5),las=0)")?;
+
+    // seq_occ and seq_uniqRead vectors
+    let seq_occ: Vec<String> = seq_hist.keys().map(|k| k.to_string()).collect();
+    let seq_vals: Vec<String> = seq_hist.values().map(|v| v.to_string()).collect();
+    writeln!(f, "seq_occ=c({})", seq_occ.join(","))?;
+    writeln!(f, "seq_uniqRead=c({})", seq_vals.join(","))?;
+
+    // pos_occ and pos_uniqRead vectors
+    let pos_occ: Vec<String> = pos_hist.keys().map(|k| k.to_string()).collect();
+    let pos_vals: Vec<String> = pos_hist.values().map(|v| v.to_string()).collect();
+    writeln!(f, "pos_occ=c({})", pos_occ.join(","))?;
+    writeln!(f, "pos_uniqRead=c({})", pos_vals.join(","))?;
+
+    // Plot commands matching upstream exactly
+    writeln!(f, "plot(pos_occ,log10(pos_uniqRead),ylab='Number of Reads (log10)',xlab='Occurrence of read',pch=4,cex=0.8,col='blue',xlim=c(1,500),yaxt='n')")?;
+    writeln!(
+        f,
+        "points(seq_occ,log10(seq_uniqRead),pch=20,cex=0.8,col='red')"
+    )?;
+    writeln!(f, "ym=floor(max(log10(pos_uniqRead)))")?;
+    writeln!(
+        f,
+        "legend(300,ym,legend=c('Sequence-based','Mapping-based'),col=c('blue','red'),pch=c(4,20))"
+    )?;
+    writeln!(f, "axis(side=2,at=0:ym,labels=0:ym)")?;
+
+    // Right-axis annotation: percentage labels at first 4 positions
+    writeln!(f, "axis(side=4,at=c(log10(pos_uniqRead[1]),log10(pos_uniqRead[2]),log10(pos_uniqRead[3]),log10(pos_uniqRead[4])), labels=c(round(pos_uniqRead[1]*100/sum(pos_uniqRead*pos_occ)),round(pos_uniqRead[2]*100/sum(pos_uniqRead*pos_occ)),round(pos_uniqRead[3]*100/sum(pos_uniqRead*pos_occ)),round(pos_uniqRead[4]*100/sum(pos_uniqRead*pos_occ))))")?;
+    writeln!(f, "mtext(4, text = \"Reads %\", line = 2)")?;
+    writeln!(f, "dev.off()")?;
+
     Ok(())
 }
 
