@@ -1515,6 +1515,12 @@ impl InnerDistAccum {
     }
 
     /// Process a single BAM record.
+    ///
+    /// Matches upstream RSeQC inner_distance.py exactly:
+    /// - `read1_end = pos + qlen + splice_intron_size` (not cigar.end_pos())
+    /// - Overlap uses 1-based exon positions from CIGAR M-blocks
+    /// - Transcript membership checked at `read1_end - 1` and `read2_start`
+    /// - mRNA distance = exonic bases between `read1_end` and `read2_start`
     pub fn process_read(
         &mut self,
         record: &bam::Record,
@@ -1570,7 +1576,7 @@ impl InnerDistAccum {
         if read2_start < read1_start {
             return;
         }
-        // Same position: skip if this is read1
+        // Same position: skip if this is read1 (upstream sets inner_distance=0 and continues)
         if read2_start == read1_start && record.is_first_in_template() {
             return;
         }
@@ -1579,17 +1585,28 @@ impl InnerDistAccum {
 
         let read_name = String::from_utf8_lossy(record.qname()).to_string();
 
-        // Compute read1_end from CIGAR
-        let read1_end = record.cigar().end_pos() as u64;
+        // Compute read1_end matching upstream RSeQC:
+        //   read1_len = aligned_read.qlen  (= query_alignment_length: M+I+=/X)
+        //   splice_intron_size = sum of N operations
+        //   read1_end = read1_start + read1_len + splice_intron_size
+        //
+        // This differs from cigar.end_pos() which uses M+D+N (not I, includes D).
+        // Upstream includes I but excludes D in the query length component.
+        let (qalen, splice_intron_size) = compute_qalen_and_intron_size(record);
+        let read1_end = read1_start + qalen + splice_intron_size;
 
-        // Compute inner distance
+        // Compute inner distance matching upstream exactly
         let inner_dist: i64 = if read2_start >= read1_end {
             (read2_start - read1_end) as i64
         } else {
-            // Overlap: count exonic positions of read1 in overlap region
+            // Overlap: upstream enumerates 1-based exon positions from CIGAR M-blocks,
+            // then counts those in range (read2_start, read1_end] (1-based).
+            // This equals counting 0-based exonic positions in [read2_start, read1_end).
             let exon_blocks = fetch_exon_blocks_rseqc(record);
             let mut overlap_count: i64 = 0;
             for (ex_start, ex_end) in &exon_blocks {
+                // Exon block is [ex_start, ex_end) in 0-based
+                // Overlap region is [read2_start, read1_end) in 0-based
                 let ov_start = (*ex_start).max(read2_start);
                 let ov_end = (*ex_end).min(read1_end);
                 if ov_start < ov_end {
@@ -1599,7 +1616,7 @@ impl InnerDistAccum {
             -overlap_count
         };
 
-        // Check transcript membership
+        // Check transcript membership using read1_end (upstream formula)
         let read1_genes =
             transcript_tree.find_overlapping(chrom_upper, read1_end.saturating_sub(1));
         let read2_genes = transcript_tree.find_overlapping(chrom_upper, read2_start);
@@ -1617,8 +1634,11 @@ impl InnerDistAccum {
                     exon_bitset.count_exonic_bases(chrom_upper, read1_end, read2_start);
 
                 if exonic_bases as i64 == inner_dist {
+                    // sameExon: all bases between reads are exonic
+                    // Upstream reports `size` which equals `inner_distance` here
                     classification = "sameTranscript=Yes,sameExon=Yes,dist=mRNA".to_string();
                 } else if exonic_bases > 0 {
+                    // Different exon: report mRNA distance (exonic bases only)
                     classification = "sameTranscript=Yes,sameExon=No,dist=mRNA".to_string();
                     let mrna_dist = exonic_bases as i64;
                     self.pairs.push(InnerDistPair {
@@ -1666,8 +1686,31 @@ impl InnerDistAccum {
 }
 
 // ===================================================================
-// Shared CIGAR helper
+// Shared CIGAR helpers
 // ===================================================================
+
+/// Compute query alignment length (M+I+=/X) and total splice intron size (N)
+/// from a BAM record's CIGAR, matching upstream RSeQC's inner_distance.py.
+///
+/// Upstream computes `read1_end = pos + qlen + splice_intron_size` where:
+/// - `qlen` = pysam `query_alignment_length` = sum of M+I+=/X CIGAR ops
+/// - `splice_intron_size` = sum of N (RefSkip) CIGAR ops
+///
+/// This differs from `cigar.end_pos()` which uses M+D+N (includes D, excludes I).
+fn compute_qalen_and_intron_size(record: &bam::Record) -> (u64, u64) {
+    let mut qalen: u64 = 0;
+    let mut intron_size: u64 = 0;
+    for op in record.cigar().iter() {
+        use rust_htslib::bam::record::Cigar::*;
+        match op {
+            Match(len) | Equal(len) | Diff(len) => qalen += *len as u64,
+            Ins(len) => qalen += *len as u64,
+            RefSkip(len) => intron_size += *len as u64,
+            _ => {}
+        }
+    }
+    (qalen, intron_size)
+}
 
 /// Extract exon blocks from CIGAR matching RSeQC's `bam_cigar.fetch_exon()`.
 ///

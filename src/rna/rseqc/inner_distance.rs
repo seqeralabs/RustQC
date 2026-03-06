@@ -48,18 +48,14 @@ pub struct ExonBitset {
 impl ExonBitset {
     /// Build an `ExonBitset` from parsed GTF gene annotations.
     ///
-    /// Uses exons from multi-exon transcripts only, converting from GTF 1-based
-    /// inclusive coordinates to 0-based half-open coordinates. Single-exon
-    /// transcripts are skipped to match BED-path behavior (and RSeQC).
-    /// Chromosome names are uppercased.
+    /// Includes exons from ALL transcripts (including single-exon), converting
+    /// from GTF 1-based inclusive coordinates to 0-based half-open coordinates.
+    /// This matches upstream RSeQC's `getExon()` which does not filter by exon
+    /// count. Chromosome names are uppercased.
     pub fn from_genes(genes: &IndexMap<String, Gene>) -> Self {
         let mut bitset = ExonBitset::default();
         for gene in genes.values() {
             for tx in &gene.transcripts {
-                // Skip single-exon transcripts (matches BED-path / RSeQC behavior)
-                if tx.exons.len() <= 1 {
-                    continue;
-                }
                 let chrom = tx.chrom.to_uppercase();
                 for &(start, end) in &tx.exons {
                     // GTF: 1-based inclusive → BED-style 0-based half-open
@@ -73,8 +69,9 @@ impl ExonBitset {
 
     /// Build an `ExonBitset` from a BED12 file.
     ///
-    /// Parses the BED12 file and extracts exon blocks from multi-exon
-    /// transcripts. Single-exon transcripts are skipped (matches RSeQC).
+    /// Parses the BED12 file and extracts exon blocks from ALL transcripts
+    /// (including single-exon). This matches upstream RSeQC's `getExon()`
+    /// which does not filter by block count.
     pub fn from_bed(bed_path: &str) -> Result<Self> {
         let reader = crate::io::open_reader(bed_path)
             .with_context(|| format!("Failed to open BED file: {}", bed_path))?;
@@ -100,10 +97,6 @@ impl ExonBitset {
             let chrom = fields[0].to_uppercase();
             let tx_start: u64 = fields[1].parse().context("Invalid txStart")?;
             let block_count: usize = fields[9].parse().context("Invalid blockCount")?;
-
-            if block_count == 1 {
-                continue;
-            }
 
             let block_sizes: Vec<u64> = fields[10]
                 .trim_end_matches(',')
@@ -211,24 +204,32 @@ pub struct TranscriptTree {
 impl TranscriptTree {
     /// Build a `TranscriptTree` from parsed GTF gene annotations.
     ///
-    /// Uses transcript-level data from each gene. Converts from GTF 1-based
-    /// inclusive coordinates to 0-based half-open coordinates. Chromosome names
-    /// are uppercased. Transcript names use the format `"transcript_id:CHROM:start-end"`.
-    /// Single-exon transcripts are skipped (matches RSeQC behaviour).
+    /// Includes ALL transcripts (including single-exon) to match upstream
+    /// RSeQC's `getTranscriptRanges()`. Converts from GTF 1-based inclusive
+    /// coordinates to 0-based half-open coordinates. Chromosome names are
+    /// uppercased. Transcript names use the format `"name:CHROM:start-end"`.
+    ///
+    /// Replicates the upstream RSeQC bug where the first transcript per
+    /// chromosome is dropped (the `if/else` in the transcript_ranges builder
+    /// creates the `Intersecter` but skips `add_interval` for the first entry).
     pub fn from_genes(genes: &IndexMap<String, Gene>) -> Self {
         let mut tree = TranscriptTree::default();
+        // Collect all transcripts, then drop the first per chromosome
+        let mut per_chrom: HashMap<String, Vec<(u64, u64, String)>> = HashMap::new();
         for gene in genes.values() {
             for tx in &gene.transcripts {
-                // Skip single-exon transcripts (matches BED12 path)
-                if tx.exons.len() <= 1 {
-                    continue;
-                }
                 let chrom = tx.chrom.to_uppercase();
                 // GTF: 1-based inclusive → BED-style 0-based half-open
                 let start = tx.start - 1;
                 let end = tx.end;
                 let name = format!("{}:{}:{}-{}", tx.transcript_id, chrom, start, end);
-                tree.add(&chrom, start, end, &name);
+                per_chrom.entry(chrom).or_default().push((start, end, name));
+            }
+        }
+        // Replicate the upstream bug: skip the first transcript per chromosome
+        for (chrom, transcripts) in &per_chrom {
+            for (start, end, name) in transcripts.iter().skip(1) {
+                tree.add(chrom, *start, *end, name);
             }
         }
         tree.build();
@@ -237,13 +238,15 @@ impl TranscriptTree {
 
     /// Build a `TranscriptTree` from a BED12 file.
     ///
-    /// Parses the BED12 file and extracts transcript spans from multi-exon
-    /// transcripts. Single-exon transcripts are skipped (matches RSeQC).
+    /// Includes ALL transcripts (including single-exon) to match upstream
+    /// RSeQC's `getTranscriptRanges()`. Replicates the upstream bug where
+    /// the first transcript per chromosome is dropped.
     pub fn from_bed(bed_path: &str) -> Result<Self> {
         let reader = crate::io::open_reader(bed_path)
             .with_context(|| format!("Failed to open BED file: {}", bed_path))?;
 
-        let mut tree = TranscriptTree::default();
+        // Collect all transcripts first, then drop the first per chromosome
+        let mut per_chrom: HashMap<String, Vec<(u64, u64, String)>> = HashMap::new();
 
         for line in reader.lines() {
             let line = line?;
@@ -265,14 +268,20 @@ impl TranscriptTree {
             let tx_start: u64 = fields[1].parse().context("Invalid txStart")?;
             let tx_end: u64 = fields[2].parse().context("Invalid txEnd")?;
             let name = fields[3];
-            let block_count: usize = fields[9].parse().context("Invalid blockCount")?;
-
-            if block_count == 1 {
-                continue;
-            }
 
             let tx_name = format!("{}:{}:{}-{}", name, chrom, tx_start, tx_end);
-            tree.add(&chrom, tx_start, tx_end, &tx_name);
+            per_chrom
+                .entry(chrom)
+                .or_default()
+                .push((tx_start, tx_end, tx_name));
+        }
+
+        let mut tree = TranscriptTree::default();
+        // Replicate the upstream bug: skip the first transcript per chromosome
+        for (chrom, transcripts) in &per_chrom {
+            for (start, end, name) in transcripts.iter().skip(1) {
+                tree.add(chrom, *start, *end, name);
+            }
         }
 
         tree.build();
@@ -564,14 +573,17 @@ mod tests {
     }
 
     #[test]
-    fn test_transcript_tree_all_transcripts_included() {
+    fn test_transcript_tree_first_per_chrom_dropped() {
+        // When using from_bed / from_genes, the first transcript per chromosome
+        // is dropped to replicate the upstream RSeQC bug. But when using add()
+        // directly, all transcripts are included.
         let mut tree = TranscriptTree::default();
-        tree.add("CHR1", 100, 200, "gene1"); // First transcript per chrom
-        tree.add("CHR1", 150, 300, "gene2"); // Second transcript
+        tree.add("CHR1", 100, 200, "gene1");
+        tree.add("CHR1", 150, 300, "gene2");
         tree.build();
 
         let genes = tree.find_overlapping("CHR1", 175);
-        assert!(genes.contains("gene1")); // First gene is now included (bug fixed)
+        assert!(genes.contains("gene1")); // Direct add() includes all
         assert!(genes.contains("gene2"));
     }
 }
