@@ -199,7 +199,7 @@ pub struct BamStatAccum {
     /// Sum of NM tag values across mapped primary reads.
     pub mismatches: u64,
     /// Insert size with orientation: abs_tlen → [total, inward, outward, other].
-    /// Both mates contribute (divide by 2 at output, matching samtools stats).
+    /// Only one mate per pair contributes (upstream mate), capped at 8000.
     pub is_hist: HashMap<u64, [u64; 4]>,
     /// Inward-oriented pairs (FR).
     pub inward_pairs: u64,
@@ -516,44 +516,61 @@ impl BamStatAccum {
                     let tid = record.tid();
                     let mtid = record.mtid();
                     if tid == mtid {
-                        let tlen = record.insert_size();
-                        let abs_tlen = tlen.unsigned_abs();
+                        let pos = record.pos();
+                        let mpos = record.mpos();
 
-                        // Compute orientation
-                        let pos_fst = record.mpos() - record.pos();
-                        let is_fst: i64 = if flags & BAM_FREAD1 != 0 { 1 } else { -1 };
-                        let is_fwd: i64 = if flags & BAM_FREVERSE != 0 { -1 } else { 1 };
-                        let is_mfwd: i64 = if flags & BAM_FMREVERSE != 0 { -1 } else { 1 };
+                        // Count each pair only once: process only when this
+                        // read's position is upstream of its mate, or at the
+                        // same position and is read1. This matches samtools
+                        // stats (stats.c) which uses:
+                        //   pos < mpos || (pos == mpos && READ1)
+                        let count_this_mate =
+                            pos < mpos || (pos == mpos && flags & BAM_FREAD1 != 0);
 
-                        // orientation_idx: 1=inward, 2=outward, 3=other
-                        let orientation_idx = if is_fwd * is_mfwd > 0 {
-                            self.other_orientation += 1;
-                            3usize
-                        } else if is_fst * pos_fst > 0 {
-                            if is_fst * is_fwd > 0 {
+                        if count_this_mate {
+                            let tlen = record.insert_size();
+                            let abs_tlen = tlen.unsigned_abs();
+
+                            // Compute orientation
+                            let pos_fst = mpos - pos;
+                            let is_fst: i64 = if flags & BAM_FREAD1 != 0 { 1 } else { -1 };
+                            let is_fwd: i64 = if flags & BAM_FREVERSE != 0 { -1 } else { 1 };
+                            let is_mfwd: i64 = if flags & BAM_FMREVERSE != 0 { -1 } else { 1 };
+
+                            // orientation_idx: 1=inward, 2=outward, 3=other
+                            let orientation_idx = if is_fwd * is_mfwd > 0 {
+                                self.other_orientation += 1;
+                                3usize
+                            } else if is_fst * pos_fst > 0 {
+                                if is_fst * is_fwd > 0 {
+                                    self.inward_pairs += 1;
+                                    1usize
+                                } else {
+                                    self.outward_pairs += 1;
+                                    2usize
+                                }
+                            } else if is_fst * pos_fst < 0 {
+                                if is_fst * is_fwd > 0 {
+                                    self.outward_pairs += 1;
+                                    2usize
+                                } else {
+                                    self.inward_pairs += 1;
+                                    1usize
+                                }
+                            } else {
                                 self.inward_pairs += 1;
                                 1usize
-                            } else {
-                                self.outward_pairs += 1;
-                                2usize
-                            }
-                        } else if is_fst * pos_fst < 0 {
-                            if is_fst * is_fwd > 0 {
-                                self.outward_pairs += 1;
-                                2usize
-                            } else {
-                                self.inward_pairs += 1;
-                                1usize
-                            }
-                        } else {
-                            self.inward_pairs += 1;
-                            1usize
-                        };
+                            };
 
-                        if abs_tlen > 0 {
-                            let entry = self.is_hist.entry(abs_tlen).or_insert([0; 4]);
-                            entry[0] += 1; // total
-                            entry[orientation_idx] += 1;
+                            if abs_tlen > 0 {
+                                // Cap at MAX_INSERT_SIZE (8000), matching
+                                // samtools stats which accumulates overflow
+                                // into the cap bucket.
+                                let capped = abs_tlen.min(8000);
+                                let entry = self.is_hist.entry(capped).or_insert([0; 4]);
+                                entry[0] += 1; // total
+                                entry[orientation_idx] += 1;
+                            }
                         }
                     }
                 }
@@ -950,11 +967,18 @@ impl InferExpAccum {
 
         let flags = record.flags();
 
-        // Skip QC-fail, dup, secondary, unmapped
-        // Note: upstream RSeQC does NOT filter supplementary alignments (0x800)
+        // Skip QC-fail, dup, secondary, supplementary, unmapped.
+        //
+        // Upstream RSeQC does not explicitly filter supplementary (0x800), but
+        // supplementary alignments represent chimeric read fragments with
+        // partial mappings (heavy soft clipping) that produce unreliable strand
+        // signals. Including them inflates the "failed to determine" fraction
+        // because they often overlap genes on multiple strands. Filtering them
+        // matches the intent of sampling only well-mapped primary alignments.
         if flags & BAM_FQCFAIL != 0
             || flags & BAM_FDUP != 0
             || flags & BAM_FSECONDARY != 0
+            || flags & BAM_FSUPPLEMENTARY != 0
             || flags & BAM_FUNMAP != 0
         {
             return;
@@ -966,8 +990,13 @@ impl InferExpAccum {
 
         let map_strand = if record.is_reverse() { '-' } else { '+' };
 
-        // Compute query length (M+I+=+X+S) to match upstream RSeQC's `qlen`
-        // which includes soft clips (pysam's `query_length` = sum of M/I/S/=/X).
+        // Compute query alignment length (M+I+=+X, NO soft clips) to match
+        // upstream RSeQC's `qlen` which is pysam's `query_alignment_length`.
+        // pos + qlen gives an approximate reference end (slightly overestimated
+        // due to insertions, matching upstream's approximation). Soft clips must
+        // be excluded because they don't consume the reference — including them
+        // would widen the query interval, causing more spurious overlaps with
+        // genes on both strands and inflating the "failed to determine" fraction.
         let read_start = record.pos() as u64;
         let qalen: u64 = record
             .cigar()
@@ -975,9 +1004,7 @@ impl InferExpAccum {
             .filter_map(|op| {
                 use rust_htslib::bam::record::Cigar::*;
                 match op {
-                    Match(len) | Ins(len) | Equal(len) | Diff(len) | SoftClip(len) => {
-                        Some(*len as u64)
-                    }
+                    Match(len) | Ins(len) | Equal(len) | Diff(len) => Some(*len as u64),
                     _ => None,
                 }
             })
@@ -1011,11 +1038,14 @@ impl InferExpAccum {
         self.count += 1;
     }
 
-    /// Merge another accumulator into this one, enforcing the global sample size cap.
+    /// Merge another accumulator into this one.
     ///
-    /// Each parallel worker independently caps at `sample_size`. When merging,
-    /// the total can exceed `sample_size`. We proportionally scale down all
-    /// counts so the merged total equals `sample_size`.
+    /// Raw counts are accumulated without scaling. Each parallel worker
+    /// independently caps at `sample_size`, so the merged total may exceed
+    /// `sample_size`. This is fine because `into_result()` computes fractions
+    /// from raw counts — the absolute count doesn't matter, only the
+    /// proportions. Avoiding intermediate scaling prevents cumulative
+    /// rounding errors from repeated merge steps.
     pub fn merge(&mut self, other: InferExpAccum) {
         for (key, count) in other.p_strandness {
             *self.p_strandness.entry(key).or_insert(0) += count;
@@ -1024,23 +1054,6 @@ impl InferExpAccum {
             *self.s_strandness.entry(key).or_insert(0) += count;
         }
         self.count += other.count;
-
-        // Enforce global sample size cap by proportionally scaling down
-        if self.count > self.sample_size {
-            let scale = self.sample_size as f64 / self.count as f64;
-            let mut new_total: u64 = 0;
-            for count in self.p_strandness.values_mut() {
-                let scaled = (*count as f64 * scale).round() as u64;
-                *count = scaled;
-                new_total += scaled;
-            }
-            for count in self.s_strandness.values_mut() {
-                let scaled = (*count as f64 * scale).round() as u64;
-                *count = scaled;
-                new_total += scaled;
-            }
-            self.count = new_total;
-        }
     }
 }
 

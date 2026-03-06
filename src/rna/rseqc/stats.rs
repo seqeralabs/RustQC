@@ -96,7 +96,7 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
     };
 
     // Insert size stats — 99th percentile truncation matching samtools stats.
-    // Both mates contribute to the histogram; total count / 2 = pairs.
+    // Each pair is counted once (upstream mate only), capped at 8000.
     // Samtools computes mean/SD from the "main bulk" (up to 99th percentile).
     let (avg_insert, insert_sd) = {
         // Build a flat insert-size histogram from is_hist (total column = index 0)
@@ -265,18 +265,14 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
         "insert size standard deviation:",
         fmt_1dp(insert_sd),
     )?;
-    // Divide orientation counts by 2 — upstream samtools stats counts both
-    // mates and applies a 0.5 factor at output (stats.c:1516-1518).
-    sn_no_comment(&mut out, "inward oriented pairs:", result.inward_pairs / 2)?;
-    sn_no_comment(
-        &mut out,
-        "outward oriented pairs:",
-        result.outward_pairs / 2,
-    )?;
+    // Orientation counts: each pair is counted once (only the upstream mate
+    // contributes), matching samtools stats behavior. No division needed.
+    sn_no_comment(&mut out, "inward oriented pairs:", result.inward_pairs)?;
+    sn_no_comment(&mut out, "outward oriented pairs:", result.outward_pairs)?;
     sn_no_comment(
         &mut out,
         "pairs with other orientation:",
-        result.other_orientation / 2,
+        result.other_orientation,
     )?;
     sn_no_comment(
         &mut out,
