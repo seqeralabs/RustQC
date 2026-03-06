@@ -620,7 +620,7 @@ impl Default for SamtoolsStatsConfig {
 ///   step_size: 1000000
 ///   n_bootstraps: 100
 ///   confidence_level: 0.95
-///   seed: 408
+///   seed: 1
 ///   max_terms: 100
 ///   max_segment_length: 100000000
 ///   defects: false
@@ -643,7 +643,7 @@ pub struct PreseqConfig {
     /// Confidence level for bootstrap intervals (e.g. 0.95 for 95%). Defaults to 0.95.
     pub confidence_level: f64,
 
-    /// Random seed for bootstrap reproducibility. Defaults to 408.
+    /// Random seed for bootstrap reproducibility. Defaults to 1.
     pub seed: u64,
 
     /// Maximum number of terms in the power series / continued fraction. Defaults to 100.
@@ -669,7 +669,7 @@ impl Default for PreseqConfig {
             step_size: 1e6,
             n_bootstraps: 100,
             confidence_level: 0.95,
-            seed: 408,
+            seed: 1,
             max_terms: 100,
             max_segment_length: 100_000_000,
             defects: false,
@@ -775,7 +775,7 @@ mod tests {
         assert!((config.preseq.step_size - 1e6).abs() < 1.0);
         assert_eq!(config.preseq.n_bootstraps, 100);
         assert!((config.preseq.confidence_level - 0.95).abs() < 1e-10);
-        assert_eq!(config.preseq.seed, 408);
+        assert_eq!(config.preseq.seed, 1);
         assert_eq!(config.preseq.max_terms, 100);
         assert!(!config.preseq.defects);
     }

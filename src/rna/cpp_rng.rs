@@ -83,8 +83,8 @@ mod tests {
     #[test]
     fn test_binomial_deterministic() {
         // Same seed should produce same sequence
-        let mut rng1 = CppMt19937::new(408);
-        let mut rng2 = CppMt19937::new(408);
+        let mut rng1 = CppMt19937::new(1);
+        let mut rng2 = CppMt19937::new(1);
 
         for _ in 0..20 {
             let a = rng1.binomial(1000, 0.3);
