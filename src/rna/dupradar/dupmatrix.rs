@@ -250,13 +250,14 @@ fn format_float(v: f64) -> String {
         //
         // Strategy: compute how many decimal places give ~15 significant digits,
         // then trim trailing zeros (but keep at least one decimal if present).
+        //
+        // For any non-zero value, floor(log10(|v|)) + 1 gives the number of
+        // digits before the decimal point. For values < 1 this is 0 or negative
+        // (e.g., 0.035 → log10 ≈ -1.45 → floor = -2 → +1 = -1), which
+        // correctly increases the number of decimal places to preserve 15
+        // significant digits through leading zeros.
         let abs_v = v.abs();
-        let digits_before_decimal = if abs_v >= 1.0 {
-            (abs_v.log10().floor() as i32) + 1
-        } else {
-            // For 0.xxx values, digits before decimal = 0 (or negative for leading zeros)
-            0
-        };
+        let digits_before_decimal = (abs_v.log10().floor() as i32) + 1;
         let decimal_places = (15 - digits_before_decimal).max(0) as usize;
 
         let s = format!("{:.*}", decimal_places, v);
@@ -314,5 +315,24 @@ mod tests {
     fn test_format_float() {
         assert_eq!(format_float(0.5), "0.5");
         assert_eq!(format_float(f64::NAN), "NA");
+        assert_eq!(format_float(0.0), "0");
+        assert_eq!(format_float(f64::INFINITY), "Inf");
+        assert_eq!(format_float(f64::NEG_INFINITY), "-Inf");
+    }
+
+    #[test]
+    fn test_format_float_significant_digits() {
+        // R uses 15 significant digits. Values < 1 with leading zeros
+        // need extra decimal places to preserve 15 significant digits.
+        // 1/28 = 0.0357142857142857... → 15 sig digits, 16 decimal places
+        assert_eq!(format_float(0.0357142857142857), "0.0357142857142857");
+        // 0.0758... → 15 sig digits, 16 decimal places
+        assert_eq!(format_float(0.0758898079987858), "0.0758898079987858");
+        // 0.0990... → 15 sig digits, 16 decimal places
+        assert_eq!(format_float(0.0990785693054592), "0.0990785693054592");
+        // Values >= 1 with 1 digit before decimal → 14 decimal places
+        assert_eq!(format_float(4.9243756595146), "4.9243756595146");
+        // Large values: 46.795... → 2 digits before decimal, 13 decimal places
+        assert_eq!(format_float(46.795523906409), "46.795523906409");
     }
 }

@@ -316,8 +316,16 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
         // positions with strand-aware logic matching the Perl gtf2bed script
         // used by upstream nf-core/rnaseq.
         //
-        // For + strand: thick_start = start_codon start, thick_end = stop_codon end
-        // For - strand: thick_start = stop_codon start, thick_end = start_codon end
+        // The Perl script stores the start of the last start_codon line and the
+        // end of the last stop_codon line (overwriting on each occurrence).
+        // For split codons spanning exon boundaries, multiple GTF lines exist
+        // for the same codon; the Perl script keeps the last line's values.
+        //
+        // For + strand: thick_start = last_sc_start, thick_end = last_stc_end
+        // For - strand: the Perl script swaps and adjusts:
+        //   thick_start = last_stc_end - 2, thick_end = last_sc_start + 2
+        //   (this reconstructs the codon span from a single position,
+        //    correct for non-split codons and matching upstream behavior)
         // Missing codons fall back to transcript boundaries (tx_start/tx_end).
         // Transcripts with CDS features but no codon features get tx_start/tx_end.
         let (cds_start, cds_end) = if builder.cds.is_empty() {
@@ -330,22 +338,27 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
             let thick_end;
 
             if has_start_codon || has_stop_codon {
-                // At least one codon feature exists — use strand-aware logic
-                let start_codon_start = builder.start_codons.iter().map(|c| c.0).min();
-                let start_codon_end = builder.start_codons.iter().map(|c| c.1).max();
-                let stop_codon_start = builder.stop_codons.iter().map(|c| c.0).min();
-                let stop_codon_end = builder.stop_codons.iter().map(|c| c.1).max();
+                // Use the last codon line seen (matching Perl overwrite semantics).
+                // For split codons across exon boundaries, multiple GTF lines exist;
+                // the Perl script simply overwrites with each line, keeping the last.
+                let last_start_codon_start = builder.start_codons.last().map(|c| c.0);
+                let last_stop_codon_end = builder.stop_codons.last().map(|c| c.1);
 
                 match builder.strand {
                     '+' => {
-                        // + strand: thick_start = start_codon start, thick_end = stop_codon end
-                        thick_start = start_codon_start.unwrap_or(tx_start);
-                        thick_end = stop_codon_end.unwrap_or(tx_end);
+                        // + strand: thick_start = last start_codon start
+                        //           thick_end   = last stop_codon end
+                        thick_start = last_start_codon_start.unwrap_or(tx_start);
+                        thick_end = last_stop_codon_end.unwrap_or(tx_end);
                     }
                     '-' => {
-                        // - strand: thick_start = stop_codon start, thick_end = start_codon end
-                        thick_start = stop_codon_start.unwrap_or(tx_start);
-                        thick_end = start_codon_end.unwrap_or(tx_end);
+                        // - strand: Perl swaps then adjusts:
+                        //   thick_start = last_stop_codon_end - 2
+                        //   thick_end   = last_start_codon_start + 2
+                        thick_start = last_stop_codon_end
+                            .map(|e| e.saturating_sub(2))
+                            .unwrap_or(tx_start);
+                        thick_end = last_start_codon_start.map(|s| s + 2).unwrap_or(tx_end);
                     }
                     _ => {
                         // Unknown strand: fall back to transcript boundaries
@@ -647,8 +660,10 @@ chr1\ttest\tstop_codon\t3501\t3503\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\
 
     #[test]
     fn test_stop_codon_extends_cds_range_reverse_strand() {
-        // On - strand with start_codon and stop_codon:
-        // thick_start = stop_codon start, thick_end = start_codon end
+        // On - strand with start_codon and stop_codon (non-split):
+        // Perl gtf2bed: swap then adjust → thick_start = stc_end - 2, thick_end = sc_start + 2
+        // For a contiguous 3-base stop_codon [1497,1499]: 1499 - 2 = 1497
+        // For a contiguous 3-base start_codon [3798,3800]: 3798 + 2 = 3800
         let (path, _f) = write_temp_gtf(
             "\
 chr1\ttest\texon\t1000\t2000\t.\t-\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
@@ -661,10 +676,71 @@ chr1\ttest\tstop_codon\t1497\t1499\t.\t-\t.\tgene_id \"G1\"; transcript_id \"T1\
 
         let genes = parse_gtf(path.to_str().unwrap(), &[]).unwrap();
         let t1 = &genes["G1"].transcripts[0];
-        // - strand: thick_start = stop_codon start = 1497
-        //           thick_end = start_codon end = 3800
+        // - strand: thick_start = last_stc_end - 2 = 1499 - 2 = 1497
+        //           thick_end   = last_sc_start + 2 = 3798 + 2 = 3800
         assert_eq!(t1.cds_start, Some(1497));
         assert_eq!(t1.cds_end, Some(3800));
+    }
+
+    #[test]
+    fn test_split_stop_codon_reverse_strand() {
+        // On - strand with a stop codon split across two exons:
+        //   stop_codon line 1: [524, 524] (1 base, exon 2)
+        //   stop_codon line 2: [101, 102] (2 bases, exon 3)
+        //
+        // The Perl gtf2bed script overwrites $sc{id}[1] with each stop_codon
+        // line, keeping the last end seen (102). Then for - strand:
+        //   thick_start = 102 - 2 = 100 (1-based)
+        //
+        // Using min/max would incorrectly give thick_start = min(524,101) - 1
+        // which is wrong. We must match the Perl overwrite behavior.
+        let (path, _f) = write_temp_gtf(
+            "\
+chr1\ttest\texon\t100\t200\t.\t-\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\texon\t400\t600\t.\t-\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\texon\t800\t1000\t.\t-\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\tCDS\t110\t200\t.\t-\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\tCDS\t400\t600\t.\t-\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\tCDS\t800\t900\t.\t-\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\tstart_codon\t898\t900\t.\t-\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\tstop_codon\t524\t524\t.\t-\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\tstop_codon\t101\t102\t.\t-\t.\tgene_id \"G1\"; transcript_id \"T1\";\n",
+        );
+
+        let genes = parse_gtf(path.to_str().unwrap(), &[]).unwrap();
+        let t1 = &genes["G1"].transcripts[0];
+        // - strand: last stop_codon end = 102, last start_codon start = 898
+        // thick_start = 102 - 2 = 100 (Perl: stc_end - 2)
+        // thick_end = 898 + 2 = 900 (Perl: sc_start + 2)
+        assert_eq!(t1.cds_start, Some(100));
+        assert_eq!(t1.cds_end, Some(900));
+    }
+
+    #[test]
+    fn test_split_start_codon_forward_strand() {
+        // On + strand with a start codon split across two exons:
+        //   start_codon line 1: [198, 199] (2 bases, exon 1)
+        //   start_codon line 2: [401, 401] (1 base, exon 2)
+        //
+        // Perl keeps the last start_codon start seen (401).
+        // For + strand: thick_start = last_sc_start = 401
+        let (path, _f) = write_temp_gtf(
+            "\
+chr1\ttest\texon\t100\t200\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\texon\t400\t600\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\tCDS\t198\t200\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\tCDS\t400\t550\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\tstart_codon\t198\t199\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\tstart_codon\t401\t401\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\tstop_codon\t551\t553\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";\n",
+        );
+
+        let genes = parse_gtf(path.to_str().unwrap(), &[]).unwrap();
+        let t1 = &genes["G1"].transcripts[0];
+        // + strand: thick_start = last start_codon start = 401
+        //           thick_end   = last stop_codon end = 553
+        assert_eq!(t1.cds_start, Some(401));
+        assert_eq!(t1.cds_end, Some(553));
     }
 
     #[test]

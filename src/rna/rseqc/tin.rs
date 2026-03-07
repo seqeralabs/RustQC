@@ -39,8 +39,15 @@ pub struct TranscriptSampling {
     /// Total exonic bases across all exon blocks.
     #[allow(dead_code)] // stored for API completeness; values used during construction
     pub exon_length: u64,
-    /// Genomic positions sampled within exonic regions (sorted).
+    /// Unique genomic positions sampled within exonic regions (sorted, deduped).
+    /// Used for coverage counting — each position gets one coverage slot.
     pub sampled_positions: Vec<u64>,
+    /// Total position count including duplicates from upstream's `chose_bases`.
+    /// Used as the denominator `l` in the TIN formula to match upstream behavior.
+    /// For the small mRNA case, upstream does NOT dedup chose_bases, so
+    /// `total_position_count > len(sampled_positions)` when boundary positions
+    /// overlap with exonic positions.
+    pub total_position_count: usize,
 }
 
 /// Index for fast lookup of sampled positions during BAM processing.
@@ -124,15 +131,16 @@ impl TinIndex {
                     continue;
                 }
 
-                let sampled = sample_exonic_positions(&exon_regions, sample_size);
-                if sampled.is_empty() {
-                    continue;
-                }
-
                 let chrom = gene.chrom.clone();
                 let chrom_upper = chrom.to_uppercase();
                 let tx_start = exon_regions.first().map(|r| r.0).unwrap_or(0);
                 let tx_end = exon_regions.last().map(|r| r.1).unwrap_or(0);
+
+                let (sampled, total_count) =
+                    sample_exonic_positions(&exon_regions, sample_size, tx_start, tx_end);
+                if sampled.is_empty() {
+                    continue;
+                }
 
                 index.add_transcript(TranscriptSampling {
                     gene_id: tx.transcript_id.clone(),
@@ -143,6 +151,7 @@ impl TinIndex {
                     exon_regions,
                     exon_length,
                     sampled_positions: sampled,
+                    total_position_count: total_count,
                 });
             }
         }
@@ -204,7 +213,8 @@ impl TinIndex {
                 continue;
             }
 
-            let sampled = sample_exonic_positions(&exon_regions, sample_size);
+            let (sampled, total_count) =
+                sample_exonic_positions(&exon_regions, sample_size, tx_start, tx_end);
             if sampled.is_empty() {
                 continue;
             }
@@ -218,6 +228,7 @@ impl TinIndex {
                 exon_regions,
                 exon_length,
                 sampled_positions: sampled,
+                total_position_count: total_count,
             });
         }
 
@@ -265,44 +276,89 @@ impl TinIndex {
     }
 }
 
-/// Sample `n` equally-spaced positions within the exonic regions.
+/// Sample positions within exonic regions, matching upstream RSeQC `tin.py`'s
+/// `genomic_positions()` algorithm.
 ///
-/// Returns genomic coordinates of sampled positions (0-based).
-fn sample_exonic_positions(exon_regions: &[(u64, u64)], n: usize) -> Vec<u64> {
-    let total_bases: u64 = exon_regions.iter().map(|(s, e)| e - s).sum();
-    if total_bases == 0 {
-        return Vec::new();
+/// Upstream uses 1-based genomic coordinates internally. All positions returned
+/// here are 1-based to match pileup semantics (pysam's `pileupcolumn.pos + 1`).
+///
+/// When `mRNA_size <= sample_size`: returns ALL exonic bases (1-based) plus
+/// `tx_start+1` and `tx_end` as boundary markers. The upstream does NOT dedup
+/// these, so duplicates inflate `len(chose_bases)` which becomes the TIN
+/// denominator `l`. We reproduce this by returning non-unique positions.
+/// When `mRNA_size > sample_size`: returns every `step_size`-th exonic base
+/// plus exon boundary positions (first and last base of each exon), deduplicated
+/// and sorted.
+/// Returns `(unique_positions, total_count)` where:
+/// - `unique_positions`: sorted, deduplicated genomic positions for coverage counting
+/// - `total_count`: length including duplicates, used as TIN denominator `l`
+fn sample_exonic_positions(
+    exon_regions: &[(u64, u64)],
+    n: usize,
+    tx_start: u64,
+    tx_end: u64,
+) -> (Vec<u64>, usize) {
+    let mrna_size: u64 = exon_regions.iter().map(|(s, e)| e - s).sum();
+    if mrna_size == 0 {
+        return (Vec::new(), 0);
     }
 
-    let n = n as u64;
-    let num_slots = n.min(total_bases);
-    if num_slots == 0 {
-        return Vec::new();
-    }
-
-    let mut positions = Vec::with_capacity(num_slots as usize);
-
-    for i in 0..num_slots {
-        // Map slot i to an offset within the concatenated exonic region
-        let offset = if num_slots == 1 {
-            total_bases / 2
-        } else {
-            (i * (total_bases - 1)) / (num_slots - 1)
-        };
-
-        // Convert offset to genomic coordinate
-        let mut remaining = offset;
+    // Build 1-based list of all exonic positions (upstream: range(st+1, end+1))
+    // exon_regions are 0-based half-open: (start, end) means bases start..end-1
+    // 1-based equivalents: start+1 .. end (inclusive)
+    if mrna_size <= n as u64 {
+        // Small transcript: chose_bases = [tx_start+1, tx_end] + all exonic bases
+        // Upstream does NOT deduplicate — duplicates inflate len(chose_bases)
+        // which is used as the TIN denominator `l`.
+        let mut positions: Vec<u64> = Vec::with_capacity(mrna_size as usize + 2);
+        positions.push(tx_start + 1); // transcript boundary (1-based)
+        positions.push(tx_end); // transcript boundary (1-based, 0-based exclusive = 1-based inclusive)
         for &(start, end) in exon_regions {
-            let block_len = end - start;
-            if remaining < block_len {
-                positions.push(start + remaining);
-                break;
+            for pos in (start + 1)..=end {
+                positions.push(pos);
             }
-            remaining -= block_len;
         }
-    }
+        positions.sort_unstable();
+        let total_count = positions.len(); // includes duplicates
 
-    positions
+        // Dedup for coverage counting (pileup only returns unique positions)
+        positions.dedup();
+        (positions, total_count)
+    } else {
+        // Large transcript: strided sampling + exon boundaries
+        // Build all 1-based exonic positions
+        let mut gene_all_base: Vec<u64> = Vec::with_capacity(mrna_size as usize);
+        let mut exon_bounds: Vec<u64> = Vec::new();
+        for &(start, end) in exon_regions {
+            for pos in (start + 1)..=end {
+                gene_all_base.push(pos);
+            }
+            // Exon boundary positions (1-based)
+            exon_bounds.push(start + 1); // first base of exon
+            exon_bounds.push(end); // last base of exon
+        }
+
+        // Strided sampling: step_size = int(mRNA_size / sample_size)
+        let step_size = (mrna_size as usize) / n;
+        let step_size = step_size.max(1);
+
+        let mut chose_bases: Vec<u64> = (0..gene_all_base.len())
+            .step_by(step_size)
+            .map(|i| gene_all_base[i])
+            .collect();
+
+        // Merge exon boundaries with sampled positions (upstream: uniqify(exon_bounds + chose_bases))
+        // uniqify preserves first occurrence order and removes duplicates
+        let mut all_positions = exon_bounds;
+        all_positions.append(&mut chose_bases);
+
+        let mut seen = HashSet::new();
+        all_positions.retain(|x| seen.insert(*x));
+        all_positions.sort_unstable();
+
+        let total_count = all_positions.len(); // already deduped by uniqify
+        (all_positions, total_count)
+    }
 }
 
 // ===================================================================
@@ -326,7 +382,9 @@ pub struct TinAccum {
     /// Number of sampled slots per transcript.
     #[allow(dead_code)]
     pub n_samples: Vec<u32>,
-    /// Minimum MAPQ threshold.
+    /// Minimum MAPQ threshold (kept for API compatibility but not used;
+    /// upstream tin.py does not filter by MAPQ).
+    #[allow(dead_code)]
     pub mapq_cut: u8,
     /// Minimum coverage threshold (unique read start positions).
     pub min_cov: u32,
@@ -358,21 +416,16 @@ impl TinAccum {
     ///
     /// Updates coverage at sampled positions that overlap the read's
     /// aligned blocks, and tracks read start positions.
+    ///
+    /// Matches upstream RSeQC `tin.py` filtering:
+    /// - `check_min_reads()`: skips qcfail, unmapped, secondary only
+    /// - `genebody_coverage()` pileup: skips is_del, qcfail, secondary, unmapped
+    /// - Neither function filters by MAPQ, supplementary, or duplicate flags
     pub fn process_read(&mut self, record: &bam::Record, chrom_upper: &str, index: &TinIndex) {
         let flags = record.flags();
 
-        // Skip unmapped, QC-fail, secondary, supplementary, duplicate
-        if flags & 0x4 != 0
-            || flags & 0x200 != 0
-            || flags & 0x100 != 0
-            || flags & 0x800 != 0
-            || flags & 0x400 != 0
-        {
-            return;
-        }
-
-        // MAPQ filter
-        if record.mapq() < self.mapq_cut {
+        // Skip unmapped, QC-fail, secondary only (matching upstream tin.py)
+        if flags & 0x4 != 0 || flags & 0x200 != 0 || flags & 0x100 != 0 {
             return;
         }
 
@@ -412,13 +465,16 @@ impl TinAccum {
             }
         }
 
-        // For each aligned block, find sampled positions that fall within it
+        // For each aligned block, find sampled positions that fall within it.
+        // Sampled positions are 1-based; aligned blocks are 0-based half-open
+        // [block_start, block_end). A 1-based position P is covered iff
+        // P-1 >= block_start && P-1 < block_end, i.e., P > block_start && P <= block_end.
         for &(block_start, block_end) in &blocks {
-            // Binary search for first position >= block_start
-            let pos_start = chrom_positions.partition_point(|p| p.0 < block_start);
+            // Binary search for first 1-based position > block_start
+            let pos_start = chrom_positions.partition_point(|p| p.0 <= block_start);
 
             for &(pos, tx_idx, slot_idx) in &chrom_positions[pos_start..] {
-                if pos >= block_end {
+                if pos > block_end {
                     break;
                 }
                 // This sampled position is covered by this aligned block
@@ -458,7 +514,9 @@ impl TinAccum {
                 continue;
             }
 
-            let n_total = coverage.len();
+            // Use total_position_count (which includes duplicates from upstream's
+            // chose_bases list) as the denominator, matching upstream's l = len(pick_positions)
+            let n_total = tx.total_position_count;
             let tin = compute_tin(coverage, n_total);
 
             transcripts.push(TinResult {
@@ -558,12 +616,31 @@ pub fn write_tin(results: &TinResults, output_path: &Path) -> Result<()> {
     writeln!(f, "geneID\tchrom\ttx_start\ttx_end\tTIN")?;
 
     for r in &results.transcripts {
-        // Upstream prints all transcripts -- those below threshold get 0.0
-        writeln!(
-            f,
-            "{}\t{}\t{}\t{}\t{}",
-            r.gene_id, r.chrom, r.tx_start, r.tx_end, r.tin
-        )?;
+        // Match upstream formatting:
+        // - Failed check_min_reads: explicitly writes "0.0" (Python float literal)
+        // - Passed but tin_score returned int 0 (empty coverage): writes "0"
+        // - Non-zero TIN: writes float value
+        if !r.passed_threshold {
+            // Below coverage threshold → upstream writes explicit 0.0
+            writeln!(
+                f,
+                "{}\t{}\t{}\t{}\t0.0",
+                r.gene_id, r.chrom, r.tx_start, r.tx_end
+            )?;
+        } else if r.tin == 0.0 {
+            // Passed threshold but zero TIN → upstream tin_score returns int 0
+            writeln!(
+                f,
+                "{}\t{}\t{}\t{}\t0",
+                r.gene_id, r.chrom, r.tx_start, r.tx_end
+            )?;
+        } else {
+            writeln!(
+                f,
+                "{}\t{}\t{}\t{}\t{}",
+                r.gene_id, r.chrom, r.tx_start, r.tx_end, r.tin
+            )?;
+        }
     }
 
     Ok(())
@@ -613,35 +690,53 @@ mod tests {
 
     #[test]
     fn test_sample_exonic_positions() {
-        // Single exon of 10 bases
+        // Single exon of 10 bases: 0-based [100, 110)
+        // tx_start=100, tx_end=110 (matching BED format)
+        // mRNA_size = 10, sample_size = 5, so mRNA_size > sample_size
+        // step_size = 10 / 5 = 2
+        // gene_all_base (1-based) = [101, 102, ..., 110]
+        // exon_bounds = [101, 110]
+        // strided: indices 0,2,4,6,8 -> [101, 103, 105, 107, 109]
+        // merged with bounds [101, 110] -> [101, 103, 105, 107, 109, 110]
+        // Large mRNA case: deduped by uniqify, total_count = unique count
         let exons = vec![(100, 110)];
-        let positions = sample_exonic_positions(&exons, 5);
-        assert_eq!(positions.len(), 5);
-        // Positions should span the exonic region
-        assert!(positions[0] >= 100 && positions[0] < 110);
-        assert!(positions[4] >= 100 && positions[4] < 110);
-        // First and last should be near boundaries
-        assert_eq!(positions[0], 100);
-        assert_eq!(positions[4], 109);
+        let (positions, total_count) = sample_exonic_positions(&exons, 5, 100, 110);
+        assert_eq!(positions.len(), 6); // 5 strided + exon end boundary 110
+        assert_eq!(total_count, 6); // no duplicates in large mRNA case
+                                    // Positions should be 1-based
+        assert_eq!(positions[0], 101);
+        assert_eq!(positions[5], 110);
     }
 
     #[test]
     fn test_sample_multi_exon() {
-        // Two exons
+        // Two exons: 0-based [100,105) and [200,205) → 10 bases total
+        // tx_start=100, tx_end=205
+        // mRNA_size = 10, sample_size = 10, so mRNA_size <= sample_size
+        // chose_bases = [tx_start+1, tx_end] + all exonic = [101, 205, 101..=105, 201..=205]
+        // Sorted with dupes: [101, 101, 102, 103, 104, 105, 201, 202, 203, 204, 205, 205]
+        // total_count = 12 (with duplicates), unique positions = 10
         let exons = vec![(100, 105), (200, 205)];
-        let positions = sample_exonic_positions(&exons, 10);
-        assert_eq!(positions.len(), 10);
-        // First position in first exon, last in second exon
-        assert_eq!(positions[0], 100);
-        assert_eq!(positions[9], 204);
+        let (positions, total_count) = sample_exonic_positions(&exons, 10, 100, 205);
+        assert_eq!(positions.len(), 10); // 10 unique positions
+        assert_eq!(total_count, 12); // 10 + 2 boundary duplicates
+        assert_eq!(positions[0], 101);
+        assert_eq!(positions[9], 205);
     }
 
     #[test]
     fn test_sample_tiny_exon() {
-        // Exon smaller than sample size
+        // Exon smaller than sample size: 0-based [100, 103) → 3 bases
+        // tx_start=100, tx_end=103
+        // mRNA_size = 3 <= sample_size = 100
+        // chose_bases = [101, 103, 101, 102, 103] -> sorted: [101, 101, 102, 103, 103]
+        // total_count = 5 (with duplicates), unique positions = 3
         let exons = vec![(100, 103)];
-        let positions = sample_exonic_positions(&exons, 100);
-        assert_eq!(positions.len(), 3); // Clamped to exon length
+        let (positions, total_count) = sample_exonic_positions(&exons, 100, 100, 103);
+        assert_eq!(positions.len(), 3); // 3 unique exonic positions
+        assert_eq!(total_count, 5); // 3 + 2 boundary duplicates
+        assert_eq!(positions[0], 101);
+        assert_eq!(positions[2], 103);
     }
 
     #[test]

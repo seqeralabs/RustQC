@@ -782,26 +782,23 @@ fn bootstrap_resample(
     }
 
     // Sequential binomial sampling (multinomial via sequential binomials).
-    // Matches upstream preseq's resample_hist() behavior exactly.
-    // For each category i: draw Binomial(remaining_trials, p_i / remaining_prob),
-    // then update remaining_trials and remaining_prob.
+    // Matches upstream preseq's multinomial() in common.hpp exactly.
+    //
+    // IMPORTANT: We must call rng.binomial() for EVERY category, even when
+    // remaining_trials == 0 or p >= 1.0, because the C++ code does:
+    //   *r = binom_dist(trials, (*p) / remaining_prob)(gen);
+    // unconditionally for every category. Skipping any call would cause the
+    // RNG state to diverge from upstream, producing different bootstrap results.
     let mut remaining_trials = n_distinct;
     let mut remaining_prob: f64 = hist_weights.iter().sum::<u64>() as f64;
     let mut sample = vec![0u64; hist_indices.len()];
 
     for i in 0..hist_indices.len() {
-        if remaining_trials == 0 || remaining_prob <= 0.0 {
-            break;
-        }
         let p = (hist_weights[i] as f64) / remaining_prob;
-        let drawn = if p >= 1.0 {
-            remaining_trials
-        } else {
-            rng.binomial(remaining_trials, p)
-        };
+        let drawn = rng.binomial(remaining_trials, p);
         sample[i] = drawn;
-        remaining_trials -= drawn;
         remaining_prob -= hist_weights[i] as f64;
+        remaining_trials -= drawn;
     }
 
     // Reconstruct the histogram from the resampled data.
@@ -1158,8 +1155,9 @@ fn compute_curve(
     // unstable curves afterwards via check_yield_estimates_stability.
     let mut curve = Vec::with_capacity(targets.len());
     for &target in targets {
-        let expected = if target <= n {
-            // Interpolation region: use bootstrap's own distinct count
+        let expected = if target < n {
+            // Interpolation region: use bootstrap's own distinct count.
+            // Uses strict < to match C++ `while (curr_sample_sz < sample_vals_sum)`.
             interpolate(histogram, total_reads, interp_distinct, target)
         } else {
             // Extrapolation region: use original initial_distinct

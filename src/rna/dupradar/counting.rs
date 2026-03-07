@@ -1542,6 +1542,12 @@ pub fn count_reads(
         }
 
         // Handle remaining singletons (mates whose partner was never seen).
+        // featureCounts defaults to requireBothEndsMapped=FALSE, meaning
+        // singleton reads (where one mate is mapped but the other is unmapped
+        // or missing) are still assigned to genes based on the mapped mate's
+        // overlap. We replicate this by treating singletons like single-end
+        // reads for gene assignment.
+        //
         // These reads were already classified individually through
         // classify_read_fc() when first encountered, so we do NOT
         // increment fc_singleton here (that would double-count).
@@ -1555,6 +1561,22 @@ pub fn count_reads(
             if !mate_info.is_dup {
                 merged.n_multi_nodup += 1;
                 merged.n_unique_nodup += 1;
+            }
+
+            // Assign singleton to a gene (matching featureCounts behaviour
+            // with requireBothEndsMapped=FALSE). The mapped mate's gene hits
+            // were stored when it was buffered.
+            if mate_info.gene_hits.is_empty() {
+                merged.stat_no_features += 1;
+            } else if mate_info.gene_hits.len() > 1 {
+                merged.stat_ambiguous += 1;
+            } else if assign_fragment_to_gene(
+                &mate_info.gene_hits,
+                &mut merged.gene_counts,
+                mate_info.is_dup,
+                mate_info.is_multi,
+            ) {
+                merged.stat_assigned += 1;
             }
         }
     }

@@ -456,12 +456,16 @@ impl BamStatAccum {
             let seq_len = record.seq_len();
             if seq_len > 0 {
                 // Raw BAM 4-bit encoded sequence: (seq_len+1)/2 bytes.
-                // Access via the raw bam1_t data pointer.
+                // In the BAM record data layout the sequence starts after
+                // the qname (l_qname bytes) AND the CIGAR (n_cigar * 4 bytes).
+                // This matches htslib's bam_get_seq() macro:
+                //   data + l_qname + (n_cigar << 2)
                 let seq_bytes = unsafe {
                     let inner = record.inner();
-                    let data = (*inner).data;
-                    let seq_offset = (*inner).core.l_qname as isize;
-                    let seq_nbytes = (seq_len + 1) / 2;
+                    let data = inner.data;
+                    let seq_offset =
+                        inner.core.l_qname as isize + ((inner.core.n_cigar as isize) << 2);
+                    let seq_nbytes = seq_len.div_ceil(2);
                     std::slice::from_raw_parts(data.offset(seq_offset), seq_nbytes)
                 };
                 let seq_crc = crc32fast::hash(seq_bytes);
@@ -1025,7 +1029,12 @@ impl BamStatAccum {
     }
 
     /// Merge another accumulator into this one.
-    pub fn merge(&mut self, other: BamStatAccum) {
+    pub fn merge(&mut self, mut other: BamStatAccum) {
+        // Flush any remaining positions in the other's round buffer into its
+        // cov_hist before merging.  Without this, positions still in the
+        // round buffer would be silently lost during parallel merges.
+        other.flush_cov_buf_all();
+
         // RSeQC bam_stat fields
         self.total_records += other.total_records;
         self.qc_failed += other.qc_failed;
