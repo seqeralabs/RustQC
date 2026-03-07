@@ -166,14 +166,20 @@ fn compute_coverage_profile(entries: &[&TranscriptCoverageEntry]) -> [f64; NUM_B
 ///
 /// Returns (5' bias, 3' bias, 5'-3' bias) as medians across all qualifying
 /// transcripts.
-fn compute_bias(entries: &[TranscriptCoverageEntry]) -> (f64, f64, f64) {
+fn compute_bias(
+    entries: &[TranscriptCoverageEntry],
+    java_ordered_indices: &[usize],
+) -> (f64, f64, f64) {
     use std::collections::HashMap;
 
     // Step 1: Pick best transcript per gene (highest mean coverage).
     // Qualimap selects one transcript per gene, then filters by length >= 500
     // and mean >= 1.0, then takes the top 1000 by mean coverage.
+    // Iterate in Java HashMap order so that ties (same mean coverage) are
+    // broken the same way as qualimap's pickTranscripts().
     let mut best_per_gene: HashMap<u32, &TranscriptCoverageEntry> = HashMap::new();
-    for entry in entries {
+    for &idx in java_ordered_indices {
+        let entry = &entries[idx];
         if entry.coverage.len() < MIN_TRANSCRIPT_LENGTH_FOR_BIAS || entry.mean_coverage < 1.0 {
             continue;
         }
@@ -230,16 +236,13 @@ fn compute_bias(entries: &[TranscriptCoverageEntry]) -> (f64, f64, f64) {
         // Qualimap pushes bias values for all qualifying transcripts unconditionally
         // (lines 247-249 of TranscriptDataHandler.java). Since pickTranscripts()
         // already ensures mean >= 1.0, whole_mean is always positive. The 5'-3'
-        // ratio may produce infinity or NaN when three_mean == 0; Java's
-        // StatUtils.percentile handles these via Arrays.sort which places NaN
-        // at the end. We filter NaN values since they don't contribute meaningful
-        // information to the median.
+        // ratio may produce Infinity or NaN when three_mean == 0. Java includes
+        // these values in the array and StatUtils.percentile (via Arrays.sort)
+        // places NaN at the end. We must include them to match the array length
+        // and thus the median position.
         five_prime_biases.push(five_mean / whole_mean);
         three_prime_biases.push(three_mean / whole_mean);
-        let ratio = five_mean / three_mean;
-        if !ratio.is_nan() {
-            five_three_biases.push(ratio);
-        }
+        five_three_biases.push(five_mean / three_mean);
     }
 
     let five = median(&mut five_prime_biases);
@@ -250,16 +253,32 @@ fn compute_bias(entries: &[TranscriptCoverageEntry]) -> (f64, f64, f64) {
 }
 
 /// Compute the median of a slice of f64 values.
+///
+/// Matches Apache Commons Math 2.0 `StatUtils.percentile(array, 50)` behavior:
+/// - Sorts using Java's `Double.compareTo` ordering (NaN after +Infinity)
+/// - Uses the percentile algorithm: `pos = p * (n + 1) / 100` with linear interpolation
 fn median(values: &mut [f64]) -> f64 {
     if values.is_empty() {
         return f64::NAN;
     }
-    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    // Java's Double.compareTo: -0 < +0, NaN > everything (including +Infinity)
+    values.sort_by(|a, b| a.total_cmp(b));
     let n = values.len();
-    if n.is_multiple_of(2) {
-        (values[n / 2 - 1] + values[n / 2]) / 2.0
+
+    // Apache Commons Math 2.0 Percentile algorithm for p=50:
+    // pos = p * (n + 1) / 100 = 50 * (n + 1) / 100 = (n + 1) / 2
+    let pos = (n + 1) as f64 / 2.0;
+
+    if pos < 1.0 {
+        values[0]
+    } else if pos >= n as f64 {
+        values[n - 1]
     } else {
-        values[n / 2]
+        let lower = pos.floor() as usize;
+        let frac = pos - pos.floor();
+        let d0 = values[lower - 1]; // 1-based to 0-based
+        let d1 = values[lower];
+        d0 + frac * (d1 - d0)
     }
 }
 
@@ -345,27 +364,76 @@ pub fn write_qualimap_results(
     let entries = build_transcript_entries(&result.transcript_coverage_raw, index);
 
     // --- Compute coverage profiles ---
-    // Qualimap uses ALL transcripts with coverage > 0, sorted by mean coverage.
-    // The profile is a SUM of per-transcript length-normalized histograms.
-    let active_entries: Vec<&TranscriptCoverageEntry> =
-        entries.iter().filter(|e| e.mean_coverage > 0.0).collect();
-    let total_profile = compute_coverage_profile(&active_entries);
+    // Qualimap uses a TreeMap<Double, int[]> keyed by mean coverage for profile
+    // computation. Java's TreeMap deduplicates by key: if two transcripts have
+    // the exact same mean coverage (as a double), only the last one inserted
+    // survives. We replicate this by using a BTreeMap keyed by the f64 bit
+    // representation (which preserves the same total ordering as Java's
+    // Double.compareTo). This produces identical profile values.
+    use std::collections::BTreeMap;
+    let mut deduped_map: BTreeMap<u64, usize> = BTreeMap::new();
+    // Qualimap iterates genes via HashMap<String,Gene>, then transcripts via
+    // the Gene's internal HashMap<String,Transcript>. To match this iteration
+    // order exactly (and thus match which transcript "wins" in the TreeMap when
+    // two transcripts share the same mean coverage), we simulate Java's
+    // HashMap iteration: iterate buckets 0..capacity-1, within each bucket
+    // entries are in reverse insertion order (Java 7/pre-8 HashMap).
+    // We iterate entries sorted by java_hashmap_order(gene_id, transcript_id)
+    // and insert into the BTreeMap with last-wins (matching TreeMap.put).
+    let java_ordered_indices = java_hashmap_order_indices(&entries, index);
+    for &idx in &java_ordered_indices {
+        let entry = &entries[idx];
+        if entry.mean_coverage > 0.0 {
+            let key = entry.mean_coverage.to_bits();
+            deduped_map.insert(key, idx);
+        }
+    }
+    // Collect deduplicated entries in ascending mean-coverage order (BTreeMap iteration order)
+    let sorted_by_mean: Vec<&TranscriptCoverageEntry> =
+        deduped_map.values().map(|&idx| &entries[idx]).collect();
 
-    log::debug!(
-        "QM_PROFILE: {} total entries, {} active (mean>0)",
-        entries.len(),
-        active_entries.len()
-    );
+    // Log dedup collision details for debugging
+    {
+        let active_count = entries.iter().filter(|e| e.mean_coverage > 0.0).count();
+        let dedup_count = sorted_by_mean.len();
+        let num_collisions = active_count - dedup_count;
+        log::debug!(
+            "QM_PROFILE: {} total entries, {} active (mean>0), {} after dedup (TreeMap emulation), {} collisions",
+            entries.len(),
+            active_count,
+            dedup_count,
+            num_collisions
+        );
+        if num_collisions > 0 {
+            // Report the mean values that collided
+            let mut mean_counts: std::collections::HashMap<u64, Vec<usize>> =
+                std::collections::HashMap::new();
+            for (idx, entry) in entries.iter().enumerate() {
+                if entry.mean_coverage > 0.0 {
+                    mean_counts
+                        .entry(entry.mean_coverage.to_bits())
+                        .or_default()
+                        .push(idx);
+                }
+            }
+            for (bits, indices) in &mean_counts {
+                if indices.len() > 1 {
+                    let mean_val = f64::from_bits(*bits);
+                    log::debug!(
+                        "  COLLISION: mean={:.15} ({} transcripts, indices: {:?})",
+                        mean_val,
+                        indices.len(),
+                        indices
+                    );
+                }
+            }
+        }
+    }
 
-    // Sort by mean coverage for high/low tiers
-    let mut sorted_by_mean: Vec<&TranscriptCoverageEntry> = active_entries.clone();
-    sorted_by_mean.sort_by(|a, b| {
-        a.mean_coverage
-            .partial_cmp(&b.mean_coverage)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    // Total: all deduplicated entries (ascending order, like Qualimap)
+    let total_profile = compute_coverage_profile(&sorted_by_mean);
 
-    // Low: bottom N transcripts (ascending order)
+    // Low: bottom N transcripts (ascending order — first N from BTreeMap)
     let low_entries: Vec<&TranscriptCoverageEntry> = sorted_by_mean
         .iter()
         .take(LOW_TIER_COUNT)
@@ -373,7 +441,7 @@ pub fn write_qualimap_results(
         .collect();
     let low_profile = compute_coverage_profile(&low_entries);
 
-    // High: top N transcripts (descending order)
+    // High: top N transcripts (descending order — last N from BTreeMap, reversed)
     let high_entries: Vec<&TranscriptCoverageEntry> = sorted_by_mean
         .iter()
         .rev()
@@ -383,7 +451,7 @@ pub fn write_qualimap_results(
     let high_profile = compute_coverage_profile(&high_entries);
 
     // --- Compute bias ---
-    let (five_bias, three_bias, five_three_bias) = compute_bias(&entries);
+    let (five_bias, three_bias, five_three_bias) = compute_bias(&entries, &java_ordered_indices);
 
     // --- Compute mean coverage histogram ---
     let coverage_histogram = compute_mean_coverage_histogram(&entries);
@@ -753,6 +821,126 @@ fn build_transcript_entries(
     }
 
     entries
+}
+
+// ============================= Java HashMap Order Simulation ===================
+
+/// Compute Java's `String.hashCode()` for a UTF-8 string.
+///
+/// Java's algorithm: `s[0]*31^(n-1) + s[1]*31^(n-2) + ... + s[n-1]`
+/// using wrapping 32-bit signed arithmetic.
+fn java_string_hashcode(s: &str) -> i32 {
+    let mut h: i32 = 0;
+    for &b in s.as_bytes() {
+        h = h.wrapping_mul(31).wrapping_add(b as i32);
+    }
+    h
+}
+
+/// Simulate Java HashMap bucket assignment for a given capacity.
+///
+/// Java 7 HashMap uses: `indexFor(hash, length) = hash & (length - 1)`
+/// where `hash` is the result of `hash(key.hashCode())` and `length` is
+/// the table capacity (always a power of 2).
+///
+/// The supplemental hash function for Java 8+ is:
+/// ```java
+/// static final int hash(Object key) {
+///     int h;
+///     return (key == null) ? 0 : (h = key.hashCode()) ^ (h >>> 16);
+/// }
+/// ```
+fn java8_hash(h: i32) -> i32 {
+    h ^ ((h as u32 >> 16) as i32)
+}
+
+/// Compute the bucket index for a Java 8+ HashMap with the given capacity.
+fn java8_bucket(key_hashcode: i32, capacity: usize) -> usize {
+    let h = java8_hash(key_hashcode);
+    (h as u32 as usize) & (capacity - 1)
+}
+
+/// Determine Java HashMap capacity for `n` insertions.
+///
+/// Java HashMap starts at capacity 16 (default) with load factor 0.75.
+/// It doubles when `size >= capacity * 0.75` (threshold).
+fn java_hashmap_capacity(n: usize) -> usize {
+    let mut capacity: usize = 16;
+    let load_factor = 0.75f64;
+    while n > (capacity as f64 * load_factor) as usize {
+        capacity *= 2;
+    }
+    capacity
+}
+
+/// Return transcript entry indices in the order Qualimap's Java code would
+/// iterate them (HashMap<String,Gene> iteration order → Gene's internal
+/// HashMap<String,Transcript> iteration order).
+///
+/// This simulates Java 7 HashMap iteration: iterate buckets 0..capacity-1,
+/// within each bucket follow the linked list in insertion order
+/// (oldest entry first, matching Java 8+'s tail-insertion).
+fn java_hashmap_order_indices(
+    entries: &[TranscriptCoverageEntry],
+    index: &QualimapIndex,
+) -> Vec<usize> {
+    // Step 1: Group entry indices by gene_id, preserving within-gene order
+    let mut gene_transcripts: indexmap::IndexMap<String, Vec<usize>> = indexmap::IndexMap::new();
+    for (idx, _entry) in entries.iter().enumerate() {
+        let tx_info = &index.transcripts[idx];
+        gene_transcripts
+            .entry(tx_info.gene_id.clone())
+            .or_default()
+            .push(idx);
+    }
+
+    // Step 2: Compute Java HashMap iteration order for gene_ids
+    let gene_ids: Vec<String> = gene_transcripts.keys().cloned().collect();
+    let gene_capacity = java_hashmap_capacity(gene_ids.len());
+
+    // Build bucket lists.
+    // Java 8+ HashMap inserts at TAIL of the bucket's linked list (or tree),
+    // so entries within a bucket are in insertion order.
+    let mut gene_buckets: Vec<Vec<String>> = vec![Vec::new(); gene_capacity];
+    for gene_id in &gene_ids {
+        let hc = java_string_hashcode(gene_id);
+        let bucket = java8_bucket(hc, gene_capacity);
+        // Java 8+ inserts at TAIL
+        gene_buckets[bucket].push(gene_id.clone());
+    }
+
+    // Step 3: For each gene (in Java HashMap bucket order), compute transcript order
+    let mut result = Vec::with_capacity(entries.len());
+
+    for bucket in &gene_buckets {
+        for gene_id in bucket {
+            let tx_indices = &gene_transcripts[gene_id];
+
+            // Compute Java HashMap order for transcript_ids within this gene
+            let tx_ids: Vec<(&str, usize)> = tx_indices
+                .iter()
+                .map(|&idx| (index.transcripts[idx].transcript_id.as_str(), idx))
+                .collect();
+
+            let tx_capacity = java_hashmap_capacity(tx_ids.len());
+            let mut tx_buckets: Vec<Vec<usize>> = vec![Vec::new(); tx_capacity];
+
+            for &(tx_id, idx) in &tx_ids {
+                let hc = java_string_hashcode(tx_id);
+                let bucket_idx = java8_bucket(hc, tx_capacity);
+                // Java 8+ inserts at TAIL
+                tx_buckets[bucket_idx].push(idx);
+            }
+
+            for tx_bucket in &tx_buckets {
+                for &idx in tx_bucket {
+                    result.push(idx);
+                }
+            }
+        }
+    }
+
+    result
 }
 
 // ============================= Tests ===========================================
