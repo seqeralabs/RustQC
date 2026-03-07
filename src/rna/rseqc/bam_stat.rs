@@ -175,6 +175,18 @@ pub struct BamStatResult {
     pub chk: [u32; 3],
     /// Coverage distribution: depth → number of reference positions at that depth.
     pub cov_hist: HashMap<u32, u64>,
+    /// GC-depth bins for the GCD section of samtools stats.
+    pub gcd_bins: Vec<GcDepthBin>,
+}
+
+/// A single GC-depth bin, representing a `gcd_bin_size`-bp window of the genome.
+#[derive(Debug, Clone)]
+pub struct GcDepthBin {
+    /// Accumulated GC fraction sum (sum of per-read `gc_count / seq_len`).
+    /// Divided by `depth` during output to get the mean GC fraction.
+    pub gc: f32,
+    /// Number of reads whose start position falls in this bin.
+    pub depth: u32,
 }
 
 impl Default for BamStatResult {
@@ -250,6 +262,7 @@ impl Default for BamStatResult {
             ic: Vec::new(),
             chk: [0u32; 3],
             cov_hist: HashMap::new(),
+            gcd_bins: Vec::new(),
         }
     }
 }

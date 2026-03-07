@@ -10,7 +10,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use log::info;
 
-use super::bam_stat::BamStatResult;
+use super::bam_stat::{BamStatResult, GcDepthBin};
 
 // ============================================================================
 // Output formatting
@@ -368,6 +368,9 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
 
     // COV — coverage distribution
     write_coverage_dist(&mut out, &result.cov_hist)?;
+
+    // GCD — GC-depth
+    write_gc_depth(&mut out, &result.gcd_bins, result)?;
 
     // CHK — CRC32 checksums
     writeln!(
@@ -827,6 +830,135 @@ fn write_coverage_dist<W: std::io::Write>(out: &mut W, cov_hist: &HashMap<u32, u
         .sum();
     if above_max > 0 {
         writeln!(out, "COV\t[{cov_max}<]\t{cov_max}\t{above_max}")?;
+    }
+
+    Ok(())
+}
+
+// ============================================================================
+// GCD — GC-depth distribution
+// ============================================================================
+
+/// Compute the p-th percentile of `depths[0..n]` using linear interpolation,
+/// matching upstream samtools `gcd_percentile()`.
+fn gcd_percentile(depths: &[u32], n: usize, p: u32) -> f64 {
+    let pos = p as f64 * (n as f64 + 1.0) / 100.0;
+    let k = pos as usize;
+    if k == 0 {
+        return depths[0] as f64;
+    }
+    if k >= n {
+        return depths[n - 1] as f64;
+    }
+    let d = pos - k as f64;
+    depths[k - 1] as f64 + d * (depths[k] as f64 - depths[k - 1] as f64)
+}
+
+/// Write the GCD (GC-depth) section.
+///
+/// Matches upstream `samtools stats` without `--ref-seq`:
+/// - Normalise per-bin GC to a percentage (sum of per-read GC fractions / depth)
+/// - Sort bins by (gc%, depth)
+/// - Group by GC% and compute depth percentiles (10, 25, 50, 75, 90)
+/// - Scale depth by avg_read_length / gcd_bin_size
+fn write_gc_depth(
+    out: &mut impl Write,
+    gcd_bins: &[GcDepthBin],
+    result: &BamStatResult,
+) -> std::io::Result<()> {
+    if gcd_bins.is_empty() {
+        return Ok(());
+    }
+
+    writeln!(
+        out,
+        "# GC-depth. Use `grep ^GCD | cut -f 2-` to extract this part. \
+         The columns are: GC%, unique sequence percentiles, 10th, 25th, \
+         50th, 75th and 90th depth percentile"
+    )?;
+
+    // Normalise GC: divide accumulated GC sum by depth, then scale to %
+    // and round to nearest integer.  Matches upstream no-reference path.
+    // Note: samtools only normalises bins 0..igcd-1 (all but the last),
+    // but the last bin is also output; here we normalise all bins uniformly
+    // which produces the same result because the last bin's gc value is an
+    // accumulated fraction that rounds to the same integer.
+    let mut bins: Vec<(f32, u32)> = gcd_bins
+        .iter()
+        .map(|b| {
+            let gc_pct = if b.depth > 0 {
+                (100.0 * b.gc / b.depth as f32).round()
+            } else {
+                0.0
+            };
+            (gc_pct, b.depth)
+        })
+        .collect();
+
+    // Sort by (gc%, depth) — matches upstream qsort with gcd_cmp.
+    bins.sort_by(|a, b| {
+        a.0.partial_cmp(&b.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.1.cmp(&b.1))
+    });
+
+    // Samtools allocates gcd[0] as a zero-depth ghost element that is never
+    // written to (indices start at 1), so after qsort the ghost sorts to the
+    // front of the array and is included in the percentile calculations but
+    // the last real bin is excluded from output.  We replicate this by
+    // prepending a (0.0, 0) ghost element and limiting output to the
+    // original real bin count.
+    let real_bins = bins.len();
+    bins.insert(0, (0.0f32, 0u32));
+    // total for denominator = real_bins + 1 (the ghost)
+    let total_for_denom = real_bins + 1;
+    // only output `real_bins` elements (loop over the first `real_bins` of
+    // the now real_bins+1 sorted entries)
+    let output_len = real_bins;
+
+    // Average read length for depth scaling (matches samtools: total_len / n_reads).
+    let avg_read_len = if result.primary_count > 0 {
+        result.total_len as f64 / result.primary_count as f64
+    } else {
+        0.0
+    };
+    let gcd_bin_size = 20_000.0_f64;
+    let scale = avg_read_len / gcd_bin_size;
+
+    // Group consecutive bins with the same GC% (within 0.1 tolerance)
+    // and emit one GCD line per group.
+    let mut i = 0;
+    while i < output_len {
+        let gc = bins[i].0;
+        let group_start = i;
+
+        // Count bins in this GC% group (only within output_len, not the ghost
+        // at the end if it happens to sort there).
+        while i < output_len && (bins[i].0 - gc).abs() < 0.1 {
+            i += 1;
+        }
+        let nbins = i - group_start;
+
+        // Extract sorted depths for this group (already sorted by the
+        // secondary sort key above).
+        let depths: Vec<u32> = bins[group_start..i].iter().map(|b| b.1).collect();
+
+        // Cumulative percentile matches samtools: (igcd_start + nbins + 1) * 100 / (igcd + 1)
+        // where igcd_start = group_start (0-based), igcd = real_bins (total output bins),
+        // and total_for_denom = real_bins + 1.
+        let cum_pct = (group_start + nbins + 1) as f64 * 100.0 / total_for_denom as f64;
+
+        writeln!(
+            out,
+            "GCD\t{:.1}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}",
+            gc,
+            cum_pct,
+            gcd_percentile(&depths, nbins, 10) * scale,
+            gcd_percentile(&depths, nbins, 25) * scale,
+            gcd_percentile(&depths, nbins, 50) * scale,
+            gcd_percentile(&depths, nbins, 75) * scale,
+            gcd_percentile(&depths, nbins, 90) * scale,
+        )?;
     }
 
     Ok(())

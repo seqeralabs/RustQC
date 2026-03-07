@@ -10,7 +10,10 @@ use std::hash::{Hash, Hasher};
 use indexmap::IndexMap;
 use rust_htslib::bam;
 
-use super::bam_stat::BamStatResult;
+use super::bam_stat::{BamStatResult, GcDepthBin};
+
+/// Default GC-depth bin size in base pairs (matches upstream samtools default).
+const GCD_BIN_SIZE: u64 = 20_000;
 use super::common::{self, KnownJunctionSet, ReferenceJunctions};
 use super::infer_experiment::{GeneModel, InferExperimentResult};
 use super::inner_distance::{
@@ -276,6 +279,14 @@ pub struct BamStatAccum {
     cov_buf_pos: i64,
     /// Current chromosome tid for round buffer tracking.
     cov_buf_tid: i32,
+
+    // --- GC-depth (GCD section) fields ---
+    /// Accumulated GC-depth bins (one per `GCD_BIN_SIZE`-bp genomic window).
+    gcd_bins: Vec<GcDepthBin>,
+    /// Start position of the current GCD bin.
+    gcd_pos: i64,
+    /// Chromosome tid of the current GCD bin.
+    gcd_tid: i32,
 }
 
 impl Default for BamStatAccum {
@@ -355,6 +366,9 @@ impl Default for BamStatAccum {
             cov_buf_idx: 0,
             cov_buf_pos: 0,
             cov_buf_tid: -1,
+            gcd_bins: Vec::new(),
+            gcd_pos: -1,
+            gcd_tid: -1,
         }
     }
 }
@@ -951,6 +965,52 @@ impl BamStatAccum {
             }
         } // if is_mapped && !is_secondary (COV)
 
+        // =============================================================
+        // GCD: GC-depth accumulation (no-reference path).
+        //
+        // Matches upstream samtools stats without --ref-seq: bins of
+        // GCD_BIN_SIZE bp, depth incremented for each read, GC fraction
+        // accumulated from the read's sequence.
+        //
+        // Included reads: mapped, non-secondary (same as COV).
+        // =============================================================
+        if is_mapped && !is_secondary {
+            let tid = record.tid();
+            let pos = record.pos();
+            let seq_len = record.seq_len();
+
+            if seq_len > 0 {
+                // Start a new bin on: first read, chromosome change, or
+                // read beyond current bin boundary.
+                let new_bin = self.gcd_pos < 0
+                    || tid != self.gcd_tid
+                    || pos - self.gcd_pos > GCD_BIN_SIZE as i64;
+
+                if new_bin {
+                    self.gcd_bins.push(GcDepthBin { gc: 0.0, depth: 0 });
+                    self.gcd_pos = pos;
+                    self.gcd_tid = tid;
+                }
+
+                // Increment depth and accumulate GC fraction from read seq.
+                if let Some(bin) = self.gcd_bins.last_mut() {
+                    bin.depth += 1;
+                    // Count G+C in the read sequence.
+                    let seq = record.seq();
+                    let mut gc_count: u32 = 0;
+                    for i in 0..seq_len {
+                        let base = seq[i];
+                        // rust-htslib encodes: A=1, C=2, G=4, T=8, N=15
+                        if base == 2 || base == 4 {
+                            // C or G
+                            gc_count += 1;
+                        }
+                    }
+                    bin.gc += gc_count as f32 / seq_len as f32;
+                }
+            }
+        } // if is_mapped && !is_secondary (GCD)
+
         // =================================================================
         // RSeQC bam_stat cascade (original logic, with early returns)
         // =================================================================
@@ -1231,6 +1291,10 @@ impl BamStatAccum {
         for (depth, count) in other.cov_hist {
             *self.cov_hist.entry(depth).or_insert(0) += count;
         }
+
+        // GCD bins (concatenate — bins from different chromosome workers
+        // are independent and will be sorted during output).
+        self.gcd_bins.append(&mut other.gcd_bins);
     }
 }
 
@@ -2371,6 +2435,7 @@ impl BamStatAccum {
             ic: self.ic,
             chk: self.chk,
             cov_hist: self.cov_hist,
+            gcd_bins: self.gcd_bins,
         }
     }
 }
