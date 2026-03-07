@@ -999,8 +999,8 @@ impl BamStatAccum {
                     let seq = record.seq();
                     let mut gc_count: u32 = 0;
                     for i in 0..seq_len {
-                        let base = seq[i];
-                        // rust-htslib encodes: A=1, C=2, G=4, T=8, N=15
+                        // encoded_base() returns BAM nibble encoding: A=1, C=2, G=4, T=8, N=15
+                        let base = seq.encoded_base(i);
                         if base == 2 || base == 4 {
                             // C or G
                             gc_count += 1;

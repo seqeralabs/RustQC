@@ -164,6 +164,17 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
         0.0
     };
 
+    // CHK — CRC32 checksums (written before SN, matching upstream order)
+    writeln!(
+        out,
+        "# CHK, Pair of checksum values for read names, sequences and qualities, calculated using a CRC32 algorithm."
+    )?;
+    writeln!(
+        out,
+        "CHK\t{:08x}\t{:08x}\t{:08x}",
+        result.chk[0], result.chk[1], result.chk[2]
+    )?;
+
     // Write SN lines
     sn(
         &mut out,
@@ -336,11 +347,11 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
     // FBC — ACGT base content per cycle, first fragments (read-oriented)
     write_base_counts(&mut out, "FBC", "first fragments", &result.fbc_ro)?;
 
-    // LBC — ACGT base content per cycle, last fragments (read-oriented)
-    write_base_counts(&mut out, "LBC", "last fragments", &result.lbc_ro)?;
-
     // FTC — total base counters, first fragments
     write_total_base_counts(&mut out, "FTC", &result.ftc)?;
+
+    // LBC — ACGT base content per cycle, last fragments (read-oriented)
+    write_base_counts(&mut out, "LBC", "last fragments", &result.lbc_ro)?;
 
     // LTC — total base counters, last fragments
     write_total_base_counts(&mut out, "LTC", &result.ltc)?;
@@ -371,17 +382,6 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
 
     // GCD — GC-depth
     write_gc_depth(&mut out, &result.gcd_bins, result)?;
-
-    // CHK — CRC32 checksums
-    writeln!(
-        out,
-        "# CHK, Pair of checksum values for read names, sequences and qualities, calculated using a CRC32 algorithm."
-    )?;
-    writeln!(
-        out,
-        "CHK\t{:08x}\t{:08x}\t{:08x}",
-        result.chk[0], result.chk[1], result.chk[2]
-    )?;
 
     info!("Wrote samtools stats output to {}", output_path.display());
     Ok(())
@@ -879,14 +879,19 @@ fn write_gc_depth(
 
     // Normalise GC: divide accumulated GC sum by depth, then scale to %
     // and round to nearest integer.  Matches upstream no-reference path.
-    // Note: samtools only normalises bins 0..igcd-1 (all but the last),
-    // but the last bin is also output; here we normalise all bins uniformly
-    // which produces the same result because the last bin's gc value is an
-    // accumulated fraction that rounds to the same integer.
+    // Note: samtools normalises only bins 0..igcd-1 (all but the last real bin).
+    // The last bin keeps its raw accumulated gc fraction completely untouched
+    // (no rint, no /depth, no *100).  This means it sorts as a raw fraction
+    // (typically < 1.0) and prints as %.1f showing e.g. "0.6".
+    let last = gcd_bins.len().saturating_sub(1);
     let mut bins: Vec<(f32, u32)> = gcd_bins
         .iter()
-        .map(|b| {
-            let gc_pct = if b.depth > 0 {
+        .enumerate()
+        .map(|(idx, b)| {
+            let gc_pct = if idx == last {
+                // Last bin: keep raw gc_sum (not normalised at all, matching upstream)
+                b.gc
+            } else if b.depth > 0 {
                 (100.0 * b.gc / b.depth as f32).round()
             } else {
                 0.0
