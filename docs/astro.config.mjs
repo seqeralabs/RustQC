@@ -66,6 +66,10 @@ export default defineConfig({
             { label: "Qualimap", slug: "benchmarks/qualimap" },
             { label: "preseq", slug: "benchmarks/preseq" },
             { label: "Samtools", slug: "benchmarks/samtools" },
+            {
+              label: "Performance & Tuning",
+              slug: "benchmarks/performance",
+            },
           ],
         },
         {
