@@ -9,7 +9,7 @@ This guide walks you through a basic RustQC analysis from start to finish.
 
 The `rustqc rna` command runs all analyses in a single pass. It requires:
 
-- A **duplicate-marked** alignment file (BAM, SAM, or CRAM). Duplicates must be flagged with SAM flag 0x400 by a tool like [Picard MarkDuplicates](https://broadinstitute.github.io/picard/), [samblaster](https://github.com/GregoryFaust/samblaster), or [sambamba](https://github.com/biod/sambamba).
+- A **coordinate-sorted, duplicate-marked** alignment file (BAM, SAM, or CRAM) with an index (`.bai` / `.csi`). Duplicates must be flagged with SAM flag 0x400 by a tool like [Picard MarkDuplicates](https://broadinstitute.github.io/picard/), [samblaster](https://github.com/GregoryFaust/samblaster), or [sambamba](https://github.com/biod/sambamba). Without an index file, only a single counting thread is used.
 - A **GTF annotation** file (`--gtf`) and/or a **BED12 gene model** file (`--bed`). At least one must be provided. Both can be plain or gzip-compressed (`.gz`) — compression is detected automatically. With a GTF, all analyses run (dupRadar, featureCounts, all 7 RSeQC tools, TIN, Qualimap, preseq, and samtools). With a BED file alone, RSeQC tools, TIN, preseq, and samtools run, but dupRadar, featureCounts, and Qualimap are skipped. When both are provided, the GTF is used for dupRadar/featureCounts/Qualimap and the BED is used for read_distribution.
 
 ## RNA-seq duplicate analysis
