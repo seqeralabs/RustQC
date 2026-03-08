@@ -754,7 +754,8 @@ fn process_single_bam(
         || rseqc_config.junction_annotation_enabled
         || rseqc_config.junction_saturation_enabled
         || rseqc_config.inner_distance_enabled
-        || rseqc_config.preseq_enabled;
+        || rseqc_config.preseq_enabled
+        || rseqc_config.tin_enabled;
 
     // === Build Qualimap exon index (if enabled, GTF-only) ===
     let qualimap_index = if params.config.qualimap.enabled {
