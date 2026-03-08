@@ -495,6 +495,10 @@ impl BamStatAccum {
             }
         }
 
+        // Track gc_count from the primary-read per-cycle loop so the GCD
+        // section below can reuse it without re-scanning the sequence.
+        let mut primary_gc_count: u64 = 0;
+
         // =================================================================
         // samtools stats SN counters (primary reads only)
         // =================================================================
@@ -538,7 +542,6 @@ impl BamStatAccum {
                 self.reads_mapped_and_paired += 1;
             }
             if is_mapped {
-                use rust_htslib::bam::record::Cigar as C;
                 self.primary_mapped += 1;
                 self.bases_mapped += seq_len;
 
@@ -549,19 +552,9 @@ impl BamStatAccum {
                     self.reads_mq0 += 1;
                 }
 
-                let cigar = record.cigar();
-
-                // CIGAR-based mapped bases (M/I/=/X operations).
-                // Upstream samtools stats counts BAM_CMATCH, BAM_CINS, BAM_CEQUAL,
-                // BAM_CDIFF in nbases_mapped_cigar (stats.c:1336-1340).
-                let cigar_mapped: u64 = cigar
-                    .iter()
-                    .map(|op| match op {
-                        C::Match(n) | C::Ins(n) | C::Equal(n) | C::Diff(n) => u64::from(*n),
-                        _ => 0,
-                    })
-                    .sum();
-                self.bases_mapped_cigar += cigar_mapped;
+                // NOTE: bases_mapped_cigar is now computed in the IC/ID CIGAR
+                // loop below (for all mapped non-secondary reads) to avoid a
+                // separate full CIGAR traversal here.
 
                 // NM tag (edit distance)
                 if let Ok(rust_htslib::bam::record::Aux::U8(nm)) = record.aux(b"NM") {
@@ -728,57 +721,60 @@ impl BamStatAccum {
 
                 let mut gc_count: u64 = 0;
 
-                for i in 0..read_len {
-                    // Read-oriented cycle: reversed for reverse-strand reads,
-                    // matching upstream samtools stats collect_orig_read_stats
-                    let ro_cycle = if is_reverse { read_len - 1 - i } else { i };
+                // Pre-built lookup tables for the per-cycle inner loop,
+                // avoiding branches and match overhead on every base.
+                //
+                // BAM 4-bit encoding: A=1, C=2, G=4, T=8, N=15, others=0,3,5..14
+                // BASE_IDX[nibble] → 0=A, 1=C, 2=G, 3=T, 4=N, 5=Other
+                const BASE_IDX: [u8; 16] = [5, 0, 1, 5, 2, 5, 5, 5, 3, 5, 5, 5, 5, 5, 5, 4];
+                // RC_IDX[base_idx] → reverse-complement base_idx (A↔T, C↔G)
+                // Only meaningful for base_idx 0-3 (ACGT). Index 4/5 not used.
+                const RC_IDX: [u8; 6] = [3, 2, 1, 0, 4, 5]; // A→T, C→G, G→C, T→A
 
-                    // Per-cycle quality (read-oriented order)
-                    let q = quals[i] as usize;
-                    let q_clamped = q.min(63);
-                    qual_arr[ro_cycle][q_clamped] += 1;
+                // Hoist the is_reverse branch outside the inner loop so the
+                // compiler can version the loop and potentially auto-vectorize
+                // each variant independently.
+                if !is_reverse {
+                    for i in 0..read_len {
+                        let q = quals[i] as usize;
+                        qual_arr[i][q.min(63)] += 1;
 
-                    // Base index: A=0, C=1, G=2, T=3, N=4, Other=5
-                    let base = seq.encoded_base(i);
-                    let base_idx = match base {
-                        1 => 0,  // A
-                        2 => 1,  // C
-                        4 => 2,  // G
-                        8 => 3,  // T
-                        15 => 4, // N
-                        _ => 5,  // Other
-                    };
-
-                    // Per-cycle base composition (alignment order — retained for
-                    // any consumers that need genome-position-order data)
-                    base_arr[i][base_idx] += 1;
-
-                    // Per-cycle base composition (read-oriented: reversed for reverse strand)
-                    base_ro_arr[ro_cycle][base_idx] += 1;
-
-                    // Per-cycle base composition for GCT (reverse-complemented for
-                    // reverse-strand reads, combined first+last fragments).
-                    // Only ACGT (base_idx 0-3), skip N and Other.
-                    if base_idx < 4 {
-                        let rc_idx = if is_reverse {
-                            // Reverse complement: A(0)→T(3), C(1)→G(2), G(2)→C(1), T(3)→A(0)
-                            3 - base_idx
-                        } else {
-                            base_idx
-                        };
-                        self.gcc_rc[ro_cycle][rc_idx] += 1;
+                        let base_idx = BASE_IDX[seq.encoded_base(i) as usize] as usize;
+                        base_arr[i][base_idx] += 1;
+                        base_ro_arr[i][base_idx] += 1;
+                        if base_idx < 4 {
+                            self.gcc_rc[i][base_idx] += 1;
+                        }
+                        if base_idx == 1 || base_idx == 2 {
+                            gc_count += 1;
+                        }
+                        if base_idx < 5 {
+                            tc_arr[base_idx] += 1;
+                        }
                     }
+                } else {
+                    for i in 0..read_len {
+                        let ro_cycle = read_len - 1 - i;
+                        let q = quals[i] as usize;
+                        qual_arr[ro_cycle][q.min(63)] += 1;
 
-                    // GC counting for GCF/GCL
-                    if base_idx == 1 || base_idx == 2 {
-                        gc_count += 1;
-                    }
-
-                    // Total base counters (FTC/LTC): only A, C, G, T, N
-                    if base_idx < 5 {
-                        tc_arr[base_idx] += 1;
+                        let base_idx = BASE_IDX[seq.encoded_base(i) as usize] as usize;
+                        base_arr[i][base_idx] += 1;
+                        base_ro_arr[ro_cycle][base_idx] += 1;
+                        if base_idx < 4 {
+                            self.gcc_rc[ro_cycle][RC_IDX[base_idx] as usize] += 1;
+                        }
+                        if base_idx == 1 || base_idx == 2 {
+                            gc_count += 1;
+                        }
+                        if base_idx < 5 {
+                            tc_arr[base_idx] += 1;
+                        }
                     }
                 }
+
+                // Save gc_count for GCD section below (avoids re-scanning the sequence).
+                primary_gc_count = gc_count;
 
                 // GC content: cumulative step function with ngc=200 bins.
                 // Matches samtools stats.c:925-941. For a read with gc_count G/C
@@ -810,10 +806,29 @@ impl BamStatAccum {
         // forward/reverse strand) and read-oriented cycle indices,
         // matching upstream count_indels().
         // =============================================================
+        // =============================================================
+        // Combined single-CIGAR-pass block for IC/ID (indel distribution),
+        // bases_mapped_cigar, and COV (coverage ring-buffer pileup).
+        //
+        // Both IC/ID and COV apply to the same read set (mapped,
+        // non-secondary). Merging them into one CIGAR traversal
+        // eliminates two redundant record.cigar() calls per read.
+        //
+        // IC/ID: Upstream samtools stats calls count_indels() outside
+        //   IS_ORIGINAL() — supplementary/dup/qcfail all contribute.
+        //   IC uses first/last-fragment order and read-oriented cycles.
+        //
+        // COV: Circular-buffer pileup; buffer flushed up to read start
+        //   before CIGAR walk; M/=/X blocks inserted as ranges.
+        //   Buffer grown to max_read_len * 5 as needed.
+        // =============================================================
         if is_mapped && !is_secondary {
             use rust_htslib::bam::record::Cigar as C;
             let is_reverse = flags & BAM_FREVERSE != 0;
             let read_len = record.seq_len();
+            let tid = record.tid();
+            let pos = record.pos(); // 0-based
+
             // Upstream order: paired ? (read1?FIRST:0)+(read2?LAST:0) : FIRST
             let order: u32 = if is_paired {
                 (if flags & BAM_FREAD1 != 0 { 1 } else { 0 })
@@ -821,21 +836,60 @@ impl BamStatAccum {
             } else {
                 1 // unpaired → FIRST
             };
+
+            // COV buffer setup (must happen before CIGAR walk).
+            // Skip reads with no sequence (upstream samtools early-return).
+            let do_cov = read_len > 0;
+            let buf_size = if do_cov {
+                // Grow buffer to max_read_len * 5 if needed.
+                // When growing, linearise the circular data just like
+                // upstream samtools: copy [idx..old_size] then [0..idx]
+                // into a fresh buffer, and reset idx to 0.
+                let need = read_len * 5;
+                if need > self.cov_buf.len() {
+                    let old_size = self.cov_buf.len();
+                    let mut new_buf = vec![0u32; need];
+                    let head = old_size - self.cov_buf_idx;
+                    new_buf[..head].copy_from_slice(&self.cov_buf[self.cov_buf_idx..]);
+                    new_buf[head..head + self.cov_buf_idx]
+                        .copy_from_slice(&self.cov_buf[..self.cov_buf_idx]);
+                    self.cov_buf = new_buf;
+                    self.cov_buf_idx = 0;
+                }
+                let bs = self.cov_buf.len();
+                // Flush entire buffer on chromosome change
+                if tid != self.cov_buf_tid {
+                    self.flush_cov_buf_all();
+                    self.cov_buf_tid = tid;
+                    self.cov_buf_pos = pos;
+                    self.cov_buf_idx = 0;
+                }
+                // Flush positions from cov_buf_pos up to read start
+                self.cov_buf_flush_to(pos, bs);
+                bs
+            } else {
+                0
+            };
+
+            // Single CIGAR traversal serving IC/ID + bases_mapped_cigar + COV
             let cigar = record.cigar();
             let mut icycle: usize = 0;
+            let mut cigar_mapped: u64 = 0;
+            let mut ref_pos = pos;
 
             for op in cigar.iter() {
                 match op {
                     C::Ins(n) => {
                         let ncig = *n as usize;
                         let len = *n as u64;
+                        cigar_mapped += len; // I counts toward bases_mapped_cigar
+
                         // ID: indel size distribution
                         let id_entry = self.id_hist.entry(len).or_insert([0; 2]);
                         id_entry[0] += 1; // insertions
 
                         // IC: indels per cycle (read-oriented index)
                         let idx = if is_reverse {
-                            // Reverse strand: read_len - icycle - ncig
                             read_len.saturating_sub(icycle + ncig)
                         } else {
                             icycle
@@ -850,7 +904,8 @@ impl BamStatAccum {
                             self.ic[idx][1] += 1; // ins_2nd
                         }
 
-                        icycle += ncig; // I advances cycle
+                        icycle += ncig; // I advances query cycle; ref unchanged
+                                        // COV: I consumes no reference positions
                     }
                     C::Del(n) => {
                         let len = *n as u64;
@@ -860,15 +915,16 @@ impl BamStatAccum {
 
                         // IC: indels per cycle (read-oriented index)
                         let idx = if is_reverse {
-                            // Reverse strand: read_len - icycle - 1
                             if icycle == 0 {
                                 // Discard meaningless deletions at cycle 0
                                 // (upstream: "if (idx<0) continue;")
+                                ref_pos += *n as i64; // still advance ref for COV
                                 continue;
                             }
                             read_len.saturating_sub(icycle + 1)
                         } else {
                             if icycle == 0 {
+                                ref_pos += *n as i64;
                                 continue;
                             }
                             icycle - 1
@@ -882,88 +938,34 @@ impl BamStatAccum {
                         if order == 2 {
                             self.ic[idx][3] += 1; // del_2nd
                         }
-                        // D does NOT advance cycle
+                        // D does NOT advance query cycle; does advance ref
+                        ref_pos += *n as i64;
                     }
                     C::Match(n) | C::Equal(n) | C::Diff(n) => {
+                        let len = *n as u64;
+                        cigar_mapped += len; // M/=/X count toward bases_mapped_cigar
                         icycle += *n as usize;
-                    }
-                    C::SoftClip(n) => {
-                        icycle += *n as usize;
-                    }
-                    C::RefSkip(_) | C::HardClip(_) | C::Pad(_) => {}
-                }
-            }
-        }
-
-        // =============================================================
-        // COV: Coverage distribution via circular-buffer pileup.
-        //
-        // Matches upstream samtools stats: a circular buffer tracks
-        // per-position depth.  The buffer is flushed up to the current
-        // read's start position BEFORE CIGAR processing, and each
-        // M/=/X block is inserted as a contiguous range (no inner
-        // flush needed).  The buffer is dynamically grown to
-        // max_read_len * 5 so a single alignment block always fits.
-        //
-        // Included reads: mapped, non-secondary (supplementary,
-        // duplicate, qcfail all contribute to depth).
-        // =============================================================
-        if is_mapped && !is_secondary {
-            use rust_htslib::bam::record::Cigar as C;
-            let tid = record.tid();
-            let pos = record.pos(); // 0-based
-            let seq_len = record.seq_len();
-
-            // Skip reads with no sequence (upstream samtools returns early
-            // for zero-length seqs before reaching COV).
-            if seq_len > 0 {
-                // Grow buffer to max_read_len * 5 if needed.
-                // When growing, linearise the circular data just like
-                // upstream samtools: copy [idx..old_size] then [0..idx]
-                // into a fresh buffer, and reset idx to 0.
-                let need = seq_len * 5;
-                if need > self.cov_buf.len() {
-                    let old_size = self.cov_buf.len();
-                    let mut new_buf = vec![0u32; need];
-                    let head = old_size - self.cov_buf_idx; // elements from idx to end
-                    new_buf[..head].copy_from_slice(&self.cov_buf[self.cov_buf_idx..]);
-                    new_buf[head..head + self.cov_buf_idx]
-                        .copy_from_slice(&self.cov_buf[..self.cov_buf_idx]);
-                    self.cov_buf = new_buf;
-                    self.cov_buf_idx = 0;
-                }
-                let buf_size = self.cov_buf.len();
-
-                // Flush entire buffer on chromosome change
-                if tid != self.cov_buf_tid {
-                    self.flush_cov_buf_all();
-                    self.cov_buf_tid = tid;
-                    self.cov_buf_pos = pos;
-                    self.cov_buf_idx = 0;
-                }
-
-                // Flush positions from cov_buf_pos up to (but not
-                // including) the current read's start.
-                self.cov_buf_flush_to(pos, buf_size);
-
-                // Walk CIGAR: insert each M/=/X block as a contiguous range
-                let cigar = record.cigar();
-                let mut ref_pos = pos;
-                for op in cigar.iter() {
-                    match op {
-                        C::Match(n) | C::Equal(n) | C::Diff(n) => {
-                            let len = *n as i64;
-                            self.cov_buf_insert(ref_pos, ref_pos + len, buf_size);
-                            ref_pos += len;
-                        }
-                        C::Del(n) | C::RefSkip(n) => {
+                        // COV: M/=/X consumes reference positions
+                        if do_cov {
+                            let end = ref_pos + *n as i64;
+                            self.cov_buf_insert(ref_pos, end, buf_size);
+                            ref_pos = end;
+                        } else {
                             ref_pos += *n as i64;
                         }
-                        C::Ins(_) | C::SoftClip(_) | C::HardClip(_) | C::Pad(_) => {}
                     }
+                    C::RefSkip(n) => {
+                        ref_pos += *n as i64; // N advances ref (COV skips it)
+                    }
+                    C::SoftClip(n) => {
+                        icycle += *n as usize; // S advances query cycle
+                                               // COV: S consumes no reference positions
+                    }
+                    C::HardClip(_) | C::Pad(_) => {}
                 }
             }
-        } // if is_mapped && !is_secondary (COV)
+            self.bases_mapped_cigar += cigar_mapped;
+        } // if is_mapped && !is_secondary (IC/ID + COV combined)
 
         // =============================================================
         // GCD: GC-depth accumulation (no-reference path).
@@ -973,6 +975,10 @@ impl BamStatAccum {
         // accumulated from the read's sequence.
         //
         // Included reads: mapped, non-secondary (same as COV).
+        //
+        // NOTE: gc_count_for_gcd is set from the primary-read per-cycle
+        // loop above (when is_primary is true), or computed here only for
+        // non-primary mapped reads, avoiding a redundant full sequence scan.
         // =============================================================
         if is_mapped && !is_secondary {
             let tid = record.tid();
@@ -995,17 +1001,22 @@ impl BamStatAccum {
                 // Increment depth and accumulate GC fraction from read seq.
                 if let Some(bin) = self.gcd_bins.last_mut() {
                     bin.depth += 1;
-                    // Count G+C in the read sequence.
-                    let seq = record.seq();
-                    let mut gc_count: u32 = 0;
-                    for i in 0..seq_len {
-                        // encoded_base() returns BAM nibble encoding: A=1, C=2, G=4, T=8, N=15
-                        let base = seq.encoded_base(i);
-                        if base == 2 || base == 4 {
-                            // C or G
-                            gc_count += 1;
+                    // For primary reads, gc_count was already computed in the
+                    // per-cycle base loop above. For non-primary mapped reads
+                    // (supplementary, etc.) compute it here from the sequence.
+                    let gc_count: u32 = if is_primary {
+                        primary_gc_count as u32
+                    } else {
+                        let seq = record.seq();
+                        let mut count: u32 = 0;
+                        for i in 0..seq_len {
+                            let base = seq.encoded_base(i);
+                            if base == 2 || base == 4 {
+                                count += 1;
+                            }
                         }
-                    }
+                        count
+                    };
                     bin.gc += gc_count as f32 / seq_len as f32;
                 }
             }

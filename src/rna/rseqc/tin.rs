@@ -388,6 +388,8 @@ pub struct TinAccum {
     pub mapq_cut: u8,
     /// Minimum coverage threshold (unique read start positions).
     pub min_cov: u32,
+    /// Reusable scratch buffer for aligned blocks, avoids per-read allocation.
+    blocks_buf: Vec<(u64, u64)>,
 }
 
 impl TinAccum {
@@ -409,6 +411,7 @@ impl TinAccum {
             n_samples,
             mapq_cut,
             min_cov,
+            blocks_buf: Vec::with_capacity(8),
         }
     }
 
@@ -429,8 +432,10 @@ impl TinAccum {
             return;
         }
 
-        // Get aligned blocks from CIGAR
-        let blocks = get_aligned_blocks(record);
+        // Fill the reusable scratch buffer with aligned blocks from CIGAR,
+        // avoiding a per-read Vec allocation.
+        fill_aligned_blocks(record, &mut self.blocks_buf);
+        let blocks = &self.blocks_buf;
         if blocks.is_empty() {
             return;
         }
@@ -469,7 +474,7 @@ impl TinAccum {
         // Sampled positions are 1-based; aligned blocks are 0-based half-open
         // [block_start, block_end). A 1-based position P is covered iff
         // P-1 >= block_start && P-1 < block_end, i.e., P > block_start && P <= block_end.
-        for &(block_start, block_end) in &blocks {
+        for &(block_start, block_end) in blocks.iter() {
             // Binary search for first 1-based position > block_start
             let pos_start = chrom_positions.partition_point(|p| p.0 <= block_start);
 
@@ -580,16 +585,18 @@ fn compute_tin(coverage: &[u32], n_total_positions: usize) -> f64 {
 /// Get aligned blocks from a BAM record's CIGAR string.
 ///
 /// Returns sorted (start, end) pairs of aligned blocks (0-based half-open).
-fn get_aligned_blocks(record: &bam::Record) -> Vec<(u64, u64)> {
+/// Fill `buf` with aligned blocks from the CIGAR, reusing the existing
+/// Vec capacity to avoid per-read heap allocation.
+fn fill_aligned_blocks(record: &bam::Record, buf: &mut Vec<(u64, u64)>) {
     use rust_htslib::bam::record::Cigar;
 
-    let mut blocks = Vec::new();
+    buf.clear();
     let mut pos = record.pos() as u64;
 
     for op in record.cigar().iter() {
         match op {
             Cigar::Match(len) | Cigar::Equal(len) | Cigar::Diff(len) => {
-                blocks.push((pos, pos + *len as u64));
+                buf.push((pos, pos + *len as u64));
                 pos += *len as u64;
             }
             Cigar::Del(len) | Cigar::RefSkip(len) => {
@@ -598,8 +605,6 @@ fn get_aligned_blocks(record: &bam::Record) -> Vec<(u64, u64)> {
             Cigar::Ins(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) | Cigar::Pad(_) => {}
         }
     }
-
-    blocks
 }
 
 // ===================================================================

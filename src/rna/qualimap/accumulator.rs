@@ -286,23 +286,21 @@ impl QualimapAccum {
         // (Qualimap: readCount counts all non-secondary, non-supplementary reads)
         self.counters.read_count += 1;
 
-        // Extract M-only CIGAR blocks (replicating Qualimap's CIGAR bug where
-        // offset += length for ALL operations, including I/S/H/P).
-        let m_blocks = extract_m_blocks(record);
-
         // Skip multi-mappers from gene assignment, junction counting, and coverage.
         // Coverage is added only for uniquely-mapped reads, restricted to fully-enclosed
         // M-blocks, matching the correct Qualimap coverage model.
         if is_multi_mapped {
             return;
         }
+
+        // Extract M-only CIGAR blocks (replicating Qualimap's CIGAR bug where
+        // offset += length for ALL operations, including I/S/H/P) AND junction
+        // motifs in a single CIGAR pass, avoiding a second record.cigar() call.
+        let (m_blocks, n_op_count, motifs) = extract_m_blocks_and_junctions(record);
+
         if m_blocks.is_empty() {
             return;
         }
-
-        // Extract junction motifs from N-operations in CIGAR.
-        // Only uniquely-mapped primary reads contribute junctions.
-        let (n_op_count, motifs) = extract_junction_motifs(record);
         // Qualimap increments numReadsWithJunction for every N-operation,
         // even when the motif extraction guard fails. Match that behavior.
         self.counters.reads_at_junctions += n_op_count as u64;
@@ -711,7 +709,7 @@ fn get_nh_tag(record: &bam::Record) -> Option<u32> {
 ///
 /// Extract correct alignment blocks from a BAM record's CIGAR string.
 ///
-/// Unlike [`extract_m_blocks`], this function uses **correct** CIGAR semantics:
+/// Unlike `extract_m_blocks_and_junctions`, this function uses **correct** CIGAR semantics:
 /// only M/D/N/=/X operations advance the reference position, while I/S/H/P
 /// **Qualimap compatibility note:** Qualimap's Java code advances the reference
 /// offset for **all** CIGAR operations, including insertions and soft-clips.
@@ -720,73 +718,47 @@ fn get_nh_tag(record: &bam::Record) -> Option<u32> {
 /// that M-blocks following an I or S operation are shifted rightward by the
 /// length of the I/S, which can push them past exon boundaries and change
 /// the exonic/intronic classification.
-fn extract_m_blocks(record: &bam::Record) -> Vec<(i32, i32)> {
-    let mut blocks = Vec::new();
-    let mut ref_pos = record.pos() as i32; // 0-based
-
-    for op in record.cigar().iter() {
-        match op {
-            // Qualimap only creates alignment blocks for M (match/mismatch),
-            // not for = (sequence match) or X (sequence mismatch).
-            // In Qualimap's getReadIntervals, only CigarOperator.M creates blocks.
-            Cigar::Match(len) => {
-                let len = *len as i32;
-                blocks.push((ref_pos, ref_pos + len));
-                ref_pos += len;
-            }
-            // Qualimap bug: EQ and X advance offset but don't create blocks.
-            Cigar::Equal(len) | Cigar::Diff(len) => {
-                ref_pos += *len as i32;
-            }
-            Cigar::Del(len) | Cigar::RefSkip(len) => {
-                ref_pos += *len as i32;
-            }
-            // Qualimap bug: insertions and soft-clips advance the reference
-            // position even though they only consume query bases.
-            Cigar::Ins(len) | Cigar::SoftClip(len) => {
-                ref_pos += *len as i32;
-            }
-            // Qualimap bug: hard clips and pads also advance the reference
-            // offset even though they shouldn't consume reference bases.
-            Cigar::HardClip(len) | Cigar::Pad(len) => {
-                ref_pos += *len as i32;
-            }
-        }
-    }
-
-    blocks
-}
-
-/// Extract junction motifs from N-operations in CIGAR.
 ///
-/// For each N (intron/RefSkip) operation, extracts the 2bp donor and 2bp acceptor
-/// motifs from the read sequence at the junction boundaries.
-/// Returns `(n_op_count, motifs)` where `n_op_count` is the total number of
-/// N-operations in the CIGAR (used for `reads_at_junctions`), and `motifs`
-/// contains the successfully extracted junction motifs. Qualimap counts
-/// `numReadsWithJunction` for every N-operation regardless of whether the
-/// motif could be extracted.
+/// Also extracts junction motifs and n_op_count in the same CIGAR pass to
+/// avoid a second `record.cigar()` call in `extract_junction_motifs`.
+/// Returns `(m_blocks, n_op_count, motifs)`.
 #[allow(clippy::needless_range_loop, unused_assignments, unused_variables)]
-fn extract_junction_motifs(record: &bam::Record) -> (usize, Vec<JunctionMotif>) {
+fn extract_m_blocks_and_junctions(
+    record: &bam::Record,
+) -> (Vec<(i32, i32)>, usize, Vec<JunctionMotif>) {
     let cigar = record.cigar();
     let seq = record.seq();
     let seq_len = seq.len();
 
+    let mut blocks = Vec::new();
     let mut motifs = Vec::new();
     let mut n_op_count: usize = 0;
-    // ref_pos and seq_pos track the current position through the CIGAR. The
-    // final assignment in the last CIGAR operation is intentionally unused.
-    let mut ref_pos = record.pos() as i32;
+    let mut ref_pos = record.pos() as i32; // 0-based
+                                           // seq_pos tracks query position for junction motif extraction.
+                                           // ref_pos for extract_m_blocks uses its own tracking with the Qualimap
+                                           // bug (I/S/H/P advance ref_pos too).
     let mut seq_pos: usize = 0;
+    // Qualimap-bug ref_pos tracks the shifted position for M-block extraction.
+    // Junction motif extraction uses a separate ref tracking (standard).
+    // We run both in one pass by tracking seq_pos alongside ref_pos.
 
     for op in cigar.iter() {
         match op {
-            Cigar::Match(len) | Cigar::Equal(len) | Cigar::Diff(len) => {
-                let len = *len as usize;
-                ref_pos += len as i32;
-                seq_pos += len;
+            // Qualimap only creates alignment blocks for M (match/mismatch),
+            // not for = (sequence match) or X (sequence mismatch).
+            Cigar::Match(len) => {
+                let len = *len as i32;
+                blocks.push((ref_pos, ref_pos + len));
+                ref_pos += len;
+                seq_pos += len as usize;
+            }
+            // Qualimap bug: EQ and X advance offset but don't create blocks.
+            Cigar::Equal(len) | Cigar::Diff(len) => {
+                ref_pos += *len as i32;
+                seq_pos += *len as usize;
             }
             Cigar::RefSkip(len) => {
+                // Junction motif extraction (N-operations).
                 // Qualimap increments numReadsWithJunction for every N-op,
                 // regardless of whether the motif can be extracted.
                 n_op_count += 1;
@@ -797,7 +769,6 @@ fn extract_junction_motifs(record: &bam::Record) -> (usize, Vec<JunctionMotif>) 
                     let donor = [seq.encoded_base(seq_pos - 2), seq.encoded_base(seq_pos - 1)];
                     let acceptor = [seq.encoded_base(seq_pos), seq.encoded_base(seq_pos + 1)];
 
-                    // Convert 4-bit encoding to ASCII
                     let donor_ascii = [decode_base(donor[0]), decode_base(donor[1])];
                     let acceptor_ascii = [decode_base(acceptor[0]), decode_base(acceptor[1])];
 
@@ -808,18 +779,23 @@ fn extract_junction_motifs(record: &bam::Record) -> (usize, Vec<JunctionMotif>) 
                 }
 
                 ref_pos += *len as i32;
+                // N does not advance query (seq_pos unchanged)
             }
+            // Qualimap bug: insertions and soft-clips advance the reference
+            // position even though they only consume query bases.
             Cigar::Ins(len) | Cigar::SoftClip(len) => {
+                ref_pos += *len as i32;
                 seq_pos += *len as usize;
             }
             Cigar::Del(len) => {
                 ref_pos += *len as i32;
+                // D does not advance query
             }
             Cigar::HardClip(_) | Cigar::Pad(_) => {}
         }
     }
 
-    (n_op_count, motifs)
+    (blocks, n_op_count, motifs)
 }
 
 /// Decode a 4-bit encoded base to ASCII uppercase.

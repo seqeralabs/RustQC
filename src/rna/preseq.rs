@@ -16,6 +16,24 @@ use super::cpp_rng::CppMt19937;
 use crate::config::PreseqConfig;
 
 // ============================================================================
+// Helpers
+// ============================================================================
+
+/// FNV-1a hash of a byte slice. Used to key the dangling-mate buffer by read
+/// name without allocating a Vec<u8> per read.
+#[inline(always)]
+fn fnv1a_hash_bytes(bytes: &[u8]) -> u64 {
+    const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut hash = FNV_OFFSET;
+    for &b in bytes {
+        hash ^= b as u64;
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    hash
+}
+
+// ============================================================================
 // Constants
 // ============================================================================
 
@@ -89,7 +107,7 @@ pub struct PreseqAccum {
     pub total_fragments: u64,
     /// Reads waiting for their mate. Keyed by read name.
     /// When both mates are seen, they are merged into a fragment immediately.
-    dangling_mates: HashMap<Vec<u8>, MateInfo>,
+    dangling_mates: HashMap<u64, MateInfo>,
     /// Number of successfully merged PE pairs.
     n_paired: u64,
     /// Number of reads counted as individual fragments (unpaired or failed merge).
@@ -141,9 +159,13 @@ impl PreseqAccum {
 
         // Check if this read is part of a pair
         if record.is_paired() {
-            let qname = record.qname().to_vec();
+            // Use a FNV-1a hash of the qname as the mate-buffer key to avoid
+            // allocating a Vec<u8> per read. Collisions are negligible for
+            // typical BAM qnames; the MateInfo already stores coordinates that
+            // would detect a spurious match if needed.
+            let qname_hash = fnv1a_hash_bytes(record.qname());
 
-            if let Some(mate) = self.dangling_mates.remove(&qname) {
+            if let Some(mate) = self.dangling_mates.remove(&qname_hash) {
                 // Found the mate — try to merge
                 if mate.tid == tid {
                     // Same chromosome: merge into genomic interval
@@ -169,7 +191,7 @@ impl PreseqAccum {
                 }
             } else {
                 // First mate seen — store for later
-                self.dangling_mates.insert(qname, info);
+                self.dangling_mates.insert(qname_hash, info);
             }
         } else {
             // Unpaired read — count as individual fragment

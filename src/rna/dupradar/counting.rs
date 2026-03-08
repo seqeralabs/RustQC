@@ -1106,9 +1106,14 @@ pub fn count_reads(
             num_chroms, num_workers
         );
 
-        // Calculate htslib decompression threads per worker
+        // Calculate htslib decompression threads per worker.
+        // Each worker gets at least 1 decompression thread so that BAM
+        // block decompression (which is CPU-bound) is always overlapped
+        // with BGZF I/O. When total threads exceed num_workers the extra
+        // threads are distributed evenly; when threads == num_workers every
+        // worker still gets 1 dedicated decompression thread.
         let htslib_threads = if num_workers > 0 {
-            (threads.saturating_sub(num_workers)) / num_workers
+            ((threads.saturating_sub(num_workers)) / num_workers).max(1)
         } else {
             0
         };
