@@ -21,12 +21,12 @@
 
 <p align="center">
 <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="docs/public/benchmarks/benchmark_dark.svg">
-   <img src="docs/public/benchmarks/benchmark_light.svg" alt="Benchmark: RustQC RNA ~7m vs traditional tools ~4h (dupRadar + featureCounts + 8 RSeQC tools + preseq + samtools + Qualimap)" width="600">
+   <source media="(prefers-color-scheme: dark)" srcset="docs/public/benchmarks/benchmark_dark.png">
+   <img src="docs/public/benchmarks/benchmark_light.png" alt="Benchmark: RustQC ~32m vs traditional tools ~9h 21m+ (dupRadar + featureCounts + 8 RSeQC tools + preseq + samtools + Qualimap)" width="600">
 </picture>
 </p>
 
-<p align="center"><em>Run time for a 10 GB paired-end BAM (dupRadar + featureCounts + RSeQC + preseq + samtools + Qualimap)</em></p>
+<p align="center"><em>Run time for a large paired-end RNA-seq BAM (~186M reads) on AWS. RSeQC TIN process timed out after 6h.</em></p>
 
 It currently includes:
 
