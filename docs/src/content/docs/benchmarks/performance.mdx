@@ -186,9 +186,13 @@ complete list of toggles.
 
 RustQC parallelises by assigning chromosomes to worker threads -- each worker
 opens its own BAM reader and processes its assigned chromosomes independently.
+
 The number of chromosomes sets the theoretical ceiling for counting threads,
-but in practice **returns diminish well before that limit**: performance
-plateaus at roughly **4-8 threads** (~2× speedup). Additional threads beyond
+but in practice returns diminish well before that limit because chromosomes
+aren't split and have very different lengths - so the longest chromosome becomes
+the parellisation bottleneck.
+
+Performance plateaus at roughly **4-8 threads** (~2× speedup). Additional threads beyond
 this point are used for BAM decompression and add little benefit while
 increasing memory usage (each worker maintains its own per-chromosome
 accumulators).
@@ -239,7 +243,12 @@ time (robust to cloud scheduling jitter).
 |      32 |    18:32 |  16.9 GB |                2.2× |
 
 Performance scales well up to ~8 threads, where runtime drops from
-~40 minutes (single-threaded) to ~19 minutes (2.1× speedup). Beyond 8
-threads, gains plateau -- additional threads are used mainly for BAM
-decompression, yielding diminishing returns. Peak RSS grows linearly with
-thread count as each worker maintains its own per-chromosome accumulators.
+~40 minutes (single-threaded) to ~19 minutes (2.1× speedup).
+
+Beyond 8 threads, gains plateau because each chromosome is processed by exactly one
+worker -- despite greedy bin-packing to balance load, the largest
+chromosome (human chr1, ~8% of the genome) becomes the critical path and
+cannot be subdivided. Additional threads beyond this point serve only as
+BAM decompression helpers, yielding diminishing returns. Peak RSS grows
+linearly with thread count as each worker maintains its own per-chromosome
+accumulators.
