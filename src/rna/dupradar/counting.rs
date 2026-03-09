@@ -307,10 +307,6 @@ fn assign_fragment_to_gene(
 pub struct CountResult {
     /// Per-gene counts indexed by gene_id
     pub gene_counts: IndexMap<String, GeneCounts>,
-    /// Total mapped reads (including multimappers, including duplicates)
-    pub total_reads_multi_dup: u64,
-    /// Total mapped reads (unique only, including duplicates)
-    pub total_reads_unique_dup: u64,
 
     // --- dupRadar fragment-level assignment statistics ---
     /// Total reads/records seen in the BAM file
@@ -1667,8 +1663,6 @@ pub fn count_reads(
 
     Ok(CountResult {
         gene_counts: gene_counts_map,
-        total_reads_multi_dup: merged.n_multi_dup,
-        total_reads_unique_dup: merged.n_unique_dup,
         stat_total_reads: merged.total_reads,
         stat_assigned: merged.stat_assigned,
         stat_ambiguous: merged.stat_ambiguous,

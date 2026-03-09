@@ -317,8 +317,6 @@ mod tests {
 
         let count_result = CountResult {
             gene_counts,
-            total_reads_multi_dup: 185,
-            total_reads_unique_dup: 185,
             stat_total_reads: 200,
             stat_assigned: 185,
             stat_ambiguous: 5,

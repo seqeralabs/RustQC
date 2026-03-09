@@ -694,16 +694,6 @@ fn process_single_bam(
     let outdir = params.outdir;
 
     // === Build RSeQC config and annotations ===
-    let ref_chroms: HashSet<String> = params
-        .known_junctions
-        .map(|kj| {
-            kj.junctions
-                .iter()
-                .map(|s| s.split(':').next().unwrap_or("").to_uppercase())
-                .collect()
-        })
-        .unwrap_or_default();
-
     let rseqc_config = RseqcConfig {
         mapq_cut: params.mapq_cut,
         infer_experiment_sample_size: params.infer_experiment_sample_size,
@@ -743,7 +733,6 @@ fn process_single_bam(
         rd_regions: params.rd_regions,
         exon_bitset: params.exon_bitset,
         transcript_tree: params.transcript_tree,
-        ref_chroms: Some(&ref_chroms),
         tin_index: params.tin_index,
     };
 
@@ -1559,13 +1548,6 @@ fn run_rseqc_single_pass(
     let pass_start = Instant::now();
 
     // Build config and annotations
-    let ref_chroms: Option<std::collections::HashSet<String>> = params.known_junctions.map(|kj| {
-        kj.junctions
-            .iter()
-            .map(|j| j.split(':').next().unwrap_or("").to_uppercase())
-            .collect()
-    });
-
     let rseqc_config = RseqcConfig {
         mapq_cut: params.mapq_cut,
         min_intron: params.min_intron,
@@ -1607,7 +1589,6 @@ fn run_rseqc_single_pass(
         rd_regions: params.rd_regions,
         exon_bitset: params.exon_bitset,
         transcript_tree: params.transcript_tree,
-        ref_chroms: ref_chroms.as_ref(),
         tin_index: params.tin_index,
     };
 

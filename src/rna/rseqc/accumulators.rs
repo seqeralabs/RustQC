@@ -47,8 +47,7 @@ pub struct RseqcAnnotations<'a> {
     pub exon_bitset: Option<&'a ExonBitset>,
     /// Transcript tree for inner_distance.
     pub transcript_tree: Option<&'a TranscriptTree>,
-    /// Chromosomes present in the known junction set (precomputed for fast lookup).
-    pub ref_chroms: Option<&'a HashSet<String>>,
+
     /// TIN index for transcript integrity number calculation.
     pub tin_index: Option<&'a super::tin::TinIndex>,
 }
@@ -1786,7 +1785,6 @@ impl JuncSatAccum {
         &mut self,
         record: &bam::Record,
         chrom_upper: &str,
-        ref_chroms: &HashSet<String>,
         min_intron: u64,
         mapq_cut: u8,
     ) {
@@ -1801,11 +1799,6 @@ impl JuncSatAccum {
             return;
         }
         if record.mapq() < mapq_cut {
-            return;
-        }
-
-        // Skip chromosomes not in reference
-        if !ref_chroms.contains(chrom_upper) {
             return;
         }
 
@@ -2232,17 +2225,9 @@ impl RseqcAccumulators {
             );
         }
 
-        // junction_saturation: needs known junction chroms, uses uppercased chrom
-        if let (Some(ref mut accum), Some(ref_chroms)) =
-            (&mut self.junc_sat, &annotations.ref_chroms)
-        {
-            accum.process_read(
-                record,
-                chrom_upper,
-                ref_chroms,
-                config.min_intron,
-                config.mapq_cut,
-            );
+        // junction_saturation: uses uppercased chrom
+        if let Some(ref mut accum) = &mut self.junc_sat {
+            accum.process_read(record, chrom_upper, config.min_intron, config.mapq_cut);
         }
 
         // inner_distance: needs exon bitset + transcript tree, uses uppercased chrom
