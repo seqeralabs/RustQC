@@ -195,14 +195,12 @@ pub fn write_junction_plot_r(results: &JunctionResults, prefix: &str, path: &Pat
     let mut f = std::fs::File::create(path)
         .with_context(|| format!("Failed to create file: {}", path.display()))?;
 
-    // Event-level percentages
-    let total_classified_events =
-        results.known_events + results.partial_novel_events + results.complete_novel_events;
-    let (e_known_pct, e_partial_pct, e_novel_pct) = if total_classified_events > 0 {
+    // Event-level percentages — denominator includes filtered events to match RSeQC
+    let (e_known_pct, e_partial_pct, e_novel_pct) = if results.total_events > 0 {
         (
-            results.known_events as f64 * 100.0 / total_classified_events as f64,
-            results.partial_novel_events as f64 * 100.0 / total_classified_events as f64,
-            results.complete_novel_events as f64 * 100.0 / total_classified_events as f64,
+            results.known_events as f64 * 100.0 / results.total_events as f64,
+            results.partial_novel_events as f64 * 100.0 / results.total_events as f64,
+            results.complete_novel_events as f64 * 100.0 / results.total_events as f64,
         )
     } else {
         (0.0, 0.0, 0.0)
@@ -230,9 +228,9 @@ pub fn write_junction_plot_r(results: &JunctionResults, prefix: &str, path: &Pat
     writeln!(
         f,
         "pie(events,col=c(2,3,4),init.angle=30,angle=c(60,120,150),density=c(70,70,70),main=\"splicing events\",labels=c(\"partial_novel {}%\",\"complete_novel {}%\",\"known {}%\"))",
-        e_partial_pct as u64,
-        e_novel_pct as u64,
-        e_known_pct as u64
+        e_partial_pct.round() as u64,
+        e_novel_pct.round() as u64,
+        e_known_pct.round() as u64
     )?;
     writeln!(f, "dev.off()")?;
 
@@ -246,9 +244,9 @@ pub fn write_junction_plot_r(results: &JunctionResults, prefix: &str, path: &Pat
     writeln!(
         f,
         "pie(junction,col=c(2,3,4),init.angle=30,angle=c(60,120,150),density=c(70,70,70),main=\"splicing junctions\",labels=c(\"partial_novel {}%\",\"complete_novel {}%\",\"known {}%\"))",
-        j_partial_pct as u64,
-        j_novel_pct as u64,
-        j_known_pct as u64
+        j_partial_pct.round() as u64,
+        j_novel_pct.round() as u64,
+        j_known_pct.round() as u64
     )?;
     writeln!(f, "dev.off()")?;
 

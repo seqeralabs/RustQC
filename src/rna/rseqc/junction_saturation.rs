@@ -44,31 +44,22 @@ pub fn write_r_script(result: &SaturationResult, prefix: &str) -> Result<()> {
     let w_str: Vec<String> = result.novel_counts.iter().map(|c| c.to_string()).collect();
 
     // m = max of last values / 1000, n = min of first values / 1000
-    let known_last = *result.known_counts.last().unwrap_or(&0) as i64;
-    let all_last = *result.all_counts.last().unwrap_or(&0) as i64;
-    let novel_last = *result.novel_counts.last().unwrap_or(&0) as i64;
-    let known_first = *result.known_counts.first().unwrap_or(&0) as i64;
-    let all_first = *result.all_counts.first().unwrap_or(&0) as i64;
-    let novel_first = *result.novel_counts.first().unwrap_or(&0) as i64;
-
-    let m = (known_last / 1000)
-        .max(all_last / 1000)
-        .max(novel_last / 1000);
-    let n = (known_first / 1000)
-        .min(all_first / 1000)
-        .min(novel_first / 1000);
+    // R's max()/min() computes the result — we emit known, all, novel in that order
+    // to match RSeQC's output format.
+    let known_last_k = *result.known_counts.last().unwrap_or(&0) as i64 / 1000;
+    let all_last_k = *result.all_counts.last().unwrap_or(&0) as i64 / 1000;
+    let novel_last_k = *result.novel_counts.last().unwrap_or(&0) as i64 / 1000;
+    let known_first_k = *result.known_counts.first().unwrap_or(&0) as i64 / 1000;
+    let all_first_k = *result.all_counts.first().unwrap_or(&0) as i64 / 1000;
+    let novel_first_k = *result.novel_counts.first().unwrap_or(&0) as i64 / 1000;
 
     writeln!(f, "pdf('{pdf_path}')")?;
     writeln!(f, "x=c({})", x_str.join(","))?;
     writeln!(f, "y=c({})", y_str.join(","))?;
     writeln!(f, "z=c({})", z_str.join(","))?;
     writeln!(f, "w=c({})", w_str.join(","))?;
-    let all_last_k = all_last / 1000;
-    let novel_last_k = novel_last / 1000;
-    let all_first_k = all_first / 1000;
-    let novel_first_k = novel_first / 1000;
-    writeln!(f, "m=max({m},{all_last_k},{novel_last_k})")?;
-    writeln!(f, "n=min({n},{all_first_k},{novel_first_k})")?;
+    writeln!(f, "m=max({known_last_k},{all_last_k},{novel_last_k})")?;
+    writeln!(f, "n=min({known_first_k},{all_first_k},{novel_first_k})")?;
     writeln!(
         f,
         "plot(x,z/1000,xlab='percent of total reads',ylab='Number of splicing junctions (x1000)',type='o',col='blue',ylim=c(n,m))"
@@ -78,7 +69,7 @@ pub fn write_r_script(result: &SaturationResult, prefix: &str) -> Result<()> {
     writeln!(
         f,
         "legend(5,{}, legend=c(\"All junctions\",\"known junctions\", \"novel junctions\"),col=c(\"blue\",\"red\",\"green\"),lwd=1,pch=1)",
-        all_last / 1000
+        all_last_k
     )?;
     writeln!(f, "dev.off()")?;
 

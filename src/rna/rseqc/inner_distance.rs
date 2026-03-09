@@ -446,11 +446,11 @@ pub fn write_r_script(
     writeln!(file, "frag_median = median(fragsize)")?;
     writeln!(
         file,
-        "write(x=c(\"Name\",\"Mean\",\"Median\",\"sd\"), sep=\"\\t\", file=stdout(),ncolumns=4)"
+        "write(x=c(\"Name\",\"Mean\",\"Median\",\"sd\"), sep=\"\t\", file=stdout(),ncolumns=4)"
     )?;
     writeln!(
         file,
-        "write(c(out_file,frag_mean,frag_median,frag_sd),sep=\"\\t\", file=stdout(),ncolumns=4)"
+        "write(c(out_file,frag_mean,frag_median,frag_sd),sep=\"\t\", file=stdout(),ncolumns=4)"
     )?;
     writeln!(
         file,
