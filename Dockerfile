@@ -13,12 +13,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     clang \
     && rm -rf /var/lib/apt/lists/*
 
+ARG GIT_SHORT_HASH=unknown
+
 WORKDIR /build
 COPY Cargo.toml Cargo.lock build.rs ./
 COPY cpp/ cpp/
 COPY src/ src/
 
-RUN cargo build --release && strip target/release/rustqc
+RUN GIT_SHORT_HASH="${GIT_SHORT_HASH}" cargo build --release && strip target/release/rustqc
 
 # ---- Runtime stage ----
 FROM debian:bookworm-slim

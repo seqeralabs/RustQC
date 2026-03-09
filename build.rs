@@ -23,13 +23,20 @@ fn main() {
     println!("cargo:rerun-if-changed=cpp/rng_shim.cpp");
 
     // --- Git short hash ---
-    let git_hash = Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
-        .output()
+    // First check the GIT_SHORT_HASH env var (set via Docker build arg),
+    // then fall back to running `git rev-parse` (works in local/CI builds).
+    let git_hash = std::env::var("GIT_SHORT_HASH")
         .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_else(|| "unknown".to_string());
+        .filter(|s| !s.is_empty() && s != "unknown")
+        .unwrap_or_else(|| {
+            Command::new("git")
+                .args(["rev-parse", "--short", "HEAD"])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_else(|| "unknown".to_string())
+        });
     println!("cargo:rustc-env=GIT_SHORT_HASH={}", git_hash);
 
     // --- Build timestamp (UTC, ISO-8601) ---
