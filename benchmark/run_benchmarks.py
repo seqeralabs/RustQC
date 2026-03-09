@@ -620,7 +620,7 @@ def generate_svgs(results: list[dict], root: Path) -> None:
     # (GM12878 dataset, run 4908176 — AWS, 1 sample).
     # TIN was aborted in this run; value kept from previous measurement.
     tool_secs: dict[str, float] = {
-        "RustQC": 1763,  # 29m 23s
+        "RustQC": 1763,  # 29m 23s (all tools including TIN in a single BAM pass)
         "bam_stat": 397,  # 6m 37s
         "infer_experiment": 404,  # 6m 44s
         "read_duplication": 1263,  # 21m 3s
@@ -635,27 +635,14 @@ def generate_svgs(results: list[dict], root: Path) -> None:
         "samtools_flagstat": 200,  # 3m 20s
         "samtools_idxstats": 21,  # 21s
         "preseq": 1209,  # 20m 9s
-        "tin": 2700,  # previous run (aborted in 4908176)
+        "tin": 21600,  # 6h — upstream tin.py aborted in benchmark; conservative estimate
     }
 
     def secs(tool: str) -> float:
         return tool_secs.get(tool, 0)
 
-    # ── Tool groups (order within each group determines stacking order) ──
+    # ── Tool groups (order determines stacking in the bar chart) ──────
     groups: list[tuple[str, list[tuple[str, str]]]] = [
-        (
-            "RSeQC",
-            [
-                ("tin", "tin.py"),
-                ("read_duplication", "read_duplication"),
-                ("junction_saturation", "junction_saturation"),
-                ("bam_stat", "bam_stat"),
-                ("read_distribution", "read_distribution"),
-                ("junction_annotation", "junction_annotation"),
-                ("inner_distance", "inner_distance"),
-                ("infer_experiment", "infer_experiment"),
-            ],
-        ),
         ("dupRadar", [("dupRadar", "dupRadar")]),
         ("Qualimap", [("qualimap", "Qualimap")]),
         (
@@ -668,6 +655,19 @@ def generate_svgs(results: list[dict], root: Path) -> None:
         ),
         ("preseq", [("preseq", "preseq")]),
         ("featureCounts", [("featureCounts", "featureCounts")]),
+        (
+            "RSeQC",
+            [
+                ("read_duplication", "read_duplication"),
+                ("junction_saturation", "junction_saturation"),
+                ("bam_stat", "bam_stat"),
+                ("read_distribution", "read_distribution"),
+                ("junction_annotation", "junction_annotation"),
+                ("inner_distance", "inner_distance"),
+                ("infer_experiment", "infer_experiment"),
+                ("tin", "tin.py (aborted after 6h)"),
+            ],
+        ),
     ]
 
     # Build flat segment list: (display_label, seconds, group_label)
@@ -779,7 +779,17 @@ def _write_svg(
     y_rustqc = 1
     y_trad = 0
 
-    # ── RustQC bar (staging hatched + work solid) ────────────────────────
+    # ── RustQC bar (staging + 3 work segments) ─────────────────────────
+    # Proportions from profiling (performance.mdx cumulative removal):
+    #   all=637s, without TIN=397s (TIN=240s), without TIN+read_dup=142s (read_dup=255s)
+    _prof_total = 637.0
+    _rustqc_segments = [
+        ("Everything else", 142.0 / _prof_total),
+        ("read_duplication", 255.0 / _prof_total),
+        ("TIN", 240.0 / _prof_total),
+    ]
+
+    # Staging hatched block
     ax.barh(
         y_rustqc,
         STAGING_SECS,
@@ -791,6 +801,8 @@ def _write_svg(
         hatch="//",
         alpha=0.5,
     )
+
+    # Solid work block (single colour), then overlay dividers
     ax.barh(
         y_rustqc,
         rustqc_work,
@@ -800,6 +812,43 @@ def _write_svg(
         edgecolor=bg,
         linewidth=0.8,
     )
+
+    # Compute segment midpoints for labels and divider lines
+    rx = STAGING_SECS
+    rustqc_seg_mids: list[tuple[float, str, float]] = []
+    for rlabel, frac in _rustqc_segments:
+        rw = frac * rustqc_work
+        rustqc_seg_mids.append((rx + rw / 2, rlabel, rw))
+        rx += rw
+        # Draw a thin divider between segments (skip after last)
+        if rx < STAGING_SECS + rustqc_work - 1:
+            ax.plot(
+                [rx, rx],
+                [y_rustqc - bar_height / 2, y_rustqc + bar_height / 2],
+                color=bg,
+                linewidth=1.2,
+            )
+
+    # Segment labels above the RustQC bar (rotated to avoid overlap)
+    label_y_top = y_rustqc + bar_height / 2 + 0.08
+    for mid_x, rlabel, rw in rustqc_seg_mids:
+        ax.plot(
+            [mid_x, mid_x],
+            [y_rustqc + bar_height / 2, label_y_top + 0.02],
+            color=subtext_c,
+            linewidth=0.5,
+            alpha=0.6,
+        )
+        ax.text(
+            mid_x,
+            label_y_top + 0.05,
+            f"{rlabel} ({_fmt_time(rw)})",
+            ha="left",
+            va="bottom",
+            fontsize=7,
+            color=subtext_c,
+            rotation=60,
+        )
 
     # ── Traditional stacked bar ──────────────────────────────────────────
     x_pos = 0.0
@@ -867,7 +916,7 @@ def _write_svg(
     ax.set_yticklabels(
         [
             f"RustQC RNA\n(10 threads) {_fmt_time(rustqc_total)}",
-            f"Traditional tools\n(sequential) {_fmt_time(total_trad)}",
+            f"Traditional tools\n(sequential) {_fmt_time(total_trad)}+",
         ],
         fontsize=10,
         fontweight="bold",
@@ -893,7 +942,7 @@ def _write_svg(
         spine.set_visible(False)
 
     # Y limits — room below for rotated labels
-    ax.set_ylim(-3.5, 1.5)
+    ax.set_ylim(-3.5, 2.2)
 
     # ── Legend ────────────────────────────────────────────────────────────
     legend_handles = []

@@ -25,24 +25,27 @@ export const base = import.meta.env.BASE_URL;
         <a href="https://bioconductor.org/packages/dupRadar/">dupRadar</a>,{" "}
         <a href="https://subread.sourceforge.net/">featureCounts</a>,{" "}
         <a href="https://rseqc.sourceforge.net/">RSeQC</a>,{" "}
-        <a href="http://qualimap.conesalab.org/">Qualimap</a>, and more in Rust,
-        delivering identical results dramatically faster.
+        <a href="http://qualimap.conesalab.org/">Qualimap</a>,{" "}
+        <a href="https://daehwankimlab.github.io/preseq/">preseq</a>, and{" "}
+        <a href="https://www.htslib.org/">samtools</a> in Rust, delivering
+        identical results dramatically faster.
       </div>
     </div>
     <div class="benchmark-chart">
       <img
         class="only-dark"
         src={`${base}benchmarks/benchmark_dark.svg`}
-        alt="Benchmark: RustQC ~32m vs traditional tools ~4h 06m sequential (AWS)"
+        alt="Benchmark: RustQC ~32m vs traditional tools ~9h 21m+ sequential (AWS)"
       />
       <img
         class="only-light"
         src={`${base}benchmarks/benchmark_light.svg`}
-        alt="Benchmark: RustQC ~32m vs traditional tools ~4h 06m sequential (AWS)"
+        alt="Benchmark: RustQC ~32m vs traditional tools ~9h 21m+ sequential (AWS)"
       />
       <p>
         <em>
-          Run time for a large paired-end RNA-seq BAM (~186M reads) on AWS
+          Run time for a large paired-end RNA-seq BAM (~186M reads) on AWS.
+          RSeQC TIN process timed out after 6h.
         </em>
       </p>
     </div>
@@ -183,7 +186,7 @@ export const base = import.meta.env.BASE_URL;
     and samtools. Over 800,000 values compared with zero mismatches.
   </Card>
   <Card title="Dramatically Faster" icon="rocket">
-    Processes ~186M reads in ~32 minutes on AWS vs ~4h 06m of sequential tool
+    Processes ~186M reads in ~32 minutes on AWS vs ~9h 21m+ of sequential tool
     runtimes — and replaces tools like TIN that fail entirely on large datasets.
   </Card>
   <Card title="All-in-One" icon="puzzle">
