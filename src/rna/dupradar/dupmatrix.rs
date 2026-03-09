@@ -52,22 +52,19 @@ impl DupMatrix {
     ///
     /// This mirrors dupRadar's `analyzeDuprates()` output exactly:
     /// - RPK = counts * (1000 / geneLength)
-    /// - RPKM = RPK * (1_000_000 / N)  where N = total mapped reads
+    /// - RPKM = RPK * (1_000_000 / N)  where N = total mapped fragments
     /// - dupRate = (allCounts - filteredCounts) / allCounts
     pub fn build(genes: &IndexMap<String, Gene>, counts: &CountResult) -> Self {
         // Compute N exactly as R dupRadar does:
         //   N <- sum(x$stat[, 2]) - x$stat[x$stat$Status == "Unassigned_Unmapped", 2]
-        // This equals the total number of fragments across all featureCounts stat
-        // categories minus unmapped fragments. Both multi-mapper and unique-mapper
-        // runs produce the same N because multi-mapped reads are always included
-        // in the sum (as either Assigned or Unassigned_MultiMapping).
-        let n_from_fc_stats = (counts.fc_assigned
-            + counts.fc_ambiguous
-            + counts.fc_no_features
-            + counts.fc_multimapping
-            + counts.fc_singleton) as f64;
-        let n_multi_all = n_from_fc_stats;
-        let n_unique_all = n_from_fc_stats;
+        // R dupRadar calls featureCounts with isPairedEnd=TRUE for paired-end data,
+        // so the stat summary counts *fragments* (read pairs), not individual reads.
+        // stat_total_fragments already tracks the correct fragment count (one per
+        // read pair for PE, one per read for SE), and excludes unmapped reads since
+        // RustQC only processes mapped BAM records.
+        let n_fragments = counts.stat_total_fragments as f64;
+        let n_multi_all = n_fragments;
+        let n_unique_all = n_fragments;
 
         let mut rows = Vec::with_capacity(genes.len());
         let default_counts = GeneCounts::default();
