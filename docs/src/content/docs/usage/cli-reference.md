@@ -27,8 +27,8 @@ rustqc rna <INPUT>... (--gtf <GTF> [--bed <BED>] | --bed <BED>) [OPTIONS]
 
 One or more paths to **coordinate-sorted**, duplicate-marked alignment files.
 Accepted formats are **SAM**, **BAM**, and **CRAM**. A BAM/CRAM index
-(`.bai` / `.csi`) is required for multi-threaded processing; without one,
-RustQC falls back to a single counting thread.
+(`.bai` / `.csi`) enables multi-threaded processing; without one, RustQC
+falls back to a single counting thread.
 
 Multiple files can be passed and will be processed in parallel, with each file
 producing its own set of output files. Threads are divided evenly among
