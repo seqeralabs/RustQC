@@ -191,6 +191,14 @@ pub struct RnaArgs {
     pub inner_distance_step: i64,
 
     // --- preseq lc_extrap ---
+    /// Skip the TIN (Transcript Integrity Number) analysis
+    #[arg(long, default_value_t = false)]
+    pub skip_tin: bool,
+
+    /// Skip the read duplication analysis
+    #[arg(long, default_value_t = false)]
+    pub skip_read_duplication: bool,
+
     /// Skip the preseq library complexity extrapolation analysis
     #[arg(long, default_value_t = false)]
     pub skip_preseq: bool,

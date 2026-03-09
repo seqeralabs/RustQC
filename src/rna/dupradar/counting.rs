@@ -1082,6 +1082,7 @@ pub fn count_reads(
     chrom_prefix: Option<&str>,
     reference: Option<&str>,
     skip_dup_check: bool,
+    biotype_attribute: &str,
     rseqc_config: Option<&RseqcConfig>,
     rseqc_annotations: Option<&RseqcAnnotations>,
     qualimap_index: Option<&crate::rna::qualimap::QualimapIndex>,
@@ -1142,21 +1143,17 @@ pub fn count_reads(
     }
 
     // Build gene_idx → biotype_idx lookup for biotype-level featureCounts counting.
-    // When featureCounts runs with `-g gene_biotype`, exons are grouped by their
-    // biotype into mega-features. Reads overlapping two genes of the SAME biotype
-    // are "Assigned" (not ambiguous), because they map to one biotype meta-feature.
-    // We build a compact lookup table from gene_idx to biotype_idx so the hot path
-    // can classify reads at the biotype level without string operations.
+    // When featureCounts runs with `-g <biotype_attribute>`, exons are grouped by
+    // their biotype into mega-features. Reads overlapping two genes of the SAME
+    // biotype are "Assigned" (not ambiguous), because they map to one biotype
+    // meta-feature. We build a compact lookup table from gene_idx to biotype_idx
+    // so the hot path can classify reads at the biotype level without string ops.
     let mut biotype_names: Vec<String> = Vec::new();
     let mut biotype_name_to_idx: HashMap<String, u16> = HashMap::new();
     let gene_to_biotype: Vec<u16> = genes
         .values()
         .map(|gene| {
-            if let Some(bt) = gene
-                .attributes
-                .get("gene_biotype")
-                .or_else(|| gene.attributes.get("gene_type"))
-            {
+            if let Some(bt) = gene.attributes.get(biotype_attribute) {
                 let next_idx = biotype_names.len() as u16;
                 *biotype_name_to_idx.entry(bt.clone()).or_insert_with(|| {
                     biotype_names.push(bt.clone());

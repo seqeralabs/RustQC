@@ -166,6 +166,11 @@ These flags control parameters for specific RSeQC-equivalent analyses. Each
 tool runs by default as part of `rustqc rna` and can be disabled via the
 [configuration file](/usage/configuration/).
 
+| Option                    | Default | Description                                         |
+| ------------------------- | ------- | --------------------------------------------------- |
+| `--skip-tin`              | `false` | Skip the TIN (Transcript Integrity Number) analysis |
+| `--skip-read-duplication` | `false` | Skip the read duplication analysis                  |
+
 #### infer_experiment
 
 | Option                               | Default  | Description                       |

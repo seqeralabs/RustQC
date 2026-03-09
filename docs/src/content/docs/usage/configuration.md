@@ -277,6 +277,8 @@ read_duplication:
 
 No additional parameters. This tool does not require annotation.
 
+> **CLI shortcut:** Use `--skip-read-duplication` to disable without a config file.
+
 ### read_distribution
 
 ```yaml
@@ -338,6 +340,8 @@ tin:
 
 Requires annotation (`--gtf` or `--bed`). The TIN (Transcript Integrity Number)
 measures transcript integrity via Shannon entropy of read coverage uniformity.
+
+> **CLI shortcut:** Use `--skip-tin` to disable without a config file.
 
 ## qualimap
 

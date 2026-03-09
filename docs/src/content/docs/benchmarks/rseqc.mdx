@@ -93,17 +93,6 @@ RSeQC and RustQC on both datasets.
 | Non-splice / Splice | 27,689,719 / 11,368,251 | 27,689,719 / 11,368,251 |
 | Properly paired     |              39,030,552 |              39,030,552 |
 
-### MultiQC view (large dataset)
-
-The MultiQC plot below combines both upstream RSeQC and RustQC bam_stat output,
-confirming identical values side-by-side:
-
-<img
-  src={`${base}benchmarks/large/multiqc/rseqc_bam_stat.png`}
-  alt="MultiQC bam_stat comparison"
-  style="width: 100%; border-radius: 8px; margin: 1rem 0;"
-/>
-
 ## infer_experiment
 
 Infers the strandedness of an RNA-Seq experiment by sampling reads and comparing
@@ -116,12 +105,6 @@ their strand to annotated gene models.
 | Failed to determine                  | 0.0775 | 0.0775 |
 | Fraction sense (1++,1--,2+-,2-+)     | 0.0051 | 0.0051 |
 | Fraction antisense (1+-,1-+,2++,2--) | 0.9174 | 0.9174 |
-
-<img
-  src={`${base}benchmarks/small/multiqc/rseqc_infer_experiment_plot.png`}
-  alt="MultiQC infer_experiment small dataset"
-  style="width: 100%; border-radius: 8px; margin: 1rem 0;"
-/>
 
 ### Large dataset — Minor difference (sampling)
 
@@ -143,12 +126,6 @@ Both tools correctly identify the library as **strongly reverse-stranded**
 `infer_experiment.py` is run with `-s 2000000000` (processing all reads), the
 results are identical.
 
-<img
-  src={`${base}benchmarks/large/multiqc/rseqc_infer_experiment_plot.png`}
-  alt="MultiQC infer_experiment large dataset"
-  style="width: 100%; border-radius: 8px; margin: 1rem 0;"
-/>
-
 ## read_distribution
 
 Calculates how mapped reads are distributed over genomic features
@@ -166,29 +143,6 @@ Calculates how mapped reads are distributed over genomic features
 
 Total reads: 43,476 | Total tags: 68,660 | Total assigned: 68,134
 
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
-  <div>
-    <img
-      src={`${base}benchmarks/small/multiqc/rseqc_read_distribution_plot-cnt.png`}
-      alt="Read distribution counts (small)"
-      style="width: 100%; border-radius: 8px;"
-    />
-    <p style="text-align: center; font-size: 0.85em; margin-top: 0.3rem;">
-      Counts
-    </p>
-  </div>
-  <div>
-    <img
-      src={`${base}benchmarks/small/multiqc/rseqc_read_distribution_plot-pct.png`}
-      alt="Read distribution percentages (small)"
-      style="width: 100%; border-radius: 8px;"
-    />
-    <p style="text-align: center; font-size: 0.85em; margin-top: 0.3rem;">
-      Percentages
-    </p>
-  </div>
-</div>
-
 ### Large dataset
 
 | Feature      | Total tags | Tags/Kb |
@@ -199,29 +153,6 @@ Total reads: 43,476 | Total tags: 68,660 | Total assigned: 68,134
 | Introns      |  7,332,516 |    4.87 |
 
 Total reads: 41,094,945 | Total tags: 55,001,331 | Total assigned: 54,113,746
-
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
-  <div>
-    <img
-      src={`${base}benchmarks/large/multiqc/rseqc_read_distribution_plot-cnt.png`}
-      alt="Read distribution counts (large)"
-      style="width: 100%; border-radius: 8px;"
-    />
-    <p style="text-align: center; font-size: 0.85em; margin-top: 0.3rem;">
-      Counts
-    </p>
-  </div>
-  <div>
-    <img
-      src={`${base}benchmarks/large/multiqc/rseqc_read_distribution_plot-pct.png`}
-      alt="Read distribution percentages (large)"
-      style="width: 100%; border-radius: 8px;"
-    />
-    <p style="text-align: center; font-size: 0.85em; margin-top: 0.3rem;">
-      Percentages
-    </p>
-  </div>
-</div>
 
 ## inner_distance
 
@@ -236,45 +167,24 @@ The R plotting script (`inner_distance_plot.r`) matches upstream format exactly.
 
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
   <div>
-    <img
-      src={`${base}benchmarks/large/multiqc/rseqc_inner_distance_plot_Counts.png`}
-      alt="Inner distance counts (large)"
-      style="width: 100%; border-radius: 8px;"
-    />
-    <p style="text-align: center; font-size: 0.85em; margin-top: 0.3rem;">
-      Counts (MultiQC combined)
-    </p>
-  </div>
-  <div>
-    <img
-      src={`${base}benchmarks/large/multiqc/rseqc_inner_distance_plot_Percentages.png`}
-      alt="Inner distance percentages (large)"
-      style="width: 100%; border-radius: 8px;"
-    />
-    <p style="text-align: center; font-size: 0.85em; margin-top: 0.3rem;">
-      Percentages (MultiQC combined)
-    </p>
-  </div>
-</div>
-
-**Side-by-side: upstream RSeQC vs RustQC native plots (large dataset)**
-
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
-  <div>
     <strong>RSeQC</strong>
-    <img
-      src={`${base}benchmarks/large/rseqc/inner_distance/inner_distance.inner_distance_plot.png`}
-      alt="RSeQC inner distance plot"
-      style="width: 100%; border-radius: 8px;"
-    />
+    <div style="background: white; border-radius: 8px; padding: 0.25rem;">
+      <img
+        src={`${base}benchmarks/large/rseqc/inner_distance/inner_distance.inner_distance_plot.png`}
+        alt="RSeQC inner distance plot"
+        style="width: 100%; border-radius: 8px;"
+      />
+    </div>
   </div>
   <div>
     <strong>RustQC</strong>
-    <img
-      src={`${base}benchmarks/large/rseqc/inner_distance/GM12878_REP1.markdup.sorted.inner_distance_plot.png`}
-      alt="RustQC inner distance plot"
-      style="width: 100%; border-radius: 8px;"
-    />
+    <div style="background: white; border-radius: 8px; padding: 0.25rem;">
+      <img
+        src={`${base}benchmarks/large/rseqc/inner_distance/GM12878_REP1.markdup.sorted.inner_distance_plot.png`}
+        alt="RustQC inner distance plot"
+        style="width: 100%; border-radius: 8px;"
+      />
+    </div>
   </div>
 </div>
 
@@ -297,29 +207,6 @@ by comparing against annotated transcript models. **All values are identical** o
 | Known                |  2,982 (91.44%) |  2,982 (91.44%) |
 | Partial novel        |      88 (2.70%) |      88 (2.70%) |
 | Novel                |     191 (5.86%) |     191 (5.86%) |
-
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
-  <div>
-    <img
-      src={`${base}benchmarks/small/multiqc/rseqc_junction_annotation_junctions_plot_Events-cnt.png`}
-      alt="Junction annotation events counts (small)"
-      style="width: 100%; border-radius: 8px;"
-    />
-    <p style="text-align: center; font-size: 0.85em; margin-top: 0.3rem;">
-      Splice events — counts
-    </p>
-  </div>
-  <div>
-    <img
-      src={`${base}benchmarks/small/multiqc/rseqc_junction_annotation_junctions_plot_Events-pct.png`}
-      alt="Junction annotation events percentages (small)"
-      style="width: 100%; border-radius: 8px;"
-    />
-    <p style="text-align: center; font-size: 0.85em; margin-top: 0.3rem;">
-      Splice events — percentages
-    </p>
-  </div>
-</div>
 
 ### Large dataset
 
@@ -344,19 +231,23 @@ produced by RustQC are identical to upstream RSeQC output.
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
   <div>
     <strong>RSeQC</strong>
-    <img
-      src={`${base}benchmarks/large/rseqc/junction_annotation/junction_annotation.splice_events.png`}
-      alt="RSeQC splice events plot"
-      style="width: 100%; border-radius: 8px;"
-    />
+    <div style="background: white; border-radius: 8px; padding: 0.25rem;">
+      <img
+        src={`${base}benchmarks/large/rseqc/junction_annotation/junction_annotation.splice_events.png`}
+        alt="RSeQC splice events plot"
+        style="width: 100%; border-radius: 8px;"
+      />
+    </div>
   </div>
   <div>
     <strong>RustQC</strong>
-    <img
-      src={`${base}benchmarks/large/rseqc/junction_annotation/GM12878_REP1.markdup.sorted.splice_events.png`}
-      alt="RustQC splice events plot"
-      style="width: 100%; border-radius: 8px;"
-    />
+    <div style="background: white; border-radius: 8px; padding: 0.25rem;">
+      <img
+        src={`${base}benchmarks/large/rseqc/junction_annotation/GM12878_REP1.markdup.sorted.splice_events.png`}
+        alt="RustQC splice events plot"
+        style="width: 100%; border-radius: 8px;"
+      />
+    </div>
   </div>
 </div>
 
@@ -365,19 +256,23 @@ produced by RustQC are identical to upstream RSeQC output.
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
   <div>
     <strong>RSeQC</strong>
-    <img
-      src={`${base}benchmarks/large/rseqc/junction_annotation/junction_annotation.splice_junction.png`}
-      alt="RSeQC splice junction plot"
-      style="width: 100%; border-radius: 8px;"
-    />
+    <div style="background: white; border-radius: 8px; padding: 0.25rem;">
+      <img
+        src={`${base}benchmarks/large/rseqc/junction_annotation/junction_annotation.splice_junction.png`}
+        alt="RSeQC splice junction plot"
+        style="width: 100%; border-radius: 8px;"
+      />
+    </div>
   </div>
   <div>
     <strong>RustQC</strong>
-    <img
-      src={`${base}benchmarks/large/rseqc/junction_annotation/GM12878_REP1.markdup.sorted.splice_junction.png`}
-      alt="RustQC splice junction plot"
-      style="width: 100%; border-radius: 8px;"
-    />
+    <div style="background: white; border-radius: 8px; padding: 0.25rem;">
+      <img
+        src={`${base}benchmarks/large/rseqc/junction_annotation/GM12878_REP1.markdup.sorted.splice_junction.png`}
+        alt="RustQC splice junction plot"
+        style="width: 100%; border-radius: 8px;"
+      />
+    </div>
   </div>
 </div>
 
@@ -414,54 +309,23 @@ subsampling, which is expected behavior matching the upstream tool.
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
   <div>
     <strong>RSeQC</strong>
-    <img
-      src={`${base}benchmarks/large/rseqc/junction_saturation/junction_saturation.junctionSaturation_plot.png`}
-      alt="RSeQC junction saturation plot"
-      style="width: 100%; border-radius: 8px;"
-    />
+    <div style="background: white; border-radius: 8px; padding: 0.25rem;">
+      <img
+        src={`${base}benchmarks/large/rseqc/junction_saturation/junction_saturation.junctionSaturation_plot.png`}
+        alt="RSeQC junction saturation plot"
+        style="width: 100%; border-radius: 8px;"
+      />
+    </div>
   </div>
   <div>
     <strong>RustQC</strong>
-    <img
-      src={`${base}benchmarks/large/rseqc/junction_saturation/GM12878_REP1.markdup.sorted.junctionSaturation_plot.png`}
-      alt="RustQC junction saturation plot"
-      style="width: 100%; border-radius: 8px;"
-    />
-  </div>
-</div>
-
-### MultiQC junction saturation plots (large dataset)
-
-<div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin: 1rem 0;">
-  <div>
-    <img
-      src={`${base}benchmarks/large/multiqc/rseqc_junction_saturation_plot_All_Junctions.png`}
-      alt="Junction saturation all junctions"
-      style="width: 100%; border-radius: 8px;"
-    />
-    <p style="text-align: center; font-size: 0.85em; margin-top: 0.3rem;">
-      All junctions
-    </p>
-  </div>
-  <div>
-    <img
-      src={`${base}benchmarks/large/multiqc/rseqc_junction_saturation_plot_Known_Junctions.png`}
-      alt="Junction saturation known junctions"
-      style="width: 100%; border-radius: 8px;"
-    />
-    <p style="text-align: center; font-size: 0.85em; margin-top: 0.3rem;">
-      Known junctions
-    </p>
-  </div>
-  <div>
-    <img
-      src={`${base}benchmarks/large/multiqc/rseqc_junction_saturation_plot_Novel_Junctions.png`}
-      alt="Junction saturation novel junctions"
-      style="width: 100%; border-radius: 8px;"
-    />
-    <p style="text-align: center; font-size: 0.85em; margin-top: 0.3rem;">
-      Novel junctions
-    </p>
+    <div style="background: white; border-radius: 8px; padding: 0.25rem;">
+      <img
+        src={`${base}benchmarks/large/rseqc/junction_saturation/GM12878_REP1.markdup.sorted.junctionSaturation_plot.png`}
+        alt="RustQC junction saturation plot"
+        style="width: 100%; border-radius: 8px;"
+      />
+    </div>
   </div>
 </div>
 
@@ -491,24 +355,24 @@ Calculates read duplication rates at both the sequence and mapping position leve
 
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
   <div>
-    <img
-      src={`${base}benchmarks/large/multiqc/rseqc_read_dups_plot.png`}
-      alt="Read duplication MultiQC plot (large)"
-      style="width: 100%; border-radius: 8px;"
-    />
-    <p style="text-align: center; font-size: 0.85em; margin-top: 0.3rem;">
-      MultiQC combined view
-    </p>
+    <strong>RSeQC</strong>
+    <div style="background: white; border-radius: 8px; padding: 0.25rem;">
+      <img
+        src={`${base}benchmarks/large/rseqc/read_duplication/GM12878_REP1.DupRate_plot.png`}
+        alt="RSeQC read duplication plot"
+        style="width: 100%; border-radius: 8px;"
+      />
+    </div>
   </div>
   <div>
-    <img
-      src={`${base}benchmarks/large/rseqc/read_duplication/GM12878_REP1.markdup.sorted.DupRate_plot.png`}
-      alt="RustQC read duplication plot (large)"
-      style="width: 100%; border-radius: 8px;"
-    />
-    <p style="text-align: center; font-size: 0.85em; margin-top: 0.3rem;">
-      RustQC native plot
-    </p>
+    <strong>RustQC</strong>
+    <div style="background: white; border-radius: 8px; padding: 0.25rem;">
+      <img
+        src={`${base}benchmarks/large/rseqc/read_duplication/GM12878_REP1.markdup.sorted.DupRate_plot.png`}
+        alt="RustQC read duplication plot"
+        style="width: 100%; border-radius: 8px;"
+      />
+    </div>
   </div>
 </div>
 

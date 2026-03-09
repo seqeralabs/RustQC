@@ -76,32 +76,6 @@ the small and large datasets.
 The output format is fully compatible with MultiQC and other tools that parse
 samtools flagstat output.
 
-### MultiQC plots (large dataset)
-
-<figure style={{ margin: "1rem 0" }}>
-  <img
-    src={`${base}benchmarks/large/multiqc/samtools_alignment_plot-pct.png`}
-    alt="samtools alignment plot (percentage) — large dataset"
-    style={{ width: "100%" }}
-  />
-  <figcaption>
-    Alignment percentages from MultiQC, large dataset (GM12878). Upstream
-    samtools and RustQC produce identical output, shown as a single combined
-    report.
-  </figcaption>
-</figure>
-
-<figure style={{ margin: "1rem 0" }}>
-  <img
-    src={`${base}benchmarks/large/multiqc/samtools-flagstat-pct-table.png`}
-    alt="samtools flagstat percentage table — large dataset"
-    style={{ width: "100%" }}
-  />
-  <figcaption>
-    MultiQC flagstat summary table (percentages), large dataset.
-  </figcaption>
-</figure>
-
 ## idxstats
 
 **Result: Identical**
@@ -109,19 +83,6 @@ samtools flagstat output.
 Per-chromosome read counts match exactly across all reference sequences.
 Both files include the same reference names, lengths, mapped counts, and
 unmapped counts, plus the `*` row for unplaced reads.
-
-### MultiQC plots (large dataset)
-
-<figure style={{ margin: "1rem 0" }}>
-  <img
-    src={`${base}benchmarks/large/multiqc/samtools-idxstats-mapped-reads-plot_Raw_Counts-cnt.png`}
-    alt="samtools idxstats mapped reads — large dataset"
-    style={{ width: "100%" }}
-  />
-  <figcaption>
-    Per-chromosome mapped read counts from MultiQC, large dataset (GM12878).
-  </figcaption>
-</figure>
 
 ## stats
 
@@ -164,19 +125,6 @@ RustQC produces the full `samtools stats` output, including the SN section and a
 histogram sections (FFQ, LFQ, GCF, GCL, GCC, GCT, FBC, LBC, FTC, LTC, IS, RL,
 FRL, LRL, MAPQ, ID, IC, COV, CHK). The output format includes the `samtools stats`
 header comment required for MultiQC parsing.
-
-### MultiQC plots (large dataset)
-
-<figure style={{ margin: "1rem 0" }}>
-  <img
-    src={`${base}benchmarks/large/multiqc/samtools-stats-dp.png`}
-    alt="samtools stats coverage depth — large dataset"
-    style={{ width: "100%" }}
-  />
-  <figcaption>
-    Coverage depth distribution from MultiQC, large dataset (GM12878).
-  </figcaption>
-</figure>
 
 ## Benchmark conditions
 

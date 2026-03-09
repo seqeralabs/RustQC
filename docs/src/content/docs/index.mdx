@@ -31,22 +31,81 @@ export const base = import.meta.env.BASE_URL;
         identical results dramatically faster.
       </div>
     </div>
-    <div class="benchmark-chart">
-      <img
-        class="only-dark"
-        src={`${base}benchmarks/benchmark_dark.svg`}
-        alt="Benchmark: RustQC ~32m vs traditional tools ~9h 21m+ sequential (AWS)"
-      />
-      <img
-        class="only-light"
-        src={`${base}benchmarks/benchmark_light.svg`}
-        alt="Benchmark: RustQC ~32m vs traditional tools ~9h 21m+ sequential (AWS)"
-      />
-      <p>
-        <em>
-          Run time for a large paired-end RNA-seq BAM (~186M reads) on AWS.
-          RSeQC TIN process timed out after 6h.
-        </em>
+    <div
+      class="benchmark-chart"
+      role="img"
+      aria-label="Benchmark: RustQC ~32m vs traditional tools ~9h 21m+ sequential (AWS)"
+    >
+      <div class="bench-row">
+        <span class="bench-label">RustQC</span>
+        <div class="bench-track">
+          <div class="bench-bar rustqc-bar" style="--pct: 5.68%">
+            <div
+              class="bench-seg"
+              data-tip="Everything else — 6m 33s"
+              style="flex: 393"
+            ></div>
+            <div
+              class="bench-seg"
+              data-tip="read_duplication — 11m 45s"
+              style="flex: 705; opacity: 0.75"
+            ></div>
+            <div
+              class="bench-seg"
+              data-tip="TIN — 11m 04s"
+              style="flex: 664; opacity: 0.55"
+            ></div>
+          </div>
+          <span class="bench-time">31m 53s</span>
+        </div>
+      </div>
+      <div class="bench-row">
+        <span class="bench-label">Traditional tools</span>
+        <div class="bench-track">
+          <div class="bench-bar trad-bar" style="--pct: 100%">
+            <div
+              class="bench-seg seg-dupradar"
+              data-tip="dupRadar — 45m 30s"
+              style="flex: 2730"
+            ></div>
+            <div
+              class="bench-seg seg-qualimap"
+              data-tip="Qualimap — 37m 07s"
+              style="flex: 2227"
+            ></div>
+            <div
+              class="bench-seg seg-samtools"
+              data-tip="samtools (3 tools) — 15m 22s"
+              style="flex: 922"
+            ></div>
+            <div
+              class="bench-seg seg-preseq"
+              data-tip="preseq — 22m 39s"
+              style="flex: 1359"
+            ></div>
+            <div
+              class="bench-seg seg-fc"
+              data-tip="featureCounts — 3m 31s"
+              style="flex: 211"
+            ></div>
+            <div
+              class="bench-seg seg-rseqc"
+              data-tip="RSeQC (7 tools) — 1h 17m 01s"
+              style="flex: 5821"
+            ></div>
+            <div
+              class="bench-seg seg-tin"
+              data-tip="tin.py — aborted after 6h"
+              style="flex: 21750"
+            ></div>
+          </div>
+          <span class="bench-time">9h 21m+</span>
+        </div>
+      </div>
+      <div class="bench-tooltip" id="bench-tooltip"></div>
+      <p class="bench-caption">
+        Run time for a large paired-end RNA-seq BAM (~186M reads) on AWS. RSeQC
+        TIN process timed out after 6h.
       </p>
     </div>
     <div class="sl-flex actions not-content">
@@ -151,9 +210,90 @@ export const base = import.meta.env.BASE_URL;
   }
   .benchmark-chart {
     text-align: center;
+    position: relative;
+    max-width: 42rem;
+    margin-inline: auto;
+    padding-block: 0.75rem;
   }
-  .benchmark-chart p {
-    margin-top: -0.5rem;
+  .bench-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.6rem;
+  }
+  .bench-label {
+    flex: 0 0 9rem;
+    text-align: right;
+    font-weight: 700;
+    font-size: 1.1rem;
+    line-height: 1.2;
+    white-space: nowrap;
+    color: var(--sl-color-white);
+  }
+  .bench-track {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .bench-bar {
+    height: 2.8rem;
+    width: var(--pct);
+    display: flex;
+    border-radius: 5px;
+    overflow: hidden;
+    min-width: 2rem;
+  }
+  .bench-seg {
+    height: 100%;
+    margin: 0;
+    transition: opacity 0.15s, filter 0.15s;
+    cursor: default;
+    position: relative;
+    border-right: 1px solid rgba(0,0,0,0.15);
+  }
+  .bench-seg:last-child {
+    border-right: none;
+  }
+  .bench-seg:hover {
+    filter: brightness(1.25);
+    z-index: 1;
+  }
+  .rustqc-bar .bench-seg {
+    background: var(--sl-color-accent);
+  }
+  .seg-dupradar  { background: #e05252; }
+  .seg-qualimap  { background: #8b5cf6; }
+  .seg-samtools  { background: #22c55e; }
+  .seg-preseq    { background: #f59e0b; }
+  .seg-fc        { background: #f97316; }
+  .seg-rseqc     { background: #3b82f6; }
+  .seg-tin       { background: #3b82f6; opacity: 0.7; }
+  .bench-time {
+    font-weight: 700;
+    font-size: 1.25rem;
+    white-space: nowrap;
+    color: var(--sl-color-white);
+  }
+  .bench-tooltip {
+    display: none;
+    position: absolute;
+    background: var(--sl-color-gray-1);
+    color: var(--sl-color-gray-7);
+    padding: 0.35rem 0.65rem;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 10;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+  }
+  .bench-caption {
+    font-style: italic;
+    font-size: 0.78rem;
+    color: var(--sl-color-gray-3);
+    margin-top: 0.25rem;
   }
   @media (min-width: 53.125rem) {
     .hero {
@@ -205,10 +345,42 @@ export const base = import.meta.env.BASE_URL;
 RustQC is a reimplementation of the excellent [dupRadar](https://bioconductor.org/packages/dupRadar/)
 Bioconductor package by Sergi Sayols, uses the same counting approach as
 [Subread featureCounts](https://subread.sourceforge.net/) by Yang Liao and Wei Shi,
-includes reimplementations of 7 tools from [RSeQC](https://rseqc.sourceforge.net/)
+includes reimplementations of 8 tools from [RSeQC](https://rseqc.sourceforge.net/)
 by Liguo Wang and colleagues, library complexity estimation from
 [preseq](http://smithlabresearch.org/software/preseq/) by Timothy Daley and Andrew Smith,
 and produces outputs compatible with [samtools](http://www.htslib.org/) and
 [Qualimap](http://qualimap.conesalab.org/).
 
 **If you use RustQC, please cite the original tools** — see the [Credits & Citation](about/credits/) page.
+
+<script>
+  {`
+  function initBenchTooltips() {
+    const tip = document.getElementById('bench-tooltip');
+    if (!tip) return;
+    const chart = tip.closest('.benchmark-chart');
+    chart.querySelectorAll('.bench-seg[data-tip]').forEach(seg => {
+      seg.addEventListener('mouseenter', e => {
+        tip.textContent = e.target.dataset.tip;
+        tip.style.display = 'block';
+      });
+      seg.addEventListener('mousemove', e => {
+        const r = chart.getBoundingClientRect();
+        let x = e.clientX - r.left + 12;
+        let y = e.clientY - r.top - 32;
+        if (x + tip.offsetWidth > r.width) x = e.clientX - r.left - tip.offsetWidth - 8;
+        if (y < 0) y = e.clientY - r.top + 16;
+        tip.style.left = x + 'px';
+        tip.style.top = y + 'px';
+      });
+      seg.addEventListener('mouseleave', () => {
+        tip.style.display = 'none';
+      });
+    });
+  }
+  // Run immediately (elements exist by the time inline scripts execute)
+  initBenchTooltips();
+  // Also re-run on Astro view transitions
+  document.addEventListener('astro:page-load', initBenchTooltips);
+`}
+</script>

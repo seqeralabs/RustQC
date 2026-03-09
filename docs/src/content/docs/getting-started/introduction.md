@@ -17,14 +17,14 @@ RustQC is a fast quality control toolkit for sequencing data, written in Rust. I
 RNA-seq quality control typically involves running multiple tools written in R and Python, each with their own dependencies, interpreters, and runtime overhead. RustQC consolidates these into a single fast binary.
 
 <div class="benchmark-chart">
-  <img class="only-dark" src="/benchmarks/benchmark_dark.svg" alt="Benchmark: RustQC ~19m vs traditional tools ~2h 58m+ (sequential)" />
-  <img class="only-light" src="/benchmarks/benchmark_light.svg" alt="Benchmark: RustQC ~19m vs traditional tools ~2h 58m+ (sequential)" />
-  <p align="center"><em>Run time for a large paired-end RNA-seq BAM (~186M reads) on AWS (dupRadar + featureCounts + RSeQC + preseq + samtools + Qualimap)</em></p>
+  <img class="only-dark" src="/benchmarks/benchmark_dark.png" alt="Benchmark: RustQC ~32m vs traditional tools ~9h 21m+ (sequential)" />
+  <img class="only-light" src="/benchmarks/benchmark_light.png" alt="Benchmark: RustQC ~32m vs traditional tools ~9h 21m+ (sequential)" />
+  <p align="center"><em>Run time for a large paired-end RNA-seq BAM (~186M reads) on AWS. RSeQC TIN process timed out after 6h.</em></p>
 </div>
 
 Key advantages:
 
-- **Speed**: Processes ~186M reads in under 19 minutes vs. 2h 58m+ of sequential tool runtimes on AWS — and replaces tools like TIN that fail entirely on large datasets
+- **Speed**: Processes ~186M reads in ~32 minutes vs. 9h 21m+ of sequential tool runtimes on AWS — and replaces tools like TIN that fail entirely on large datasets
 - **Single binary**: No runtime dependencies -- no R, Python, or Bioconductor installation required
 - **Single-pass architecture**: The `rna` subcommand performs read counting and duplicate analysis simultaneously, eliminating the need for a separate featureCounts run
 - **Identical output**: Produces bit-for-bit identical results to the original tools (verified across 820,000+ values with zero mismatches for dupRadar)

@@ -195,7 +195,13 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         config::Config::default()
     };
 
-    // Apply CLI overrides to preseq config
+    // Apply CLI overrides to skip flags
+    if args.skip_tin {
+        config.tin.enabled = false;
+    }
+    if args.skip_read_duplication {
+        config.read_duplication.enabled = false;
+    }
     if args.skip_preseq {
         config.preseq.enabled = false;
     }
@@ -770,6 +776,7 @@ fn process_single_bam(
             params.chrom_prefix,
             params.reference,
             params.skip_dup_check,
+            params.biotype_attribute,
             if any_rseqc_enabled {
                 Some(&rseqc_config)
             } else {
