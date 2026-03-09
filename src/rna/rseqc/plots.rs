@@ -736,14 +736,14 @@ where
         .fold(0.0_f64, f64::max)
         * 1.05;
 
-    let y_max = if y_max <= 0.0 { 1.0 } else { y_max };
+    let y_max = if y_max <= 1.0 { 10.0 } else { y_max };
 
     // --- Build chart ---
     let mut chart = ChartBuilder::on(root)
         .margin(ps(10.0))
         .x_label_area_size(ps(35.0))
         .y_label_area_size(ps(55.0))
-        .build_cartesian_2d(1.0_f64..x_max, 0.0..y_max)?;
+        .build_cartesian_2d(1.0_f64..x_max, (1.0_f64..y_max).log_scale())?;
 
     chart
         .configure_mesh()
