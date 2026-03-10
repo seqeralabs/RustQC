@@ -5,7 +5,7 @@
 //! histogram and R plot output.
 
 use crate::gtf::Gene;
-use anyhow::{Context, Result};
+use anyhow::{ensure, Context, Result};
 use coitrees::{COITree, Interval, IntervalTree};
 use indexmap::IndexMap;
 use std::collections::{HashMap, HashSet};
@@ -244,7 +244,13 @@ pub fn build_histogram(
     lower_bound: i64,
     upper_bound: i64,
     step: i64,
-) -> Vec<(i64, i64, u64)> {
+) -> Result<Vec<(i64, i64, u64)>> {
+    ensure!(step > 0, "inner_distance step must be positive, got {step}");
+    ensure!(
+        lower_bound < upper_bound,
+        "inner_distance lower_bound ({lower_bound}) must be less than upper_bound ({upper_bound})"
+    );
+
     let mut sorted = distances.to_vec();
     sorted.sort_unstable();
 
@@ -265,7 +271,7 @@ pub fn build_histogram(
         bins.push((bin_start, bin_end, (cursor - start_cursor) as u64));
         bin_start = bin_end;
     }
-    bins
+    Ok(bins)
 }
 
 // ============================================================================
@@ -506,7 +512,7 @@ mod tests {
     #[test]
     fn test_histogram() {
         let distances = vec![-5, -3, 0, 2, 7, 12];
-        let hist = build_histogram(&distances, -10, 15, 5);
+        let hist = build_histogram(&distances, -10, 15, 5).unwrap();
         assert_eq!(hist.len(), 5);
         assert_eq!(hist[0], (-10, -5, 1)); // -5 (d > -10 && d <= -5)
         assert_eq!(hist[1], (-5, 0, 2)); // -3, 0 (d > -5 && d <= 0)

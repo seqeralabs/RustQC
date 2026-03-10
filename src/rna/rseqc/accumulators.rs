@@ -7,6 +7,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
+use anyhow::Result;
 use indexmap::IndexMap;
 use rust_htslib::bam;
 
@@ -471,11 +472,13 @@ impl BamStatAccum {
 
             let seq_len = record.seq_len();
             if seq_len > 0 {
-                // Raw BAM 4-bit encoded sequence: (seq_len+1)/2 bytes.
-                // In the BAM record data layout the sequence starts after
-                // the qname (l_qname bytes) AND the CIGAR (n_cigar * 4 bytes).
-                // This matches htslib's bam_get_seq() macro:
+                // SAFETY: We access the raw BAM record data to compute CRC32
+                // checksums matching samtools' approach. The pointer arithmetic
+                // replicates htslib's bam_get_seq() macro:
                 //   data + l_qname + (n_cigar << 2)
+                // The seq_len > 0 guard above ensures sequence data exists.
+                // The slice length seq_len.div_ceil(2) matches the BAM spec's
+                // 4-bit encoded sequence format: (seq_len+1)/2 bytes.
                 let seq_bytes = unsafe {
                     let inner = record.inner();
                     let data = inner.data;
@@ -2711,7 +2714,12 @@ impl JuncSatAccum {
 
 impl InnerDistAccum {
     /// Convert accumulated pair data into an `InnerDistanceResult`.
-    pub fn into_result(self, lower_bound: i64, upper_bound: i64, step: i64) -> InnerDistanceResult {
+    pub fn into_result(
+        self,
+        lower_bound: i64,
+        upper_bound: i64,
+        step: i64,
+    ) -> Result<InnerDistanceResult> {
         let pairs: Vec<PairRecord> = self
             .pairs
             .into_iter()
@@ -2721,11 +2729,11 @@ impl InnerDistAccum {
                 classification: p.classification,
             })
             .collect();
-        let histogram = build_histogram(&self.distances, lower_bound, upper_bound, step);
-        InnerDistanceResult {
+        let histogram = build_histogram(&self.distances, lower_bound, upper_bound, step)?;
+        Ok(InnerDistanceResult {
             pairs,
             histogram,
             total_pairs: self.pair_num,
-        }
+        })
     }
 }

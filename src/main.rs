@@ -153,10 +153,13 @@ fn reconstruct_command_line(args: &cli::RnaArgs) -> String {
     parts.join(" ")
 }
 
-/// Simple shell-escaping: wrap in quotes if the string contains spaces.
+/// Shell-escaping: wrap in single quotes if the string contains shell metacharacters.
+///
+/// Single quotes prevent all shell interpretation. Any embedded single quotes
+/// are escaped using the `'\''` pattern (end quote, escaped quote, restart quote).
 fn shell_escape(s: &str) -> String {
-    if s.contains(' ') {
-        format!("\"{}\"", s)
+    if s.contains(|c: char| c.is_whitespace() || "\"'\\$`!#&|;(){}[]<>?*~".contains(c)) {
+        format!("'{}'", s.replace('\'', "'\\''"))
     } else {
         s.to_string()
     }
@@ -209,6 +212,39 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
     if let Some(val) = args.preseq_n_bootstraps {
         config.preseq.n_bootstraps = val;
     }
+
+    // Apply CLI overrides for RSeQC tool parameters
+    if let Some(val) = args.infer_experiment_sample_size {
+        config.infer_experiment.sample_size = Some(val);
+    }
+    if let Some(val) = args.min_intron {
+        config.junction_annotation.min_intron = Some(val);
+    }
+    if let Some(val) = args.junction_saturation_min_coverage {
+        config.junction_saturation.min_coverage = Some(val);
+    }
+    if let Some(val) = args.junction_saturation_percentile_floor {
+        config.junction_saturation.percentile_floor = Some(val);
+    }
+    if let Some(val) = args.junction_saturation_percentile_ceiling {
+        config.junction_saturation.percentile_ceiling = Some(val);
+    }
+    if let Some(val) = args.junction_saturation_percentile_step {
+        config.junction_saturation.percentile_step = Some(val);
+    }
+    if let Some(val) = args.inner_distance_sample_size {
+        config.inner_distance.sample_size = Some(val);
+    }
+    if let Some(val) = args.inner_distance_lower_bound {
+        config.inner_distance.lower_bound = Some(val);
+    }
+    if let Some(val) = args.inner_distance_upper_bound {
+        config.inner_distance.upper_bound = Some(val);
+    }
+    if let Some(val) = args.inner_distance_step {
+        config.inner_distance.step = Some(val);
+    }
+
     // Warn early if CRAM input is likely but no reference is provided
     if args.input.iter().any(|f| f.ends_with(".cram"))
         && args.reference.is_none()
@@ -464,16 +500,25 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         exon_bitset: exon_bitset.as_ref(),
         transcript_tree: transcript_tree.as_ref(),
         mapq_cut: args.mapq_cut,
-        infer_experiment_sample_size: args.infer_experiment_sample_size,
-        min_intron: args.min_intron,
-        junction_saturation_min_coverage: args.junction_saturation_min_coverage,
-        junction_saturation_percentile_floor: args.junction_saturation_percentile_floor,
-        junction_saturation_percentile_ceiling: args.junction_saturation_percentile_ceiling,
-        junction_saturation_percentile_step: args.junction_saturation_percentile_step,
-        inner_distance_sample_size: args.inner_distance_sample_size,
-        inner_distance_lower_bound: args.inner_distance_lower_bound,
-        inner_distance_upper_bound: args.inner_distance_upper_bound,
-        inner_distance_step: args.inner_distance_step,
+        infer_experiment_sample_size: config.infer_experiment.sample_size.unwrap_or(200_000),
+        min_intron: config.junction_annotation.min_intron.unwrap_or(50),
+        junction_saturation_min_coverage: config.junction_saturation.min_coverage.unwrap_or(1),
+        junction_saturation_percentile_floor: config
+            .junction_saturation
+            .percentile_floor
+            .unwrap_or(5),
+        junction_saturation_percentile_ceiling: config
+            .junction_saturation
+            .percentile_ceiling
+            .unwrap_or(100),
+        junction_saturation_percentile_step: config
+            .junction_saturation
+            .percentile_step
+            .unwrap_or(5),
+        inner_distance_sample_size: config.inner_distance.sample_size.unwrap_or(1_000_000),
+        inner_distance_lower_bound: config.inner_distance.lower_bound.unwrap_or(-250),
+        inner_distance_upper_bound: config.inner_distance.upper_bound.unwrap_or(250),
+        inner_distance_step: config.inner_distance.step.unwrap_or(5),
         tin_index: tin_index.as_ref(),
         tin_sample_size,
         tin_min_coverage: config.tin.min_coverage.unwrap_or(10),
@@ -1334,7 +1379,7 @@ fn write_rseqc_outputs(
             params.inner_distance_lower_bound,
             params.inner_distance_upper_bound,
             params.inner_distance_step,
-        );
+        )?;
 
         let detail_path = format!("{prefix}.inner_distance.txt");
         rna::rseqc::inner_distance::write_detail_file(&results, &detail_path)?;

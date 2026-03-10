@@ -121,56 +121,48 @@ pub struct RnaArgs {
     pub mapq_cut: u8,
 
     // --- infer_experiment ---
-    /// Maximum number of reads to sample for strandedness inference
-    #[arg(long = "infer-experiment-sample-size", default_value_t = 200_000)]
-    pub infer_experiment_sample_size: u64,
+    /// Maximum number of reads to sample for strandedness inference [default: 200000]
+    #[arg(long = "infer-experiment-sample-size")]
+    pub infer_experiment_sample_size: Option<u64>,
 
     // --- junction_annotation ---
-    /// Minimum intron size for junction annotation and saturation analysis
-    #[arg(long = "min-intron", default_value_t = 50)]
-    pub min_intron: u64,
+    /// Minimum intron size for junction annotation and saturation analysis [default: 50]
+    #[arg(long = "min-intron")]
+    pub min_intron: Option<u64>,
 
     // --- junction_saturation ---
-    /// Minimum read coverage to count a known junction (junction_saturation)
-    #[arg(long = "junction-saturation-min-coverage", default_value_t = 1)]
-    pub junction_saturation_min_coverage: u64,
+    /// Minimum read coverage to count a known junction (junction_saturation) [default: 1]
+    #[arg(long = "junction-saturation-min-coverage")]
+    pub junction_saturation_min_coverage: Option<u64>,
 
-    /// Sampling start percentage for junction saturation
-    #[arg(long = "junction-saturation-percentile-floor", default_value_t = 5)]
-    pub junction_saturation_percentile_floor: u64,
+    /// Sampling start percentage for junction saturation [default: 5]
+    #[arg(long = "junction-saturation-percentile-floor")]
+    pub junction_saturation_percentile_floor: Option<u64>,
 
-    /// Sampling end percentage for junction saturation
-    #[arg(long = "junction-saturation-percentile-ceiling", default_value_t = 100)]
-    pub junction_saturation_percentile_ceiling: u64,
+    /// Sampling end percentage for junction saturation [default: 100]
+    #[arg(long = "junction-saturation-percentile-ceiling")]
+    pub junction_saturation_percentile_ceiling: Option<u64>,
 
-    /// Sampling step percentage for junction saturation
-    #[arg(long = "junction-saturation-percentile-step", default_value_t = 5)]
-    pub junction_saturation_percentile_step: u64,
+    /// Sampling step percentage for junction saturation [default: 5]
+    #[arg(long = "junction-saturation-percentile-step")]
+    pub junction_saturation_percentile_step: Option<u64>,
 
     // --- inner_distance ---
-    /// Maximum number of read pairs to sample for inner distance
-    #[arg(long = "inner-distance-sample-size", default_value_t = 1_000_000)]
-    pub inner_distance_sample_size: u64,
+    /// Maximum number of read pairs to sample for inner distance [default: 1000000]
+    #[arg(long = "inner-distance-sample-size")]
+    pub inner_distance_sample_size: Option<u64>,
 
-    /// Lower bound of inner distance histogram
-    #[arg(long = "inner-distance-lower-bound", default_value_t = -250, allow_hyphen_values = true)]
-    pub inner_distance_lower_bound: i64,
+    /// Lower bound of inner distance histogram [default: -250]
+    #[arg(long = "inner-distance-lower-bound", allow_hyphen_values = true)]
+    pub inner_distance_lower_bound: Option<i64>,
 
-    /// Upper bound of inner distance histogram
-    #[arg(
-        long = "inner-distance-upper-bound",
-        default_value_t = 250,
-        allow_hyphen_values = true
-    )]
-    pub inner_distance_upper_bound: i64,
+    /// Upper bound of inner distance histogram [default: 250]
+    #[arg(long = "inner-distance-upper-bound", allow_hyphen_values = true)]
+    pub inner_distance_upper_bound: Option<i64>,
 
-    /// Step size (bin width) for inner distance histogram
-    #[arg(
-        long = "inner-distance-step",
-        default_value_t = 5,
-        allow_hyphen_values = true
-    )]
-    pub inner_distance_step: i64,
+    /// Step size (bin width) for inner distance histogram [default: 5]
+    #[arg(long = "inner-distance-step", allow_hyphen_values = true)]
+    pub inner_distance_step: Option<i64>,
 
     // --- preseq lc_extrap ---
     /// Skip the TIN (Transcript Integrity Number) analysis
@@ -221,9 +213,9 @@ mod tests {
                 assert_eq!(args.outdir, ".");
                 assert!(args.biotype_attribute.is_none());
                 assert_eq!(args.mapq_cut, 30);
-                assert_eq!(args.infer_experiment_sample_size, 200_000);
-                assert_eq!(args.min_intron, 50);
-                assert_eq!(args.inner_distance_step, 5);
+                assert_eq!(args.infer_experiment_sample_size, None);
+                assert_eq!(args.min_intron, None);
+                assert_eq!(args.inner_distance_step, None);
             }
             #[allow(unreachable_patterns)]
             _ => panic!("Expected Rna subcommand"),
@@ -317,12 +309,12 @@ mod tests {
         ]);
         match cli.command {
             Commands::Rna(args) => {
-                assert_eq!(args.infer_experiment_sample_size, 500_000);
-                assert_eq!(args.min_intron, 100);
-                assert_eq!(args.junction_saturation_min_coverage, 5);
-                assert_eq!(args.inner_distance_lower_bound, -500);
-                assert_eq!(args.inner_distance_upper_bound, 500);
-                assert_eq!(args.inner_distance_step, 10);
+                assert_eq!(args.infer_experiment_sample_size, Some(500_000));
+                assert_eq!(args.min_intron, Some(100));
+                assert_eq!(args.junction_saturation_min_coverage, Some(5));
+                assert_eq!(args.inner_distance_lower_bound, Some(-500));
+                assert_eq!(args.inner_distance_upper_bound, Some(500));
+                assert_eq!(args.inner_distance_step, Some(10));
             }
             #[allow(unreachable_patterns)]
             _ => panic!("Expected Rna subcommand"),
