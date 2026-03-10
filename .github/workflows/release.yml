@@ -139,7 +139,7 @@ jobs:
   # ------------------------------------------------------------------
   docker-build:
     name: Docker ${{ matrix.platform }}
-    if: always() && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main')
+    if: success() && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main')
     needs: create-release
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -201,7 +201,7 @@ jobs:
   # ------------------------------------------------------------------
   docker-merge:
     name: Docker merge
-    if: always() && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main')
+    if: success() && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main')
     needs: docker-build
     runs-on: ubuntu-latest
     steps:

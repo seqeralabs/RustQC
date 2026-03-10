@@ -9,6 +9,8 @@ license = "MIT"
 repository = "https://github.com/seqeralabs/RustQC"
 readme = "README.md"
 keywords = ["bioinformatics", "rna-seq", "duplication", "qc", "rseqc"]
+categories = ["command-line-utilities", "science"]
+homepage = "https://rustqc.netlify.app/"
 
 [[bin]]
 name = "rustqc"

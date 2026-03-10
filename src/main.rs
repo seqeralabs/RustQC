@@ -2,9 +2,11 @@
 //!
 //! A collection of Rust-based QC tools for bioinformatics.
 //! The `rna` subcommand runs all RNA-Seq QC analyses in a single pass:
-//! dupRadar duplication rate analysis, featureCounts-compatible output,
-//! and RSeQC-equivalent metrics (bam_stat, infer_experiment, read_duplication,
-//! read_distribution, junction_annotation, junction_saturation, inner_distance).
+//! dupRadar duplication rate analysis, featureCounts-compatible gene counting,
+//! 8 RSeQC-equivalent tools (bam_stat, infer_experiment, read_duplication,
+//! read_distribution, junction_annotation, junction_saturation, inner_distance, TIN),
+//! preseq library complexity extrapolation, samtools-compatible outputs
+//! (flagstat, idxstats, stats), and Qualimap gene body coverage profiling.
 //! Individual tools can be disabled via the YAML config file.
 
 mod cli;
@@ -1295,11 +1297,10 @@ fn write_rseqc_outputs(
     if let Some(accum) = accums.read_dist {
         info!("[{}] Writing read_distribution results...", bam_stem);
         std::fs::create_dir_all(&rseqc_read_dist_dir)?;
-        let result = accum.into_result(
-            params
-                .rd_regions
-                .expect("rd_regions must be Some when read_distribution accumulator exists"),
-        );
+        let rd_regions = params
+            .rd_regions
+            .context("rd_regions must be Some when read_distribution accumulator exists")?;
+        let result = accum.into_result(rd_regions);
         let output_path = rseqc_read_dist_dir.join(format!("{}.read_distribution.txt", bam_stem));
         rna::rseqc::read_distribution::write_read_distribution(&result, &output_path)?;
         info!(
@@ -1347,10 +1348,11 @@ fn write_rseqc_outputs(
             .join(bam_stem)
             .to_string_lossy()
             .to_string();
+        let known_junctions = params
+            .known_junctions
+            .context("known_junctions must be Some when junction_saturation accumulator exists")?;
         let results = accum.into_result(
-            params
-                .known_junctions
-                .expect("known_junctions must be Some when junction_saturation accumulator exists"),
+            known_junctions,
             params.junction_saturation_percentile_floor as u32,
             params.junction_saturation_percentile_ceiling as u32,
             params.junction_saturation_percentile_step as u32,
@@ -1422,7 +1424,7 @@ fn write_rseqc_outputs(
         let tin_index = params
             .tin_index
             .as_ref()
-            .expect("TIN index must exist when TIN accumulator is present");
+            .context("TIN index must exist when TIN accumulator is present")?;
         let results = accum.into_result(tin_index);
         info!(
             "[{}] Writing TIN results ({} transcripts)...",

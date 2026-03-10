@@ -181,8 +181,11 @@ fn compute_bias(entries: &[TranscriptCoverageEntry]) -> (f64, f64, f64) {
             continue;
         }
         let gene = entry.gene_idx;
-        let current_best = best_per_gene.get(&gene);
-        if current_best.is_none() || entry.mean_coverage > current_best.unwrap().mean_coverage {
+        let dominated = match best_per_gene.get(&gene) {
+            None => true,
+            Some(best) => entry.mean_coverage > best.mean_coverage,
+        };
+        if dominated {
             best_per_gene.insert(gene, entry);
         }
     }

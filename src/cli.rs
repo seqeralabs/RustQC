@@ -39,6 +39,10 @@ pub enum Commands {
     /// - junction_annotation: Splice junction classification
     /// - junction_saturation: Junction discovery saturation curves
     /// - inner_distance: Insert size estimation for paired-end data
+    /// - TIN: Transcript Integrity Number analysis
+    /// - preseq: Library complexity extrapolation (lc_extrap)
+    /// - Qualimap rnaseq: Gene body coverage and read origin profiling
+    /// - flagstat / idxstats / stats: samtools-compatible alignment summaries
     ///
     /// A GTF gene annotation file (--gtf) is required. Input alignment files
     /// must have duplicates marked (SAM flag 0x400) but NOT removed. Use tools
@@ -164,7 +168,7 @@ pub struct RnaArgs {
     #[arg(long = "inner-distance-step", allow_hyphen_values = true)]
     pub inner_distance_step: Option<i64>,
 
-    // --- preseq lc_extrap ---
+    // --- TIN / read_duplication / preseq ---
     /// Skip the TIN (Transcript Integrity Number) analysis
     #[arg(long, default_value_t = false)]
     pub skip_tin: bool,

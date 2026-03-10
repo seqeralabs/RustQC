@@ -840,11 +840,11 @@ fn process_chromosome_batch(
             // --- Qualimap per-read dispatch (before counting filters) ---
             // Qualimap accumulator handles its own filtering (unmapped, secondary,
             // QC-fail, supplementary, NH>1) and uses enclosure-based gene assignment.
-            if let Some(ref mut qm) = result.qualimap {
+            if let (Some(ref mut qm), Some(qm_index)) = (&mut result.qualimap, qualimap_index) {
                 let tid = record.tid();
                 if tid >= 0 && (tid as usize) < tid_to_gtf_chrom.len() {
                     let qm_chrom = &tid_to_gtf_chrom[tid as usize];
-                    qm.process_read(&record, qm_chrom, qualimap_index.unwrap());
+                    qm.process_read(&record, qm_chrom, qm_index);
                 }
             }
 

@@ -11,27 +11,35 @@ Pre-built binaries are available from the [GitHub Releases page](https://github.
 
 <Tabs>
   <TabItem label="macOS Apple Silicon" icon="apple">
-    ```bash curl -fsSL
-    https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-macos-aarch64.tar.gz
-    | tar xz chmod +x ./rustqc sudo mv ./rustqc /usr/local/bin/ rustqc --version
+    ```bash
+    curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-macos-aarch64.tar.gz | tar xz --strip-components=1
+    chmod +x ./rustqc
+    sudo mv ./rustqc /usr/local/bin/
+    rustqc --version
     ```
   </TabItem>
   <TabItem label="macOS Intel" icon="apple">
-    ```bash curl -fsSL
-    https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-macos-x86_64.tar.gz
-    | tar xz chmod +x ./rustqc sudo mv ./rustqc /usr/local/bin/ rustqc --version
+    ```bash
+    curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-macos-x86_64.tar.gz | tar xz --strip-components=1
+    chmod +x ./rustqc
+    sudo mv ./rustqc /usr/local/bin/
+    rustqc --version
     ```
   </TabItem>
   <TabItem label="Linux x86_64" icon="linux">
-    ```bash curl -fsSL
-    https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-linux-x86_64.tar.gz
-    | tar xz chmod +x ./rustqc sudo mv ./rustqc /usr/local/bin/ rustqc --version
+    ```bash
+    curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-linux-x86_64.tar.gz | tar xz --strip-components=1
+    chmod +x ./rustqc
+    sudo mv ./rustqc /usr/local/bin/
+    rustqc --version
     ```
   </TabItem>
   <TabItem label="Linux aarch64" icon="linux">
-    ```bash curl -fsSL
-    https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-linux-aarch64.tar.gz
-    | tar xz chmod +x ./rustqc sudo mv ./rustqc /usr/local/bin/ rustqc --version
+    ```bash
+    curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-linux-aarch64.tar.gz | tar xz --strip-components=1
+    chmod +x ./rustqc
+    sudo mv ./rustqc /usr/local/bin/
+    rustqc --version
     ```
   </TabItem>
 </Tabs>
@@ -41,9 +49,9 @@ Pre-built binaries are available from the [GitHub Releases page](https://github.
 Run RustQC without any local installation using Docker:
 
 ```bash
-# Run all RNA-seq QC (dupRadar + featureCounts + RSeQC) in a single pass
+# Run all RNA-seq QC analyses in a single pass
 docker run -v $(pwd):/data ghcr.io/seqeralabs/rustqc:latest \
-  rna /data/sample.bam --gtf /data/genes.gtf -p -o /data/output/
+  rustqc rna /data/sample.bam --gtf /data/genes.gtf -p -o /data/output/
 ```
 
 ## Build from source

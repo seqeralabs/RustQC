@@ -1,6 +1,6 @@
 # RustQC Changelog
 
-## [Version 0.1.0](https://github.com/seqeralabs/RustQC/releases/tag/v0.1.0) - 2026-02-13
+## [Version 0.1.0](https://github.com/seqeralabs/RustQC/releases/tag/v0.1.0)
 
 Initial release of RustQC — fast quality control tools for sequencing data, written in Rust.
 
@@ -20,7 +20,7 @@ A single `rustqc rna` command runs 15 QC analyses in one pass over the BAM file,
 - Single static binary with no runtime dependencies
 - SAM, BAM, and CRAM input support (auto-detected)
 - Multi-threaded alignment processing with htslib thread pool
-- Simultaneous `--gtf` and `--bed` annotation support (gzip-compressed files accepted)
+- GTF annotation support (gzip-compressed files accepted)
 - YAML configuration for output control, chromosome name mapping, and tool parameters
 - Multiple BAM file support via positional arguments
 - Docker container at `ghcr.io/seqeralabs/rustqc`

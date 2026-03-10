@@ -122,7 +122,7 @@ Reference outputs for validating RSeQC reimplementations are stored in
 [RSeQC 5.0.4](https://rseqc.sourceforge.net/) run via Docker
 (`--platform linux/amd64`).
 
-**Small BAM** — All 7 tools have reference output:
+**Small BAM** — All 8 tools have reference output:
 
 | Tool                  | Key metrics                                                |
 | --------------------- | ---------------------------------------------------------- |
@@ -134,7 +134,7 @@ Reference outputs for validating RSeQC reimplementations are stored in
 | `junction_saturation` | Saturation curve, 20 sampling points                       |
 | `inner_distance`      | 20,861 pairs (mean -38.85, median -72.5)                   |
 
-**Large BAM** — 6 of 7 tools have reference output (`read_duplication`
+**Large BAM** — 7 of 8 tools have reference output (`read_duplication`
 pending):
 
 | Tool                  | Key metrics                                                                     |
@@ -241,7 +241,7 @@ cargo build --release
 
 ### 5. RSeQC tools (RustQC reimplementations)
 
-All 7 RSeQC tools are integrated into `rustqc rna` and run automatically when
+All 8 RSeQC tools are integrated into `rustqc rna` and run automatically when
 `--gtf` is provided (the commands in step 4 already include all RSeQC analyses).
 All required data is derived from the GTF.
 

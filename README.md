@@ -56,15 +56,15 @@ All outputs are format- and numerically identical to the upstream tools, and com
 
 ```bash
 # Install (Linux x86_64 example -- see docs for all platforms)
-curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-linux-x86_64.tar.gz | tar xz
-sudo mv rustqc /usr/local/bin/
+curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-linux-x86_64.tar.gz | tar xz --strip-components=1
+sudo mv ./rustqc /usr/local/bin/
 
 # Run RNA-Seq QC
 rustqc rna sample.markdup.bam --gtf genes.gtf --paired --outdir results/
 
 # Or use Docker
 docker run --rm -v "$PWD":/data ghcr.io/seqeralabs/rustqc:latest \
-  rna /data/sample.markdup.bam --gtf /data/genes.gtf --outdir /data/results
+  rustqc rna /data/sample.markdup.bam --gtf /data/genes.gtf --outdir /data/results
 ```
 
 See the [documentation](https://rustqc.netlify.app/) for full usage details, configuration options, output file descriptions, and benchmark results.

@@ -38,7 +38,7 @@ sequence reads to genomic features.
 
 ## RSeQC
 
-RustQC reimplements seven quality control tools from the
+RustQC reimplements eight quality control tools from the
 [RSeQC](https://rseqc.sourceforge.net/) package, created by Liguo Wang, Shengqin
 Wang, and Wei Li. RSeQC is a widely used toolkit for evaluating RNA-seq data quality,
 covering alignment statistics, strandedness, read distribution, splice junctions,
