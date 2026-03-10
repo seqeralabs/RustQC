@@ -315,29 +315,7 @@ mod tests {
     use crate::rna::rseqc::common::ReferenceJunctions;
     use std::collections::{HashMap, HashSet};
 
-    /// Classify a junction as annotated, partial novel, or complete novel.
-    /// Kept in test module — production classification is in accumulators.rs.
-    fn classify_junction(
-        chrom: &str,
-        intron_start: u64,
-        intron_end: u64,
-        reference: &ReferenceJunctions,
-    ) -> JunctionClass {
-        let start_known = reference
-            .intron_starts
-            .get(chrom)
-            .is_some_and(|s| s.contains(&intron_start));
-        let end_known = reference
-            .intron_ends
-            .get(chrom)
-            .is_some_and(|s| s.contains(&intron_end));
-
-        match (start_known, end_known) {
-            (true, true) => JunctionClass::Annotated,
-            (false, false) => JunctionClass::CompleteNovel,
-            _ => JunctionClass::PartialNovel,
-        }
-    }
+    use crate::rna::rseqc::common::classify_junction;
 
     #[test]
     fn test_classify_junction_annotated() {

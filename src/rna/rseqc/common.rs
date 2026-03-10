@@ -69,6 +69,31 @@ pub struct ReferenceJunctions {
     pub intron_ends: HashMap<String, HashSet<u64>>,
 }
 
+/// Classify a junction as annotated, partial novel, or complete novel
+/// based on whether its start and end positions appear in the reference.
+pub fn classify_junction(
+    chrom: &str,
+    intron_start: u64,
+    intron_end: u64,
+    reference: &ReferenceJunctions,
+) -> super::junction_annotation::JunctionClass {
+    let start_known = reference
+        .intron_starts
+        .get(chrom)
+        .is_some_and(|s| s.contains(&intron_start));
+    let end_known = reference
+        .intron_ends
+        .get(chrom)
+        .is_some_and(|s| s.contains(&intron_end));
+
+    use super::junction_annotation::JunctionClass;
+    match (start_known, end_known) {
+        (true, true) => JunctionClass::Annotated,
+        (false, false) => JunctionClass::CompleteNovel,
+        _ => JunctionClass::PartialNovel,
+    }
+}
+
 /// Set of known junction keys in `"CHROM:start-end"` format.
 ///
 /// Used by `junction_saturation` for classifying junctions.
