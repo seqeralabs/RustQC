@@ -259,6 +259,19 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         );
     }
 
+    // Validate all input alignment files before expensive GTF parsing
+    for bam_path in &args.input {
+        let mut reader = rust_htslib::bam::Reader::from_path(bam_path)
+            .with_context(|| format!("Cannot open alignment file '{}'", bam_path))?;
+        if let Some(ref reference) = args.reference {
+            reader
+                .set_reference(reference)
+                .with_context(|| format!("Cannot set reference for CRAM file '{}'", bam_path))?;
+        }
+        let _header = reader.header().clone();
+        // Reader dropped — just validating the file is openable
+    }
+
     let start = Instant::now();
     let n_bams = args.input.len();
     info!(

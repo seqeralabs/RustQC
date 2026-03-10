@@ -97,11 +97,6 @@ impl TinResults {
         self.transcripts.len()
     }
 
-    /// Returns true if there are no results.
-    #[allow(dead_code)]
-    pub fn is_empty(&self) -> bool {
-        self.transcripts.is_empty()
-    }
 }
 
 // ===================================================================

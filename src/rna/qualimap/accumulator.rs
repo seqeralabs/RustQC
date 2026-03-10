@@ -564,7 +564,6 @@ impl QualimapAccum {
     /// PE mates that were never reconciled are treated as singletons and
     /// Qualimap skips proper-pair fragments where only one mate survived
     /// filters (numSingleReadOnly). We simply discard orphaned mates.
-    #[allow(dead_code)]
     pub fn flush_unpaired(&mut self, _index: &QualimapIndex) {
         // Qualimap behaviour: if a proper-pair read's mate was filtered out
         // (by NH>1, unmapped, etc.), the fragment is skipped entirely —
