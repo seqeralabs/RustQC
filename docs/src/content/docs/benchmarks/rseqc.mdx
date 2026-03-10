@@ -8,7 +8,7 @@ export const base = import.meta.env.BASE_URL;
 RustQC reimplements 8 [RSeQC](https://rseqc.sourceforge.net/) tools — including TIN (Transcript
 Integrity Number) analysis — as built-in analyses that run in a single pass over the BAM file. This page
 compares the output of each tool against the originals, validated on two datasets from an AWS
-cloud run (nf-core AWS megatests, 2026-03-07).
+cloud run (nf-core AWS megatests, 2026-03-09).
 
 - **Small dataset**: `test.bam` — ~52K reads, chr6 subset
 - **Large dataset**: `GM12878_REP1.markdup.sorted.bam` — ~186M reads (GM12878 ENCODE RNA-Seq)
@@ -38,23 +38,22 @@ all tools in a single pass.
 
 ### Large dataset (~186M reads, GM12878)
 
-| Tool                        |     Runtime |         RSS |
-| --------------------------- | ----------: | ----------: |
-| bam_stat                    |      7m 08s |     50.4 MB |
-| infer_experiment            |        5.7s |     72.5 MB |
-| read_distribution           |      7m 35s |      1.1 GB |
-| inner_distance              |      1m 11s |    883.2 MB |
-| junction_annotation         |      6m 29s |    134.9 MB |
-| junction_saturation         |      8m 19s |    951.8 MB |
-| read_duplication            |     21m 53s |     10.2 GB |
-| tin.py                      |  **FAILED** |           — |
-| **RUSTQC_RNA (all-in-one)** | **18m 52s** | **13.8 GB** |
+| Tool                        |      Runtime |         RSS |
+| --------------------------- | -----------: | ----------: |
+| bam_stat                    |      12m 11s |     48.7 MB |
+| infer_experiment            |      11m 49s |     72.4 MB |
+| read_distribution           |      13m 12s |      1.1 GB |
+| inner_distance              |       1m 45s |    880.0 MB |
+| junction_annotation         |      10m 51s |    132.6 MB |
+| junction_saturation         |      14m 34s |    951.0 MB |
+| read_duplication            |       33m 1s |     10.2 GB |
+| tin.py                      |  **9h 45m**  |     71.6 MB |
+| **RUSTQC_RNA (all-in-one)** | **41m 24s**  | **11.4 GB** |
 
-The sum of upstream RSeQC tools on the large dataset (excluding the failed TIN) is approximately
-**53 minutes**. RustQC covers all of these plus samtools, Qualimap, dupRadar, featureCounts, and
-preseq in a single **18m 52s** pass — roughly a **3× speedup** over RSeQC alone, with full
-coverage of all tools. The upstream `tin.py` failed after 6+ hours and produced no output;
-RustQC completes TIN as part of its single pass.
+The sum of upstream RSeQC tools on the large dataset (including TIN) is approximately
+**10 hours 37 minutes**. RustQC covers all of these plus samtools, Qualimap, dupRadar, featureCounts, and
+preseq in a single **41m 24s** pass. The upstream `tin.py` alone takes **9h 45m**;
+RustQC completes TIN as part of its single pass in under 42 minutes total.
 
 ## bam_stat
 
@@ -389,20 +388,21 @@ transcript integrity via Shannon entropy of read coverage uniformity.
 | TIN median  | 55.5830 | 55.5830 |
 | TIN std dev | 22.5333 | 22.5333 |
 
-### Large dataset — RustQC only (upstream failed)
+### Large dataset — Both tools completed
 
-The upstream `tin.py` was terminated after **6+ hours** without producing output on
-the large dataset. RustQC completes TIN analysis as part of its single-pass
-BAM processing in under 19 minutes total (inclusive of all other analyses).
+The upstream `tin.py` took **9h 45m** to complete on the large dataset.
+RustQC completes TIN analysis as part of its single-pass BAM processing
+in under 42 minutes total (inclusive of all other analyses).
 
-| Metric      |         RSeQC | RustQC |
-| ----------- | ------------: | -----: |
-| TIN mean    | — (timed out) | 68.287 |
-| TIN median  | — (timed out) | 75.921 |
-| TIN std dev | — (timed out) | 23.959 |
+| Metric      |  RSeQC | RustQC |
+| ----------- | -----: | -----: |
+| TIN mean    | 68.287 | 68.287 |
+| TIN median  | 75.921 | 75.921 |
+| TIN std dev | 23.959 | 23.959 |
 
-This is a key RustQC advantage: TIN completes reliably on large production datasets
-where the Python tool is not practical.
+TIN values are **identical** between RSeQC and RustQC. The key advantage is speed:
+RustQC computes TIN in under 42 minutes (alongside all other analyses) vs nearly
+10 hours for `tin.py` alone.
 
 ### Output format
 
@@ -423,4 +423,4 @@ body coverage profiling, bias metrics, and Qualimap-compatible output comparison
 - **Annotation**: Ensembl GTF gene annotation (RustQC uses GTF directly; RSeQC uses BED12 derived from the same GTF)
 - **RSeQC version**: 5.0.4
 - **RustQC**: multi-threaded, `--gtf` mode for all tools
-- **Infrastructure**: AWS cloud (nf-core AWS megatests, 2026-03-07)
+- **Infrastructure**: AWS cloud (nf-core AWS megatests, 2026-03-09)

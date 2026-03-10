@@ -28,12 +28,12 @@ itself is fast (under 1 second) -- it is purely a function of the histogram data
 
 | Tool                            |     Runtime |     RSS |    CPU |
 | ------------------------------- | ----------: | ------: | -----: |
-| preseq lc_extrap (standalone)   |     23m 26s |  2.0 GB | 101.3% |
-| RustQC (all tools, single pass) | **18m 52s** | 13.8 GB | 224.8% |
+| preseq lc_extrap (standalone)   |      39m 9s |  2.0 GB | 102.2% |
+| RustQC (all tools, single pass) | **41m 24s** | 11.4 GB | 174.2% |
 
 RustQC produces preseq output at zero additional I/O cost — the fragment
 histogram is collected during the same BAM pass that produces all other outputs.
-The 18m 52s RustQC runtime covers **all** QC tools, not just preseq.
+The 41m 24s RustQC runtime covers **all** QC tools, not just preseq.
 
 ## Output comparison
 
@@ -154,4 +154,4 @@ full details.
 - **preseq version**: 3.2.0 (via Docker, matching nf-core/rnaseq)
 - **RustQC**: 10 threads, `--gtf` mode
 - **Platform**: AWS cloud (Linux x86_64)
-- **Date**: 2026-03-07
+- **Date**: 2026-03-09

@@ -10,7 +10,7 @@ compatible with the Subread featureCounts format. This page compares the
 counting performance and output accuracy against standalone Rsubread
 featureCounts.
 
-Benchmarks were run on AWS cloud infrastructure on 2026-03-07.
+Benchmarks were run on AWS cloud infrastructure on 2026-03-09.
 
 ## Performance
 
@@ -21,8 +21,8 @@ GRCh38 (~186M reads).
 
 | Tool                            | Wall time | CPU time | Peak RSS |
 | ------------------------------- | --------: | -------: | -------: |
-| Rsubread featureCounts          |    2m 50s |      56s | 214.1 MB |
-| RustQC (all tools, single pass) |   18m 52s |  18m 52s |  13.8 GB |
+| Rsubread featureCounts          |     3m 3s |     3m 3s | 210 MB  |
+| RustQC (all tools, single pass) |   41m 24s |  41m 24s |  11.4 GB |
 
 RustQC's single pass includes featureCounts-compatible counting alongside
 dupRadar duplication analysis, all 8 RSeQC tools (including TIN), preseq, samtools
