@@ -35,13 +35,6 @@ RustQC's Qualimap module computes:
 - **Alignment statistics** -- primary/secondary alignments, multi-mappers,
   proper pairs, and supplementary read counts
 
-:::note
-Qualimap analyses only run in GTF mode (`--gtf`). They are skipped when using
-`--bed` because the merged exon models, transcript structure, and biotype
-information needed for coverage profiling and read origin classification are
-only available from GTF annotations.
-:::
-
 :::tip[No name-sorted BAM required]
 The original Qualimap requires **name-sorted** BAM files as input, which
 typically means adding an extra `samtools sort -n` step to your pipeline.

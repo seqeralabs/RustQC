@@ -275,8 +275,6 @@ impl Default for BamStatConfig {
 
 /// Configuration for infer_experiment output.
 ///
-/// Requires a BED file to be provided via `--bed`.
-///
 /// Example:
 /// ```yaml
 /// infer_experiment:
@@ -325,8 +323,6 @@ impl Default for ReadDuplicationConfig {
 
 /// Configuration for read_distribution output.
 ///
-/// Requires a BED file to be provided via `--bed`.
-///
 /// Example:
 /// ```yaml
 /// read_distribution:
@@ -346,8 +342,6 @@ impl Default for ReadDistributionConfig {
 }
 
 /// Configuration for junction_annotation output.
-///
-/// Requires a BED file to be provided via `--bed`.
 ///
 /// Example:
 /// ```yaml
@@ -376,8 +370,6 @@ impl Default for JunctionAnnotationConfig {
 }
 
 /// Configuration for junction_saturation output.
-///
-/// Requires a BED file to be provided via `--bed`.
 ///
 /// Example:
 /// ```yaml
@@ -424,8 +416,6 @@ impl Default for JunctionSaturationConfig {
 }
 
 /// Configuration for inner_distance output.
-///
-/// Requires a BED file to be provided via `--bed`.
 ///
 /// Example:
 /// ```yaml

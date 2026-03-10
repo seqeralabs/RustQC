@@ -14,7 +14,6 @@ use indexmap::IndexMap;
 use log::debug;
 
 use crate::gtf::Gene;
-use crate::io as rustqc_io;
 
 // ===================================================================
 // Data structures
@@ -23,7 +22,7 @@ use crate::io as rustqc_io;
 /// A single transcript's sampling metadata.
 #[derive(Debug, Clone)]
 pub struct TranscriptSampling {
-    /// Gene identifier (gene_id from GTF or BED name).
+    /// Gene identifier (gene_id from GTF).
     pub gene_id: String,
     /// Chromosome name (original case, for output).
     pub chrom: String,
@@ -113,8 +112,7 @@ impl TinIndex {
     /// Build TIN index from GTF gene annotations.
     ///
     /// Emits every transcript from every gene, matching RSeQC's
-    /// per-transcript behaviour when given a BED file derived from
-    /// the same GTF.
+    /// per-transcript behaviour.
     pub fn from_genes(genes: &IndexMap<String, Gene>, sample_size: usize) -> Self {
         let mut index = TinIndex::default();
 
@@ -158,82 +156,6 @@ impl TinIndex {
 
         index.build();
         index
-    }
-
-    /// Build TIN index from BED12 file.
-    pub fn from_bed(bed_path: &str, sample_size: usize) -> Result<Self> {
-        let content = rustqc_io::read_to_string(bed_path)
-            .with_context(|| format!("Failed to read BED file: {bed_path}"))?;
-
-        let mut index = TinIndex::default();
-
-        for line in content.lines() {
-            if line.starts_with('#') || line.starts_with("track") || line.is_empty() {
-                continue;
-            }
-            let fields: Vec<&str> = line.split('\t').collect();
-            if fields.len() < 12 {
-                continue;
-            }
-
-            let chrom = fields[0].to_string();
-            let chrom_upper = chrom.to_uppercase();
-            let tx_start: u64 = fields[1].parse().unwrap_or(0);
-            let tx_end: u64 = fields[2].parse().unwrap_or(0);
-            let name = fields[3].to_string();
-            let block_count: usize = fields[9].parse().unwrap_or(0);
-
-            if block_count == 0 {
-                continue;
-            }
-
-            let block_sizes: Vec<u64> = fields[10]
-                .split(',')
-                .filter(|s| !s.is_empty())
-                .filter_map(|s| s.parse().ok())
-                .collect();
-            let block_starts: Vec<u64> = fields[11]
-                .split(',')
-                .filter(|s| !s.is_empty())
-                .filter_map(|s| s.parse().ok())
-                .collect();
-
-            if block_sizes.len() != block_count || block_starts.len() != block_count {
-                continue;
-            }
-
-            let exon_regions: Vec<(u64, u64)> = block_starts
-                .iter()
-                .zip(block_sizes.iter())
-                .map(|(&start, &size)| (tx_start + start, tx_start + start + size))
-                .collect();
-
-            let exon_length: u64 = exon_regions.iter().map(|(s, e)| e - s).sum();
-            if exon_length == 0 {
-                continue;
-            }
-
-            let (sampled, total_count) =
-                sample_exonic_positions(&exon_regions, sample_size, tx_start, tx_end);
-            if sampled.is_empty() {
-                continue;
-            }
-
-            index.add_transcript(TranscriptSampling {
-                gene_id: name,
-                chrom,
-                chrom_upper,
-                tx_start,
-                tx_end,
-                exon_regions,
-                exon_length,
-                sampled_positions: sampled,
-                total_position_count: total_count,
-            });
-        }
-
-        index.build();
-        Ok(index)
     }
 
     /// Add a transcript to the index (before calling `build()`).

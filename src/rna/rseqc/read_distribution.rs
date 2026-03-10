@@ -1,8 +1,8 @@
 //! Read distribution across genomic features.
 //!
 //! Reimplementation of RSeQC's `read_distribution.py`: classifies BAM read tags
-//! into CDS exons, 5'/3' UTRs, introns, and intergenic regions using a BED12
-//! gene model. Tags (CIGAR M-blocks) are classified by midpoint with priority
+//! into CDS exons, 5'/3' UTRs, introns, and intergenic regions using a GTF gene
+//! model. Tags (CIGAR M-blocks) are classified by midpoint with priority
 //! CDS > UTR > Intron > Intergenic.
 
 use std::collections::HashMap;
@@ -119,8 +119,8 @@ impl ChromIntervals {
 
 /// Per-chromosome region sets for all feature types.
 ///
-/// This is the core data structure for read distribution analysis. It can be
-/// built from either a BED12 file or from GTF gene annotations.
+/// This is the core data structure for read distribution analysis, built
+/// from GTF gene annotations.
 #[derive(Debug, Default)]
 pub struct RegionSets {
     pub cds_exon: HashMap<String, ChromIntervals>,
@@ -135,289 +135,10 @@ pub struct RegionSets {
     pub tes_down_10kb: HashMap<String, ChromIntervals>,
 }
 
-// ===================================================================
-// BED12 parsing and region extraction
-// ===================================================================
-
-/// A parsed BED12 transcript record.
-#[derive(Debug)]
-struct Bed12Record {
-    chrom: String,
-    tx_start: u64,
-    tx_end: u64,
-    strand: char,
-    cds_start: u64,
-    cds_end: u64,
-    exon_starts: Vec<u64>,
-    exon_ends: Vec<u64>,
-}
-
-impl Bed12Record {
-    /// Parse a BED12 line. Returns None if malformed.
-    fn parse(line: &str) -> Option<Self> {
-        let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() < 12 {
-            return None;
-        }
-        let chrom = fields[0].to_uppercase();
-        let tx_start: u64 = fields[1].parse().ok()?;
-        let tx_end: u64 = fields[2].parse().ok()?;
-        let strand = fields[5].chars().next().unwrap_or('+');
-        let cds_start: u64 = fields[6].parse().ok()?;
-        let cds_end: u64 = fields[7].parse().ok()?;
-        let block_count: usize = fields[9].parse().ok()?;
-        let block_sizes: Vec<u64> = fields[10]
-            .trim_end_matches(',')
-            .split(',')
-            .filter_map(|s| s.parse().ok())
-            .collect();
-        let block_starts: Vec<u64> = fields[11]
-            .trim_end_matches(',')
-            .split(',')
-            .filter_map(|s| s.parse().ok())
-            .collect();
-
-        if block_sizes.len() < block_count || block_starts.len() < block_count {
-            return None;
-        }
-
-        let exon_starts: Vec<u64> = block_starts
-            .iter()
-            .take(block_count)
-            .map(|s| tx_start + s)
-            .collect();
-        let exon_ends: Vec<u64> = exon_starts
-            .iter()
-            .zip(block_sizes.iter().take(block_count))
-            .map(|(s, sz)| s + sz)
-            .collect();
-
-        Some(Bed12Record {
-            chrom,
-            tx_start,
-            tx_end,
-            strand,
-            cds_start,
-            cds_end,
-            exon_starts,
-            exon_ends,
-        })
-    }
-
-    /// Get CDS exon intervals (intersection of exon blocks with [cds_start, cds_end)).
-    fn get_cds_exons(&self) -> Vec<(u64, u64)> {
-        let mut result = Vec::new();
-        for (start, end) in self.exon_starts.iter().zip(self.exon_ends.iter()) {
-            if *end <= self.cds_start || *start >= self.cds_end {
-                continue;
-            }
-            let s = (*start).max(self.cds_start);
-            let e = (*end).min(self.cds_end);
-            if s < e {
-                result.push((s, e));
-            }
-        }
-        result
-    }
-
-    /// Get 5' UTR intervals.
-    fn get_utr_5(&self) -> Vec<(u64, u64)> {
-        let mut result = Vec::new();
-        for (start, end) in self.exon_starts.iter().zip(self.exon_ends.iter()) {
-            match self.strand {
-                '+' => {
-                    if *start < self.cds_start {
-                        result.push((*start, (*end).min(self.cds_start)));
-                    }
-                }
-                '-' => {
-                    if *end > self.cds_end {
-                        result.push(((*start).max(self.cds_end), *end));
-                    }
-                }
-                _ => {}
-            }
-        }
-        result
-    }
-
-    /// Get 3' UTR intervals.
-    fn get_utr_3(&self) -> Vec<(u64, u64)> {
-        let mut result = Vec::new();
-        for (start, end) in self.exon_starts.iter().zip(self.exon_ends.iter()) {
-            match self.strand {
-                '+' => {
-                    if *end > self.cds_end {
-                        result.push(((*start).max(self.cds_end), *end));
-                    }
-                }
-                '-' => {
-                    if *start < self.cds_start {
-                        result.push((*start, (*end).min(self.cds_start)));
-                    }
-                }
-                _ => {}
-            }
-        }
-        result
-    }
-
-    /// Get intron intervals (gaps between exon blocks).
-    fn get_introns(&self) -> Vec<(u64, u64)> {
-        let mut result = Vec::new();
-        for i in 0..self.exon_starts.len().saturating_sub(1) {
-            let start = self.exon_ends[i];
-            let end = self.exon_starts[i + 1];
-            if start < end {
-                result.push((start, end));
-            }
-        }
-        result
-    }
-
-    /// Get TSS upstream region.
-    fn get_tss_upstream(&self, size: u64) -> (u64, u64) {
-        match self.strand {
-            '-' => (self.tx_end, self.tx_end + size),
-            _ => (self.tx_start.saturating_sub(size), self.tx_start),
-        }
-    }
-
-    /// Get TES downstream region.
-    fn get_tes_downstream(&self, size: u64) -> (u64, u64) {
-        match self.strand {
-            '-' => (self.tx_start.saturating_sub(size), self.tx_start),
-            _ => (self.tx_end, self.tx_end + size),
-        }
-    }
-}
-
-// ===================================================================
-// Build region sets from BED12 file
-// ===================================================================
-
-/// Build all region sets from a BED12 gene model file.
-pub fn build_regions_from_bed(bed_path: &str) -> Result<RegionSets> {
-    let content = crate::io::read_to_string(bed_path)
-        .with_context(|| format!("Failed to read BED file: {}", bed_path))?;
-
-    let mut regions = RegionSets::default();
-
-    for line in content.lines() {
-        if line.starts_with('#') || line.starts_with("track") || line.is_empty() {
-            continue;
-        }
-        let rec = match Bed12Record::parse(line) {
-            Some(r) => r,
-            None => continue,
-        };
-
-        // CDS exons
-        for (s, e) in rec.get_cds_exons() {
-            regions
-                .cds_exon
-                .entry(rec.chrom.clone())
-                .or_default()
-                .add(s, e);
-        }
-
-        // 5' UTR
-        for (s, e) in rec.get_utr_5() {
-            regions
-                .utr_5
-                .entry(rec.chrom.clone())
-                .or_default()
-                .add(s, e);
-        }
-
-        // 3' UTR
-        for (s, e) in rec.get_utr_3() {
-            regions
-                .utr_3
-                .entry(rec.chrom.clone())
-                .or_default()
-                .add(s, e);
-        }
-
-        // Introns
-        for (s, e) in rec.get_introns() {
-            regions
-                .intron
-                .entry(rec.chrom.clone())
-                .or_default()
-                .add(s, e);
-        }
-
-        // TSS upstream regions
-        for (size, map) in [
-            (1000u64, &mut regions.tss_up_1kb),
-            (5000, &mut regions.tss_up_5kb),
-            (10000, &mut regions.tss_up_10kb),
-        ] {
-            let (s, e) = rec.get_tss_upstream(size);
-            map.entry(rec.chrom.clone()).or_default().add(s, e);
-        }
-
-        // TES downstream regions
-        for (size, map) in [
-            (1000u64, &mut regions.tes_down_1kb),
-            (5000, &mut regions.tes_down_5kb),
-            (10000, &mut regions.tes_down_10kb),
-        ] {
-            let (s, e) = rec.get_tes_downstream(size);
-            map.entry(rec.chrom.clone()).or_default().add(s, e);
-        }
-    }
-
-    // Merge all regions
-    for map in [
-        &mut regions.cds_exon,
-        &mut regions.utr_5,
-        &mut regions.utr_3,
-        &mut regions.intron,
-        &mut regions.tss_up_1kb,
-        &mut regions.tss_up_5kb,
-        &mut regions.tss_up_10kb,
-        &mut regions.tes_down_1kb,
-        &mut regions.tes_down_5kb,
-        &mut regions.tes_down_10kb,
-    ] {
-        for intervals in map.values_mut() {
-            intervals.merge();
-        }
-    }
-
-    // Priority-based subtraction to make regions mutually exclusive
-    // utr_5 -= cds_exon
-    subtract_regions(&mut regions.utr_5, &regions.cds_exon);
-    // utr_3 -= cds_exon
-    subtract_regions(&mut regions.utr_3, &regions.cds_exon);
-    // intron -= cds_exon, utr_5, utr_3
-    subtract_regions(&mut regions.intron, &regions.cds_exon);
-    subtract_regions(&mut regions.intron, &regions.utr_5);
-    subtract_regions(&mut regions.intron, &regions.utr_3);
-    // intergenic -= cds_exon, utr_5, utr_3, intron
-    for intergenic in [
-        &mut regions.tss_up_1kb,
-        &mut regions.tss_up_5kb,
-        &mut regions.tss_up_10kb,
-        &mut regions.tes_down_1kb,
-        &mut regions.tes_down_5kb,
-        &mut regions.tes_down_10kb,
-    ] {
-        subtract_regions(intergenic, &regions.cds_exon);
-        subtract_regions(intergenic, &regions.utr_5);
-        subtract_regions(intergenic, &regions.utr_3);
-        subtract_regions(intergenic, &regions.intron);
-    }
-
-    Ok(regions)
-}
-
 /// Build all region sets from GTF gene annotations.
 ///
-/// Derives the same region types as [`build_regions_from_bed`] by using
-/// transcript-level exon and CDS information from the GTF:
+/// Derives region types from transcript-level exon and CDS information
+/// in the GTF:
 ///
 /// - **CDS exons**: intersection of transcript exon blocks with CDS range
 /// - **5'/3' UTR**: exon portions outside CDS range (strand-aware)
@@ -714,26 +435,6 @@ mod tests {
         assert!(!ci.contains(30)); // boundary: not contained
         assert!(ci.contains(31)); // inside [30, 40)
         assert!(!ci.contains(40)); // boundary: not contained
-    }
-
-    #[test]
-    fn test_bed12_cds_exons() {
-        // Simple: one exon, fully CDS
-        let line = "chr1\t100\t200\tgene1\t0\t+\t100\t200\t0\t1\t100,\t0,";
-        let rec = Bed12Record::parse(line).unwrap();
-        let cds = rec.get_cds_exons();
-        assert_eq!(cds, vec![(100, 200)]);
-    }
-
-    #[test]
-    fn test_bed12_utr() {
-        // Two exons: first is 5'UTR, second is CDS on + strand
-        let line = "chr1\t100\t300\tgene1\t0\t+\t200\t300\t0\t2\t50,50,\t0,150,";
-        let rec = Bed12Record::parse(line).unwrap();
-        let utr5 = rec.get_utr_5();
-        assert_eq!(utr5, vec![(100, 150)]); // first exon: 100-150, all before CDS at 200
-        let utr3 = rec.get_utr_3();
-        assert!(utr3.is_empty()); // no exon portions after CDS end (300)
     }
 
     #[test]

@@ -102,6 +102,5 @@ pub fn write_summary(result: &SaturationResult, path: &str) -> Result<()> {
 
 // ============================= Tests =============================
 
-// Note: CIGAR intron extraction tests and BED junction parsing tests have been
-// moved to the common module (rseqc::common::tests). Tests here focus on
-// saturation-specific logic.
+// Note: CIGAR intron extraction tests are in the common module
+// (rseqc::common::tests). Tests here focus on saturation-specific logic.

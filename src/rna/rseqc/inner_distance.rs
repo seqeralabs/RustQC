@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use coitrees::{COITree, Interval, IntervalTree};
 use indexmap::IndexMap;
 use std::collections::{HashMap, HashSet};
-use std::io::{BufRead, Write};
+use std::io::Write;
 
 // ============================================================================
 // Data Structures
@@ -65,61 +65,6 @@ impl ExonBitset {
         }
         bitset.merge();
         bitset
-    }
-
-    /// Build an `ExonBitset` from a BED12 file.
-    ///
-    /// Parses the BED12 file and extracts exon blocks from ALL transcripts
-    /// (including single-exon). This matches upstream RSeQC's `getExon()`
-    /// which does not filter by block count.
-    pub fn from_bed(bed_path: &str) -> Result<Self> {
-        let reader = crate::io::open_reader(bed_path)
-            .with_context(|| format!("Failed to open BED file: {}", bed_path))?;
-
-        let mut bitset = ExonBitset::default();
-
-        for line in reader.lines() {
-            let line = line?;
-            let line = line.trim();
-            if line.is_empty()
-                || line.starts_with('#')
-                || line.starts_with("track")
-                || line.starts_with("browser")
-            {
-                continue;
-            }
-
-            let fields: Vec<&str> = line.split('\t').collect();
-            if fields.len() < 12 {
-                continue;
-            }
-
-            let chrom = fields[0].to_uppercase();
-            let tx_start: u64 = fields[1].parse().context("Invalid txStart")?;
-            let block_count: usize = fields[9].parse().context("Invalid blockCount")?;
-
-            let block_sizes: Vec<u64> = fields[10]
-                .trim_end_matches(',')
-                .split(',')
-                .map(|s| s.parse::<u64>())
-                .collect::<std::result::Result<Vec<_>, _>>()
-                .context("Invalid blockSizes")?;
-            let block_starts: Vec<u64> = fields[11]
-                .trim_end_matches(',')
-                .split(',')
-                .map(|s| s.parse::<u64>())
-                .collect::<std::result::Result<Vec<_>, _>>()
-                .context("Invalid blockStarts")?;
-
-            for i in 0..block_count.min(block_sizes.len()).min(block_starts.len()) {
-                let exon_start = tx_start + block_starts[i];
-                let exon_end = exon_start + block_sizes[i];
-                bitset.add(&chrom, exon_start, exon_end);
-            }
-        }
-
-        bitset.merge();
-        Ok(bitset)
     }
 
     /// Add an exon interval for a chromosome.
@@ -236,58 +181,6 @@ impl TranscriptTree {
         tree
     }
 
-    /// Build a `TranscriptTree` from a BED12 file.
-    ///
-    /// Includes ALL transcripts (including single-exon) to match upstream
-    /// RSeQC's `getTranscriptRanges()`. Replicates the upstream bug where
-    /// the first transcript per chromosome is dropped.
-    pub fn from_bed(bed_path: &str) -> Result<Self> {
-        let reader = crate::io::open_reader(bed_path)
-            .with_context(|| format!("Failed to open BED file: {}", bed_path))?;
-
-        // Collect all transcripts first, then drop the first per chromosome
-        let mut per_chrom: HashMap<String, Vec<(u64, u64, String)>> = HashMap::new();
-
-        for line in reader.lines() {
-            let line = line?;
-            let line = line.trim();
-            if line.is_empty()
-                || line.starts_with('#')
-                || line.starts_with("track")
-                || line.starts_with("browser")
-            {
-                continue;
-            }
-
-            let fields: Vec<&str> = line.split('\t').collect();
-            if fields.len() < 12 {
-                continue;
-            }
-
-            let chrom = fields[0].to_uppercase();
-            let tx_start: u64 = fields[1].parse().context("Invalid txStart")?;
-            let tx_end: u64 = fields[2].parse().context("Invalid txEnd")?;
-            let name = fields[3];
-
-            let tx_name = format!("{}:{}:{}-{}", name, chrom, tx_start, tx_end);
-            per_chrom
-                .entry(chrom)
-                .or_default()
-                .push((tx_start, tx_end, tx_name));
-        }
-
-        let mut tree = TranscriptTree::default();
-        // Replicate the upstream bug: skip the first transcript per chromosome
-        for (chrom, transcripts) in &per_chrom {
-            for (start, end, name) in transcripts.iter().skip(1) {
-                tree.add(chrom, *start, *end, name);
-            }
-        }
-
-        tree.build();
-        Ok(tree)
-    }
-
     /// Add a transcript range to the pending list (must call `build()` after).
     pub fn add(&mut self, chrom: &str, start: u64, end: u64, name: &str) {
         self.pending
@@ -337,8 +230,6 @@ impl TranscriptTree {
         result
     }
 }
-
-// (BED12 parsing moved to ExonBitset::from_bed and TranscriptTree::from_bed)
 
 // ============================================================================
 // Histogram
@@ -626,7 +517,7 @@ mod tests {
 
     #[test]
     fn test_transcript_tree_first_per_chrom_dropped() {
-        // When using from_bed / from_genes, the first transcript per chromosome
+        // When using from_genes(), the first transcript per chromosome
         // is dropped to replicate the upstream RSeQC bug. But when using add()
         // directly, all transcripts are included.
         let mut tree = TranscriptTree::default();

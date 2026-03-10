@@ -82,7 +82,7 @@ src/
     rseqc/
       mod.rs                — Re-exports all RSeQC modules + common helpers
       accumulators.rs       — Shared RSeQC accumulator infrastructure (read dispatch)
-      common.rs             — Shared junction/intron extraction, from_genes/from_bed builders
+      common.rs             — Shared junction/intron extraction, from_genes builders
       bam_stat.rs           — bam_stat.py reimplementation
       flagstat.rs           — samtools flagstat-compatible output
       idxstats.rs           — samtools idxstats-compatible output
@@ -108,26 +108,16 @@ Inter-module access uses `crate::` paths (e.g., `use crate::rna::dupradar::count
 
 The CLI uses a single subcommand:
 
-- `rustqc rna <BAM>... (--gtf <GTF> | --bed <BED> | --gtf <GTF> --bed <BED>) [OPTIONS]`
+- `rustqc rna <BAM>... --gtf <GTF> [OPTIONS]`
 
-The `--gtf` and `--bed` flags can be used **individually or together**. At least one must be provided:
-
-- **`--gtf`** (recommended): Runs all analyses — dupRadar duplicate rate analysis,
-  featureCounts-compatible gene counting, all 8 RSeQC-equivalent tools
-  (bam_stat, infer_experiment, read_duplication, read_distribution,
-  junction_annotation, junction_saturation, inner_distance, TIN),
-  preseq library complexity extrapolation, samtools-compatible outputs
-  (flagstat, idxstats, stats), and gene body coverage profiling with
-  Qualimap-compatible output. The GTF parser extracts transcript-level
-  structure (exons + CDS features) to derive all data needed by every tool.
-- **`--bed`**: Runs the 8 RSeQC tools + preseq + samtools outputs
-  (flagstat, idxstats, stats). DupRadar,
-  featureCounts, and gene body coverage are skipped (they require gene-level
-  annotation with biotype/exon attributes that BED12 cannot provide).
-- **`--gtf` + `--bed` together**: When both are provided, the GTF is used for
-  dupRadar, featureCounts, and Qualimap (which require gene-level annotation),
-  while the BED file is used for read_distribution. All other RSeQC tools,
-  preseq, and samtools outputs also run.
+A GTF gene annotation file (`--gtf`) is required. This runs all analyses:
+dupRadar duplicate rate analysis, featureCounts-compatible gene counting,
+all 8 RSeQC-equivalent tools (bam_stat, infer_experiment, read_duplication,
+read_distribution, junction_annotation, junction_saturation, inner_distance,
+TIN), preseq library complexity extrapolation, samtools-compatible outputs
+(flagstat, idxstats, stats), and gene body coverage profiling with
+Qualimap-compatible output. The GTF parser extracts transcript-level
+structure (exons + CDS features) to derive all data needed by every tool.
 
 Individual tools can be disabled via the YAML config file (each has an `enabled`
 toggle). Tool-specific parameters (e.g., `--min-intron`, `--inner-distance-lower-bound`)
@@ -290,7 +280,6 @@ forwarded to `count_reads()` as the `skip_dup_check: bool` parameter).
   in the YAML config.
 - GENCODE GTFs use `gene_type` while Ensembl GTFs use `gene_biotype`. The tool
   auto-detects which is present and falls back gracefully with a warning if neither is found.
-- Both GTF and BED annotation files can be provided plain or gzip-compressed (`.gz`).
+- GTF annotation files can be provided plain or gzip-compressed (`.gz`).
   Detection is based on file magic bytes, not the file extension. The shared `io` module
-  (`src/io.rs`) provides `open_reader()` and `read_to_string()` helpers that transparently
-  handle both formats. All annotation file readers use these helpers.
+  (`src/io.rs`) provides an `open_reader()` helper that transparently handles both formats.
