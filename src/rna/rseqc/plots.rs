@@ -5,7 +5,7 @@
 //! tool plots as closely as possible.
 
 use anyhow::{Context, Result};
-use log::info;
+use log::debug;
 use plotters::prelude::*;
 use plotters_svg::SVGBackend;
 use std::path::Path;
@@ -68,7 +68,7 @@ pub fn inner_distance_plot(
             .context("Failed to write inner distance SVG")?;
     }
 
-    info!("Wrote inner distance plot: {}", output_path.display());
+    debug!("Wrote inner distance plot: {}", output_path.display());
     Ok(())
 }
 
@@ -299,7 +299,7 @@ pub fn junction_annotation_plot(results: &JunctionResults, prefix: &str) -> Resu
                 .context("Failed to write splice events SVG")?;
         }
 
-        info!("Wrote splice events plot: {}", events_png);
+        debug!("Wrote splice events plot: {}", events_png);
     }
 
     // --- Splice junctions pie chart ---
@@ -341,7 +341,7 @@ pub fn junction_annotation_plot(results: &JunctionResults, prefix: &str) -> Resu
                 .context("Failed to write splice junctions SVG")?;
         }
 
-        info!("Wrote splice junctions plot: {}", junctions_png);
+        debug!("Wrote splice junctions plot: {}", junctions_png);
     }
 
     Ok(())
@@ -471,7 +471,7 @@ pub fn junction_saturation_plot(result: &SaturationResult, output_path: &Path) -
             .context("Failed to write junction saturation SVG")?;
     }
 
-    info!("Wrote junction saturation plot: {}", output_path.display());
+    debug!("Wrote junction saturation plot: {}", output_path.display());
     Ok(())
 }
 
@@ -687,7 +687,7 @@ pub fn read_duplication_plot(result: &ReadDuplicationResult, output_path: &Path)
             .context("Failed to write read duplication SVG")?;
     }
 
-    info!("Wrote read duplication plot: {}", output_path.display());
+    debug!("Wrote read duplication plot: {}", output_path.display());
     Ok(())
 }
 

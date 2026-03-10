@@ -16,16 +16,16 @@ most aligners), eliminating that preprocessing step entirely.
 
 ### Large dataset (~186M reads, GM12878)
 
-| Tool                        | Runtime      | Peak RSS | Notes                                                          |
-| --------------------------- | ------------ | -------- | -------------------------------------------------------------- |
-| `samtools sort -n`          | 7m 57s       | 5.2 GB   | Name-sort required by Qualimap Java (not needed by RustQC)     |
-| Qualimap rnaseq (Java)      | 38m 31s      | 6.0 GB   | Separate BAM pass, single-threaded, requires name-sorted input |
-| **Total upstream pipeline** | **~46m 28s** |          | Name-sort + Qualimap combined                                  |
-| RustQC (all tools)          | 18m 52s      | 13.8 GB  | Single pass, all analyses combined, coordinate-sorted input    |
+| Tool                        | Runtime       | Peak RSS | Notes                                                          |
+| --------------------------- | ------------- | -------- | -------------------------------------------------------------- |
+| `samtools sort -n`          | 12m 16s       | 5.2 GB   | Name-sort required by Qualimap Java (not needed by RustQC)     |
+| Qualimap rnaseq (Java)      | 49m 58s       | 4.9 GB   | Separate BAM pass, single-threaded, requires name-sorted input |
+| **Total upstream pipeline** | **~1h 2m 14s** |          | Name-sort + Qualimap combined                                  |
+| RustQC (all tools)          | 41m 24s       | 11.4 GB  | Single pass, all analyses combined, coordinate-sorted input    |
 
-RustQC completes **all QC analyses** in under 19 minutes, compared to nearly
-47 minutes for the upstream Qualimap pipeline alone (name-sort + Qualimap).
-Note that RustQC's 18m 52s covers every QC tool (dupRadar, featureCounts,
+RustQC completes **all QC analyses** in under 42 minutes, compared to over
+1 hour for the upstream Qualimap pipeline alone (name-sort + Qualimap).
+Note that RustQC's 41m 24s covers every QC tool (dupRadar, featureCounts,
 RSeQC including TIN, preseq, samtools, and Qualimap), not just the Qualimap equivalent.
 
 ### Small dataset (~52K reads, chr6)
@@ -43,7 +43,7 @@ On the small dataset, RustQC uses only **182 MB** of memory vs Qualimap's
 RustQC produces output effectively identical to Qualimap Java across all key
 metrics. Both tools were run on the same BAM file with matching parameters
 (`--stranded 2` / `strand-specific-reverse`, same GENCODE GTF). Results below
-are from the AWS benchmark run (2026-03-07).
+are from the AWS benchmark run (2026-03-09).
 
 ### Small dataset (~52K reads, chr6)
 
@@ -330,9 +330,9 @@ junction motif counting all follow Qualimap's algorithms.
 
 - **Small dataset**: `test` sample, ~52K reads, chr6 only
 - **Large dataset**: GM12878 ENCODE RNA-Seq, paired-end, ~186M reads
-- **Run date**: 2026-03-07 (AWS cloud execution)
+- **Run date**: 2026-03-09 (AWS cloud execution)
 - **Annotation**: GENCODE v47 GTF (filtered to standard chromosomes, used for both tools)
 - **Strandedness**: strand-specific-reverse (`--stranded 2` / `-p strand-specific-reverse`)
 - **Qualimap version**: 2.3 (Java implementation, name-sorted BAM input)
-- **RustQC**: coordinate-sorted BAM input, 224.8% CPU utilization on large dataset
+- **RustQC**: coordinate-sorted BAM input, 174.2% CPU utilization on large dataset
 - **Infrastructure**: AWS cloud (via Nextflow/Seqera Platform)

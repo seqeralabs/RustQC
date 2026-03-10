@@ -363,7 +363,8 @@ impl TinAccum {
     /// Matches upstream RSeQC `tin.py` filtering:
     /// - `check_min_reads()`: skips qcfail, unmapped, secondary only
     /// - `genebody_coverage()` pileup: skips is_del, qcfail, secondary, unmapped
-    /// - Neither function filters by MAPQ, supplementary, or duplicate flags
+    ///   (pysam pileup default flag_filter also excludes BAM_FDUP)
+    /// - Neither function filters by MAPQ or supplementary flags
     pub fn process_read(&mut self, record: &bam::Record, chrom_upper: &str, index: &TinIndex) {
         let flags = record.flags();
 
@@ -429,6 +430,16 @@ impl TinAccum {
                     }
                 }
             }
+        }
+
+        // Skip duplicate reads for coverage counting.
+        // Upstream tin.py uses pysam pileup() whose default flag_filter
+        // (BAM_FUNMAP|BAM_FSECONDARY|BAM_FQCFAIL|BAM_FDUP = 0x704) excludes
+        // duplicate-flagged reads from coverage columns. However, the upstream
+        // check_min_reads() uses fetch() which does NOT filter duplicates, so
+        // duplicates are allowed above for the unique_starts tracking.
+        if flags & 0x400 != 0 {
+            return;
         }
 
         // For each aligned block, find sampled positions that fall within it.

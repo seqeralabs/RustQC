@@ -6,7 +6,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use log::info;
+use log::debug;
 
 use super::bam_stat::BamStatResult;
 
@@ -147,7 +147,7 @@ pub fn write_flagstat(result: &BamStatResult, output_path: &Path) -> Result<()> 
         )
     )?;
 
-    info!("Wrote flagstat output to {}", output_path.display());
+    debug!("Wrote flagstat output to {}", output_path.display());
     Ok(())
 }
 

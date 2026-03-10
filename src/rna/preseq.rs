@@ -5,7 +5,7 @@
 //! method, matching the behavior of preseq v3.
 
 use anyhow::{bail, Context, Result};
-use log::{debug, info};
+use log::debug;
 use rust_htslib::bam;
 use std::collections::HashMap;
 use std::io::Write;
@@ -886,7 +886,7 @@ pub fn estimate_complexity(
         );
     }
 
-    info!(
+    debug!(
         "Library complexity estimation: {} total reads, {} distinct",
         total_reads, n_distinct
     );
@@ -939,7 +939,7 @@ pub fn estimate_complexity(
     // Uses original n_distinct (initial_distinct) for extrapolation, but each
     // bootstrap's vals_sum for the fold calculation.
 
-    info!("Running {} bootstrap replicates...", n_bootstraps);
+    debug!("Running {} bootstrap replicates...", n_bootstraps);
 
     // Run bootstraps sequentially with a single MT19937 RNG seeded once,
     // matching upstream preseq's behavior exactly. Upstream uses C++ std::mt19937
@@ -1249,7 +1249,7 @@ pub fn write_output(
         }
     }
 
-    info!("Wrote preseq output to {}", output_path.display());
+    debug!("Wrote preseq output to {}", output_path.display());
     Ok(())
 }
 

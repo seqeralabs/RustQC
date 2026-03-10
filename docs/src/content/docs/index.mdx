@@ -34,29 +34,29 @@ export const base = import.meta.env.BASE_URL;
     <div
       class="benchmark-chart"
       role="img"
-      aria-label="Benchmark: RustQC ~32m vs traditional tools ~9h 21m+ sequential (AWS)"
+      aria-label="Benchmark: RustQC ~41m vs traditional tools ~15h 34m sequential (AWS)"
     >
       <div class="bench-row">
         <span class="bench-label">RustQC</span>
         <div class="bench-track">
-          <div class="bench-bar rustqc-bar" style="--pct: 5.68%">
+          <div class="bench-bar rustqc-bar" style="--pct: 4.43%">
             <div
               class="bench-seg"
-              data-tip="Everything else — 6m 33s"
-              style="flex: 393"
+              data-tip="Everything else — 9m 09s"
+              style="flex: 549"
             ></div>
             <div
               class="bench-seg"
-              data-tip="read_duplication — 11m 45s"
-              style="flex: 705; opacity: 0.75"
+              data-tip="read_duplication — 16m 39s"
+              style="flex: 999; opacity: 0.75"
             ></div>
             <div
               class="bench-seg"
-              data-tip="TIN — 11m 04s"
-              style="flex: 664; opacity: 0.55"
+              data-tip="TIN — 15m 37s"
+              style="flex: 937; opacity: 0.55"
             ></div>
           </div>
-          <span class="bench-time">31m 53s</span>
+          <span class="bench-time">41m 24s</span>
         </div>
       </div>
       <div class="bench-row">
@@ -65,47 +65,47 @@ export const base = import.meta.env.BASE_URL;
           <div class="bench-bar trad-bar" style="--pct: 100%">
             <div
               class="bench-seg seg-dupradar"
-              data-tip="dupRadar — 45m 30s"
-              style="flex: 2730"
+              data-tip="dupRadar — 2h 14m"
+              style="flex: 8064"
             ></div>
             <div
               class="bench-seg seg-qualimap"
-              data-tip="Qualimap — 37m 07s"
-              style="flex: 2227"
+              data-tip="Qualimap — 1h 02m"
+              style="flex: 3734"
             ></div>
             <div
               class="bench-seg seg-samtools"
-              data-tip="samtools (3 tools) — 15m 22s"
-              style="flex: 922"
+              data-tip="samtools (3 tools) — 13m 09s"
+              style="flex: 789"
             ></div>
             <div
               class="bench-seg seg-preseq"
-              data-tip="preseq — 22m 39s"
-              style="flex: 1359"
+              data-tip="preseq — 39m 09s"
+              style="flex: 2349"
             ></div>
             <div
               class="bench-seg seg-fc"
-              data-tip="featureCounts — 3m 31s"
-              style="flex: 211"
+              data-tip="featureCounts — 3m 03s"
+              style="flex: 183"
             ></div>
             <div
               class="bench-seg seg-rseqc"
-              data-tip="RSeQC (7 tools, excl. TIN) — 1h 17m 01s"
-              style="flex: 5821"
+              data-tip="RSeQC (7 tools, excl. TIN) — 1h 37m"
+              style="flex: 5843"
             ></div>
             <div
               class="bench-seg seg-tin"
-              data-tip="tin.py — aborted after 6h"
-              style="flex: 21750"
+              data-tip="tin.py — 9h 45m"
+              style="flex: 35086"
             ></div>
           </div>
-          <span class="bench-time">9h 21m+</span>
+          <span class="bench-time">15h 34m</span>
         </div>
       </div>
       <div class="bench-tooltip" id="bench-tooltip"></div>
       <p class="bench-caption">
         Run time for a large paired-end RNA-seq BAM (~186M reads) on AWS. RSeQC
-        TIN process timed out after 6h.
+        TIN alone takes 9h 45m; RustQC completes everything in 41 minutes.
       </p>
     </div>
     <div class="sl-flex actions not-content">
@@ -326,8 +326,8 @@ export const base = import.meta.env.BASE_URL;
     and samtools. Over 800,000 values compared with zero mismatches.
   </Card>
   <Card title="Dramatically Faster" icon="rocket">
-    Processes ~186M reads in ~32 minutes on AWS vs ~9h 21m+ of sequential tool
-    runtimes — and replaces tools like TIN that fail entirely on large datasets.
+    Processes ~186M reads in ~41 minutes on AWS vs ~15h 34m of sequential tool
+    runtimes — including TIN, which takes 9h 45m alone in the traditional workflow.
   </Card>
   <Card title="All-in-One" icon="puzzle">
     Combines dupRadar, featureCounts, biotype counting, 8 RSeQC metrics

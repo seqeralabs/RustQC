@@ -314,6 +314,8 @@ mod tests {
             stat_ambiguous: 5,
             stat_no_features: 10,
             stat_total_fragments: 200,
+            stat_total_mapped: 200,
+            stat_total_dup: 0,
             fc_assigned: 185,
             fc_ambiguous: 5,
             fc_no_features: 10,

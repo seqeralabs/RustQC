@@ -4,7 +4,7 @@
 //! a BAM/SAM/CRAM file in a single pass.
 
 use anyhow::{Context, Result};
-use log::info;
+use log::debug;
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
@@ -75,7 +75,7 @@ pub fn write_read_duplication(
             pos_path.display()
         )
     })?;
-    info!(
+    debug!(
         "Wrote position-based duplication rates to {}",
         pos_path.display()
     );
@@ -86,7 +86,7 @@ pub fn write_read_duplication(
             seq_path.display()
         )
     })?;
-    info!(
+    debug!(
         "Wrote sequence-based duplication rates to {}",
         seq_path.display()
     );
@@ -95,7 +95,7 @@ pub fn write_read_duplication(
     let r_path = outdir.join(format!("{}.DupRate_plot.r", stem));
     write_r_script(&result.pos_histogram, &result.seq_histogram, stem, &r_path)
         .with_context(|| format!("Failed to write duplication R script: {}", r_path.display()))?;
-    info!(
+    debug!(
         "Wrote duplication R plotting script to {}",
         r_path.display()
     );

@@ -157,10 +157,24 @@ pub struct RnaArgs {
     #[arg(long, default_value_t = false)]
     pub skip_dup_check: bool,
 
+    /// Suppress all output except warnings and errors
+    #[arg(short = 'q', long, conflicts_with = "verbose")]
+    pub quiet: bool,
+
+    /// Show additional detail (per-file writes, intermediate stats)
+    #[arg(short = 'v', long, conflicts_with = "quiet")]
+    pub verbose: bool,
+
+    /// Write a JSON summary to the given path (or to <outdir>/rustqc_summary.json if no path given).
+    ///
+    /// Use "-" to write JSON to stdout. Useful for automation and AI agents.
+    #[arg(short = 'j', long = "json-summary", value_name = "PATH", num_args = 0..=1, default_missing_value = "")]
+    pub json_summary: Option<String>,
+
     // === RSeQC tool-specific parameters ===
     /// MAPQ cutoff for read quality filtering (used by bam_stat, infer_experiment,
     /// read_duplication, junction_annotation, junction_saturation, inner_distance)
-    #[arg(short = 'q', long = "mapq", default_value_t = 30)]
+    #[arg(short = 'Q', long = "mapq", default_value_t = 30)]
     pub mapq_cut: u8,
 
     // --- infer_experiment ---
@@ -304,7 +318,7 @@ mod tests {
             "/tmp/out",
             "--reference",
             "genome.fa",
-            "-q",
+            "-Q",
             "20",
         ]);
         match cli.command {

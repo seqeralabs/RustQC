@@ -8,7 +8,7 @@ export const base = import.meta.env.BASE_URL;
 RustQC produces samtools-compatible output files (flagstat, idxstats, and full stats
 output including SN and all histogram sections) as part of its single-pass BAM
 processing. This page compares the output of each tool against the originals,
-validated on two datasets from an AWS cloud run (nf-core AWS megatests, 2026-03-07).
+validated on two datasets from an AWS cloud run (nf-core AWS megatests, 2026-03-09).
 
 ## Performance
 
@@ -30,10 +30,10 @@ samtools tool times are shown for reference.
 
 | Tool                        |     Runtime |         RSS |
 | --------------------------- | ----------: | ----------: |
-| samtools flagstat           |       2m 8s |      5.2 MB |
-| samtools idxstats           |         19s |      4.8 MB |
-| samtools stats              |      4m 44s |      8.4 MB |
-| **RUSTQC_RNA (all-in-one)** | **18m 52s** | **13.8 GB** |
+| samtools flagstat           |       3m 5s |      5.1 MB |
+| samtools idxstats           |         16s |      4.8 MB |
+| samtools stats              |      9m 48s |      8.2 MB |
+| **RUSTQC_RNA (all-in-one)** | **41m 24s** | **11.4 GB** |
 
 `RUSTQC_RNA` runs **all** QC tools in a single BAM pass, so its time is not
 directly comparable to any individual samtools command — it replaces the combined
@@ -132,4 +132,4 @@ header comment required for MultiQC parsing.
 - **Large dataset**: GM12878 ENCODE RNA-Seq, paired-end, ~186M reads
 - **samtools version**: 1.21 (via nf-core/rnaseq pipeline, Docker)
 - **RustQC**: single-pass `rustqc rna`, `--gtf` mode
-- **Platform**: AWS cloud (nf-core AWS megatests), 2026-03-07
+- **Platform**: AWS cloud (nf-core AWS megatests), 2026-03-09

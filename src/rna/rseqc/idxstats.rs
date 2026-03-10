@@ -6,7 +6,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use log::info;
+use log::debug;
 
 use super::bam_stat::BamStatResult;
 
@@ -49,7 +49,7 @@ pub fn write_idxstats(
     // Final line for unplaced unmapped reads
     writeln!(out, "*\t0\t0\t{}", result.unplaced_unmapped)?;
 
-    info!("Wrote idxstats output to {}", output_path.display());
+    debug!("Wrote idxstats output to {}", output_path.display());
     Ok(())
 }
 

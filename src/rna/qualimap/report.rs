@@ -10,7 +10,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 use crate::cli::Strandedness;
-use log::info;
+use log::debug;
 
 // ===================================================================
 // Embedded assets (base64-encoded)
@@ -172,7 +172,7 @@ pub fn write_html_report(data: &ReportData, output_dir: &Path) -> Result<()> {
     f.write_all(html.as_bytes())
         .with_context(|| format!("Failed to write {}", path.display()))?;
 
-    info!("Wrote HTML report: {}", path.display());
+    debug!("Wrote HTML report: {}", path.display());
     Ok(())
 }
 

@@ -7,7 +7,7 @@ use std::io::Write;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use log::info;
+use log::debug;
 
 use super::coverage::TranscriptCoverage;
 use super::index::QualimapIndex;
@@ -461,7 +461,7 @@ pub fn write_qualimap_results(
         &raw_data_dir.join("coverage_profile_along_genes_(low).txt"),
     )?;
 
-    info!("Wrote coverage profiles to {}", raw_data_dir.display());
+    debug!("Wrote coverage profiles to {}", raw_data_dir.display());
 
     // --- Write rnaseq_qc_results.txt ---
     let results_path = output_dir.join("rnaseq_qc_results.txt");
@@ -477,7 +477,7 @@ pub fn write_qualimap_results(
         &results_path,
     )?;
 
-    info!("Wrote {}", results_path.display());
+    debug!("Wrote {}", results_path.display());
 
     // --- Generate plots ---
     let images_dir = output_dir.join("images_qualimapReport");
@@ -534,7 +534,7 @@ pub fn write_qualimap_results(
         }
     }
 
-    info!("Wrote Qualimap plots to {}", images_dir.display());
+    debug!("Wrote Qualimap plots to {}", images_dir.display());
 
     // --- HTML report ---
     let report_data = super::report::ReportData {
