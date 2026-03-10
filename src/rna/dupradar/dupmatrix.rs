@@ -215,10 +215,12 @@ pub struct DupMatStats {
     /// Number of genes with at least one read
     pub n_regions_covered: usize,
     /// Fraction of genes covered (n_regions_covered / n_regions)
+    #[allow(dead_code)]
     pub f_regions_covered: f64,
     /// Number of genes with duplication rate > 0
     pub n_regions_duplication: usize,
     /// Fraction of genes with duplication (n_regions_duplication / n_regions)
+    #[allow(dead_code)]
     pub f_regions_duplication: f64,
     /// Fraction of covered genes that have duplication (computed for completeness, not yet output)
     #[allow(dead_code)]

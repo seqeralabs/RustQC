@@ -13,10 +13,12 @@ use crate::cli::Strandedness;
 use crate::gtf::Gene;
 use crate::rna::qualimap::QualimapAccum;
 use crate::rna::rseqc::accumulators::{RseqcAccumulators, RseqcAnnotations, RseqcConfig};
+use crate::ui::format_count;
 use anyhow::{Context, Result};
 use coitrees::{COITree, Interval, IntervalTree};
 use indexmap::IndexMap;
-use log::{debug, info, warn};
+use indicatif::ProgressBar;
+use log::{debug, warn};
 use rayon::prelude::*;
 use rust_htslib::bam::{self, FetchDefinition, Read as BamRead};
 use std::collections::HashMap;
@@ -320,6 +322,10 @@ pub struct CountResult {
     pub stat_no_features: u64,
     /// Total fragments (single-end reads or paired-end pairs)
     pub stat_total_fragments: u64,
+    /// Total mapped reads
+    pub stat_total_mapped: u64,
+    /// Total duplicate-flagged reads
+    pub stat_total_dup: u64,
 
     // --- featureCounts per-read statistics ---
     // featureCounts with `-p` (no `--countReadPairs`) counts each read
@@ -928,6 +934,7 @@ fn process_chromosome_batch(
     qualimap_index: Option<&crate::rna::qualimap::QualimapIndex>,
     gene_to_biotype: &[u16],
     num_biotypes: usize,
+    progress: Option<&ProgressBar>,
 ) -> Result<(ChromResult, Option<RseqcAccumulators>)> {
     let mut result = ChromResult::new(num_genes, num_biotypes);
     if qualimap_index.is_some() {
@@ -981,10 +988,12 @@ fn process_chromosome_batch(
             read_result.context("Error reading alignment record")?;
             result.total_reads += 1;
 
-            // Periodic progress logging (approximate, using atomic counter)
+            // Periodic progress update (approximate, using atomic counter)
             let prev = global_read_counter.fetch_add(1, Ordering::Relaxed);
-            if (prev + 1).is_multiple_of(5_000_000) {
-                debug!("Processed ~{} reads...", prev + 1);
+            if (prev + 1).is_multiple_of(500_000) {
+                if let Some(pb) = progress {
+                    pb.set_message(format!("{} reads processed", format_count(prev + 1)));
+                }
             }
 
             // --- RSeQC per-read dispatch (before counting filters) ---
@@ -1096,6 +1105,7 @@ pub fn count_reads(
     rseqc_config: Option<&RseqcConfig>,
     rseqc_annotations: Option<&RseqcAnnotations>,
     qualimap_index: Option<&crate::rna::qualimap::QualimapIndex>,
+    progress: Option<&ProgressBar>,
 ) -> Result<CountResult> {
     // Build gene ID interner for allocation-free lookups in the hot loop
     let interner = GeneIdInterner::from_genes(genes);
@@ -1116,7 +1126,7 @@ pub fn count_reads(
 
         // Check for evidence of duplicate-marking in @PG header lines
         if skip_dup_check {
-            info!("Skipping duplicate-marking verification (--skip-dup-check)");
+            log::info!("Skipping duplicate-marking verification (--skip-dup-check)");
         } else {
             verify_duplicates_marked(&header, bam_path)?;
         }
@@ -1209,7 +1219,7 @@ pub fn count_reads(
         // Global read counter for progress logging across threads
         let global_read_counter = AtomicU64::new(0);
 
-        info!(
+        debug!(
             "Processing {} chromosomes across {} threads",
             num_chroms, num_workers
         );
@@ -1249,6 +1259,7 @@ pub fn count_reads(
                         qualimap_index,
                         &gene_to_biotype,
                         num_biotypes,
+                        progress,
                     )
                 })
                 .collect()
@@ -1322,8 +1333,10 @@ pub fn count_reads(
             result.total_reads += 1;
 
             let prev = global_read_counter.fetch_add(1, Ordering::Relaxed);
-            if (prev + 1).is_multiple_of(5_000_000) {
-                debug!("Processed {} reads...", prev + 1);
+            if (prev + 1).is_multiple_of(500_000) {
+                if let Some(pb) = progress {
+                    pb.set_message(format!("{} reads processed", format_count(prev + 1)));
+                }
             }
 
             let flags = record.flags();
@@ -1450,7 +1463,7 @@ pub fn count_reads(
         }
 
         if unmapped_count > 0 {
-            info!(
+            debug!(
                 "Parallel unmapped sweep: processed {} unmapped reads",
                 unmapped_count
             );
@@ -1550,7 +1563,7 @@ pub fn count_reads(
         }
     }
 
-    info!(
+    debug!(
         "Read {} total reads, {} mapped, {} fragments, {} duplicates, {} multimappers",
         merged.total_reads,
         merged.total_mapped,
@@ -1558,7 +1571,7 @@ pub fn count_reads(
         merged.total_dup,
         merged.total_multi
     );
-    info!(
+    debug!(
         "Assignment stats: {} assigned, {} ambiguous, {} no_features (total fragments: {})",
         merged.stat_assigned,
         merged.stat_ambiguous,
@@ -1636,6 +1649,8 @@ pub fn count_reads(
         stat_ambiguous: merged.stat_ambiguous,
         stat_no_features: merged.stat_no_features,
         stat_total_fragments: merged.total_fragments,
+        stat_total_mapped: merged.total_mapped,
+        stat_total_dup: merged.total_dup,
         fc_assigned: merged.fc_assigned,
         fc_ambiguous: merged.fc_ambiguous,
         fc_no_features: merged.fc_no_features,

@@ -7,7 +7,7 @@
 use crate::gtf::Gene;
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
-use log::info;
+use log::debug;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
@@ -93,7 +93,7 @@ impl GeneModel {
             intervals.sort_by_key(|iv| iv.start);
         }
 
-        info!("Loaded {} transcript intervals from GTF annotation", count);
+        debug!("Loaded {} transcript intervals from GTF annotation", count);
         model
     }
 

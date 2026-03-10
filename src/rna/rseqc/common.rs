@@ -6,7 +6,7 @@
 use std::collections::{HashMap, HashSet};
 
 use indexmap::IndexMap;
-use log::info;
+use log::debug;
 
 use crate::gtf::Gene;
 
@@ -146,7 +146,7 @@ pub fn build_reference_junctions_from_genes(genes: &IndexMap<String, Gene>) -> R
         }
     }
 
-    info!(
+    debug!(
         "Extracted reference junctions from {} multi-exon transcripts (GTF)",
         transcript_count
     );
@@ -182,7 +182,7 @@ pub fn build_known_junctions_from_genes(genes: &IndexMap<String, Gene>) -> Known
         }
     }
 
-    info!(
+    debug!(
         "Extracted {} known splice junctions from GTF",
         result.junctions.len()
     );

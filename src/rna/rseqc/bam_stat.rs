@@ -5,7 +5,7 @@
 //! then converted to `BamStatResult` for output.
 
 use anyhow::{Context, Result};
-use log::info;
+use log::debug;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
@@ -316,7 +316,7 @@ pub fn write_bam_stat(result: &BamStatResult, output_path: &Path) -> Result<()> 
         result.proper_pair_diff_chrom
     )?;
 
-    info!("Wrote bam_stat output to {}", output_path.display());
+    debug!("Wrote bam_stat output to {}", output_path.display());
     Ok(())
 }
 

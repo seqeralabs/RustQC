@@ -8,7 +8,7 @@ use std::io::Write;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use log::info;
+use log::debug;
 
 use super::bam_stat::{BamStatResult, GcDepthBin};
 
@@ -383,7 +383,7 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
     // GCD — GC-depth
     write_gc_depth(&mut out, &result.gcd_bins, result)?;
 
-    info!("Wrote samtools stats output to {}", output_path.display());
+    debug!("Wrote samtools stats output to {}", output_path.display());
     Ok(())
 }
 

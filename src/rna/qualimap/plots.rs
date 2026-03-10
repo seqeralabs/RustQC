@@ -4,7 +4,7 @@
 //! coverage profile line charts, coverage histogram, and pie charts.
 
 use anyhow::{Context, Result};
-use log::info;
+use log::debug;
 use plotters::prelude::*;
 use plotters_svg::SVGBackend;
 use std::path::Path;
@@ -95,7 +95,7 @@ pub fn coverage_profile_plot(
             .context("Failed to write coverage profile SVG")?;
     }
 
-    info!("Wrote coverage profile: {}", output_path.display());
+    debug!("Wrote coverage profile: {}", output_path.display());
     Ok(())
 }
 
@@ -238,7 +238,7 @@ pub fn coverage_histogram_plot(
             .context("Failed to write coverage histogram SVG")?;
     }
 
-    info!("Wrote coverage histogram: {}", output_path.display());
+    debug!("Wrote coverage histogram: {}", output_path.display());
     Ok(())
 }
 
@@ -482,7 +482,7 @@ fn pie_chart(
         root.present().context("Failed to write pie chart SVG")?;
     }
 
-    info!("Wrote pie chart: {}", output_path.display());
+    debug!("Wrote pie chart: {}", output_path.display());
     Ok(())
 }
 
