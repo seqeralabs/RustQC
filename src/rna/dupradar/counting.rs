@@ -729,6 +729,180 @@ fn classify_read_fc_biotype(
     // Zero biotype hits (all unknown) → not counted
 }
 
+// ===================================================================
+// Shared per-record counting logic
+// ===================================================================
+
+/// Process a single BAM record for featureCounts-style counting.
+///
+/// Handles flag filtering, multimapper detection, gene overlap, single-end
+/// counting, and paired-end mate buffering. This is the core counting logic
+/// shared by both the parallel (indexed) and sequential (streaming) paths.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn process_counting_record(
+    record: &bam::Record,
+    result: &mut ChromResult,
+    index: &HashMap<String, ChromIndex>,
+    chrom: &str,
+    stranded: u8,
+    paired: bool,
+    gene_to_biotype: &[u16],
+    aligned_blocks_buf: &mut Vec<(u64, u64)>,
+    gene_hits: &mut Vec<GeneIdx>,
+    biotype_hits_buf: &mut Vec<u16>,
+    mate_buffer: &mut HashMap<MateBufferKey, MateInfo>,
+) {
+    let flags = record.flags();
+
+    // Skip unmapped reads (count for featureCounts summary)
+    if flags & BAM_FUNMAP != 0 {
+        result.fc_unmapped += 1;
+        return;
+    }
+
+    // Skip supplementary alignments (but NOT secondary - featureCounts processes
+    // secondary alignments as separate counting events for multi-mapped reads)
+    if flags & BAM_FSUPPLEMENTARY != 0 {
+        return;
+    }
+
+    // Skip QC-failed reads
+    if flags & BAM_FQCFAIL != 0 {
+        return;
+    }
+
+    // For paired-end data, must actually be a paired read
+    if paired && flags & BAM_FPAIRED == 0 {
+        return;
+    }
+
+    result.total_mapped += 1;
+
+    let is_dup = flags & BAM_FDUP != 0;
+    if is_dup {
+        result.total_dup += 1;
+    }
+
+    // Determine if the read is a multimapper (NH tag)
+    let is_multi = crate::rna::bam_flags::get_aux_int(record, b"NH").is_some_and(|nh| nh > 1);
+    if is_multi {
+        result.total_multi += 1;
+    }
+
+    let is_reverse = flags & BAM_FREVERSE != 0;
+    let is_read1 = flags & BAM_FREAD1 != 0;
+
+    // Find gene overlaps using CIGAR-aware aligned blocks
+    gene_hits.clear();
+    if let Some(chrom_idx) = index.get(chrom) {
+        cigar_to_aligned_blocks(record.pos() as u64, &record.cigar(), aligned_blocks_buf);
+
+        for &(block_start, block_end) in aligned_blocks_buf.iter() {
+            chrom_idx.query(block_start as i32, (block_end - 1) as i32, |node| {
+                let meta = node.metadata;
+                if strand_matches(is_reverse, is_read1, paired, meta.strand, stranded) {
+                    gene_hits.push(meta.gene_idx);
+                }
+            });
+        }
+        gene_hits.sort_unstable();
+        gene_hits.dedup();
+    }
+
+    // --- Per-read featureCounts counting (independent of mate pairing) ---
+    classify_read_fc(is_multi, gene_hits, result);
+    classify_read_fc_biotype(
+        is_multi,
+        gene_hits,
+        gene_to_biotype,
+        biotype_hits_buf,
+        result,
+    );
+
+    // --- Single-end counting ---
+    if !paired {
+        result.n_multi_dup += 1;
+        result.n_unique_dup += 1;
+        if !is_dup {
+            result.n_multi_nodup += 1;
+            result.n_unique_nodup += 1;
+        }
+        result.total_fragments += 1;
+
+        if gene_hits.is_empty() {
+            result.stat_no_features += 1;
+        } else if gene_hits.len() > 1 {
+            result.stat_ambiguous += 1;
+        } else if assign_fragment_to_gene(gene_hits, &mut result.gene_counts, is_dup, is_multi) {
+            result.stat_assigned += 1;
+        }
+        return;
+    }
+
+    // --- Paired-end counting: buffer mates and combine ---
+    let qname_hash = hash_qname(record.qname());
+    let own_pos = record.pos();
+    let own_tid = record.tid();
+    let mate_pos_val = record.mpos();
+    let mate_tid = record.mtid();
+
+    let hi_tag: i32 = crate::rna::bam_flags::get_aux_int(record, b"HI").map_or(-1, |v| v as i32);
+
+    let buffer_key: MateBufferKey = if is_read1 {
+        (qname_hash, own_tid, own_pos, mate_tid, mate_pos_val, hi_tag)
+    } else {
+        (qname_hash, mate_tid, mate_pos_val, own_tid, own_pos, hi_tag)
+    };
+
+    if let Some(mate_info) = mate_buffer.remove(&buffer_key) {
+        result.total_fragments += 1;
+
+        let frag_is_dup = if is_read1 { is_dup } else { mate_info.is_dup };
+        let frag_is_multi = if is_read1 {
+            is_multi
+        } else {
+            mate_info.is_multi
+        };
+        result.n_multi_dup += 1;
+        result.n_unique_dup += 1;
+        if !frag_is_dup {
+            result.n_multi_nodup += 1;
+            result.n_unique_nodup += 1;
+        }
+
+        // featureCounts union-with-both-end-preference voting: each gene
+        // gets +1 per mate that overlaps it (max 2).  Genes hit by both
+        // mates (score 2) beat genes hit by only one (score 1).  If
+        // multiple genes tie at the highest score the fragment is
+        // ambiguous.  This matches Rsubread::featureCounts behaviour.
+        let combined_genes: Vec<GeneIdx> = merge_gene_hits(&mate_info.gene_hits, gene_hits);
+
+        if combined_genes.is_empty() {
+            result.stat_no_features += 1;
+        } else if combined_genes.len() > 1 {
+            result.stat_ambiguous += 1;
+        } else if assign_fragment_to_gene(
+            &combined_genes,
+            &mut result.gene_counts,
+            frag_is_dup,
+            frag_is_multi,
+        ) {
+            result.stat_assigned += 1;
+        }
+    } else {
+        // Take ownership of gene_hits instead of cloning (it's cleared at loop start)
+        mate_buffer.insert(
+            buffer_key,
+            MateInfo {
+                gene_hits: std::mem::take(gene_hits),
+                is_dup,
+                is_multi,
+            },
+        );
+    }
+}
+
 /// Process a batch of chromosomes from an alignment file, counting reads against gene annotations.
 ///
 /// Opens its own indexed reader and seeks to each chromosome in the batch.
@@ -843,173 +1017,27 @@ fn process_chromosome_batch(
                 }
             }
 
-            let flags = record.flags();
-
-            // Skip unmapped reads (count for featureCounts summary)
-            if flags & BAM_FUNMAP != 0 {
-                result.fc_unmapped += 1;
-                continue;
-            }
-
-            // Skip supplementary alignments (but NOT secondary - featureCounts processes
-            // secondary alignments as separate counting events for multi-mapped reads)
-            if flags & BAM_FSUPPLEMENTARY != 0 {
-                continue;
-            }
-
-            // Skip QC-failed reads
-            if flags & BAM_FQCFAIL != 0 {
-                continue;
-            }
-
-            // For paired-end data, must actually be a paired read
-            if paired && flags & BAM_FPAIRED == 0 {
-                continue;
-            }
-
-            result.total_mapped += 1;
-
-            let is_dup = flags & BAM_FDUP != 0;
-            if is_dup {
-                result.total_dup += 1;
-            }
-
-            // Determine if the read is a multimapper (NH tag)
-            let is_multi =
-                crate::rna::bam_flags::get_aux_int(&record, b"NH").is_some_and(|nh| nh > 1);
-            if is_multi {
-                result.total_multi += 1;
-            }
-
-            let is_reverse = flags & BAM_FREVERSE != 0;
-            let is_read1 = flags & BAM_FREAD1 != 0;
-            // Get the chromosome name
+            // Resolve chromosome for gene counting
             let rec_tid = record.tid();
-            if rec_tid < 0 || rec_tid as usize >= tid_to_name.len() {
-                continue;
-            }
-            // Use pre-computed GTF chromosome name (prefix/mapping applied once at init)
-            let chrom = tid_to_gtf_chrom[rec_tid as usize].as_str();
-
-            // Find gene overlaps using CIGAR-aware aligned blocks
-            gene_hits.clear();
-            if let Some(chrom_idx) = index.get(chrom) {
-                cigar_to_aligned_blocks(
-                    record.pos() as u64,
-                    &record.cigar(),
-                    &mut aligned_blocks_buf,
-                );
-
-                for &(block_start, block_end) in &aligned_blocks_buf {
-                    chrom_idx.query(block_start as i32, (block_end - 1) as i32, |node| {
-                        let meta = node.metadata;
-                        if strand_matches(is_reverse, is_read1, paired, meta.strand, stranded) {
-                            gene_hits.push(meta.gene_idx);
-                        }
-                    });
-                }
-                gene_hits.sort_unstable();
-                gene_hits.dedup();
-            }
-
-            // --- Per-read featureCounts counting (independent of mate pairing) ---
-            classify_read_fc(is_multi, &gene_hits, &mut result);
-            classify_read_fc_biotype(
-                is_multi,
-                &gene_hits,
-                gene_to_biotype,
-                &mut biotype_hits_buf,
-                &mut result,
-            );
-
-            // --- Single-end counting ---
-            if !paired {
-                result.n_multi_dup += 1;
-                result.n_unique_dup += 1;
-                if !is_dup {
-                    result.n_multi_nodup += 1;
-                    result.n_unique_nodup += 1;
-                }
-                result.total_fragments += 1;
-
-                if gene_hits.is_empty() {
-                    result.stat_no_features += 1;
-                } else if gene_hits.len() > 1 {
-                    result.stat_ambiguous += 1;
-                } else if assign_fragment_to_gene(
-                    &gene_hits,
-                    &mut result.gene_counts,
-                    is_dup,
-                    is_multi,
-                ) {
-                    result.stat_assigned += 1;
-                }
-                continue;
-            }
-
-            // --- Paired-end counting: buffer mates and combine ---
-            let qname_hash = hash_qname(record.qname());
-            let own_pos = record.pos();
-            let own_tid = record.tid();
-            let mate_pos_val = record.mpos();
-            let mate_tid = record.mtid();
-
-            let hi_tag: i32 =
-                crate::rna::bam_flags::get_aux_int(&record, b"HI").map_or(-1, |v| v as i32);
-
-            let buffer_key: MateBufferKey = if is_read1 {
-                (qname_hash, own_tid, own_pos, mate_tid, mate_pos_val, hi_tag)
+            let chrom = if rec_tid >= 0 && (rec_tid as usize) < tid_to_gtf_chrom.len() {
+                tid_to_gtf_chrom[rec_tid as usize].as_str()
             } else {
-                (qname_hash, mate_tid, mate_pos_val, own_tid, own_pos, hi_tag)
+                ""
             };
 
-            if let Some(mate_info) = mate_buffer.remove(&buffer_key) {
-                result.total_fragments += 1;
-
-                let frag_is_dup = if is_read1 { is_dup } else { mate_info.is_dup };
-                let frag_is_multi = if is_read1 {
-                    is_multi
-                } else {
-                    mate_info.is_multi
-                };
-                result.n_multi_dup += 1;
-                result.n_unique_dup += 1;
-                if !frag_is_dup {
-                    result.n_multi_nodup += 1;
-                    result.n_unique_nodup += 1;
-                }
-
-                // featureCounts union-with-both-end-preference voting: each gene
-                // gets +1 per mate that overlaps it (max 2).  Genes hit by both
-                // mates (score 2) beat genes hit by only one (score 1).  If
-                // multiple genes tie at the highest score the fragment is
-                // ambiguous.  This matches Rsubread::featureCounts behaviour.
-                let combined_genes: Vec<GeneIdx> =
-                    merge_gene_hits(&mate_info.gene_hits, &gene_hits);
-
-                if combined_genes.is_empty() {
-                    result.stat_no_features += 1;
-                } else if combined_genes.len() > 1 {
-                    result.stat_ambiguous += 1;
-                } else if assign_fragment_to_gene(
-                    &combined_genes,
-                    &mut result.gene_counts,
-                    frag_is_dup,
-                    frag_is_multi,
-                ) {
-                    result.stat_assigned += 1;
-                }
-            } else {
-                // Take ownership of gene_hits instead of cloning (it's cleared at loop start)
-                mate_buffer.insert(
-                    buffer_key,
-                    MateInfo {
-                        gene_hits: std::mem::take(&mut gene_hits),
-                        is_dup,
-                        is_multi,
-                    },
-                );
-            }
+            process_counting_record(
+                &record,
+                &mut result,
+                index,
+                chrom,
+                stranded,
+                paired,
+                gene_to_biotype,
+                &mut aligned_blocks_buf,
+                &mut gene_hits,
+                &mut biotype_hits_buf,
+                &mut mate_buffer,
+            );
         }
     }
 
@@ -1332,167 +1360,27 @@ pub fn count_reads(
                 }
             }
 
-            if flags & BAM_FUNMAP != 0 {
-                result.fc_unmapped += 1;
-                continue;
-            }
-            if flags & BAM_FSUPPLEMENTARY != 0 {
-                continue;
-            }
-            if flags & BAM_FQCFAIL != 0 {
-                continue;
-            }
-            if paired && flags & BAM_FPAIRED == 0 {
-                continue;
-            }
-
-            result.total_mapped += 1;
-
-            let is_dup = flags & BAM_FDUP != 0;
-            if is_dup {
-                result.total_dup += 1;
-            }
-
-            let is_multi =
-                crate::rna::bam_flags::get_aux_int(&record, b"NH").is_some_and(|nh| nh > 1);
-            if is_multi {
-                result.total_multi += 1;
-            }
-
-            let is_reverse = flags & BAM_FREVERSE != 0;
-            let is_read1 = flags & BAM_FREAD1 != 0;
+            // Resolve chromosome for gene counting
             let tid = record.tid();
-            if tid < 0 || tid as usize >= tid_to_name.len() {
-                continue;
-            }
-            let chrom = &tid_to_rseqc_chrom[tid as usize];
-
-            gene_hits.clear();
-            if let Some(chrom_idx) = index.get(chrom.as_str()) {
-                cigar_to_aligned_blocks(
-                    record.pos() as u64,
-                    &record.cigar(),
-                    &mut aligned_blocks_buf,
-                );
-                for &(block_start, block_end) in &aligned_blocks_buf {
-                    chrom_idx.query(block_start as i32, (block_end - 1) as i32, |node| {
-                        let meta = node.metadata;
-                        if strand_matches(is_reverse, is_read1, paired, meta.strand, stranded) {
-                            gene_hits.push(meta.gene_idx);
-                        }
-                    });
-                }
-                gene_hits.sort_unstable();
-                gene_hits.dedup();
-            }
-
-            // --- Per-read featureCounts counting (independent of mate pairing) ---
-            classify_read_fc(is_multi, &gene_hits, &mut result);
-            classify_read_fc_biotype(
-                is_multi,
-                &gene_hits,
-                &gene_to_biotype,
-                &mut biotype_hits_buf,
-                &mut result,
-            );
-
-            if !paired {
-                result.n_multi_dup += 1;
-                result.n_unique_dup += 1;
-                if !is_dup {
-                    result.n_multi_nodup += 1;
-                    result.n_unique_nodup += 1;
-                }
-                result.total_fragments += 1;
-
-                if gene_hits.is_empty() {
-                    result.stat_no_features += 1;
-                } else if gene_hits.len() > 1 {
-                    result.stat_ambiguous += 1;
-                } else if assign_fragment_to_gene(
-                    &gene_hits,
-                    &mut result.gene_counts,
-                    is_dup,
-                    is_multi,
-                ) {
-                    result.stat_assigned += 1;
-                }
-                continue;
-            }
-
-            // Paired-end mate buffering (same logic as process_chromosome_batch)
-            let qname_hash = hash_qname(record.qname());
-            let own_pos = record.pos();
-            let own_tid = record.tid();
-            let mate_pos_val = record.mpos();
-            let mate_tid_val = record.mtid();
-
-            let hi_tag: i32 =
-                crate::rna::bam_flags::get_aux_int(&record, b"HI").map_or(-1, |v| v as i32);
-
-            let buffer_key: MateBufferKey = if is_read1 {
-                (
-                    qname_hash,
-                    own_tid,
-                    own_pos,
-                    mate_tid_val,
-                    mate_pos_val,
-                    hi_tag,
-                )
+            let chrom = if tid >= 0 && (tid as usize) < tid_to_rseqc_chrom.len() {
+                tid_to_rseqc_chrom[tid as usize].as_str()
             } else {
-                (
-                    qname_hash,
-                    mate_tid_val,
-                    mate_pos_val,
-                    own_tid,
-                    own_pos,
-                    hi_tag,
-                )
+                ""
             };
 
-            if let Some(mate_info) = mate_buffer.remove(&buffer_key) {
-                result.total_fragments += 1;
-                let frag_is_dup = if is_read1 { is_dup } else { mate_info.is_dup };
-                let frag_is_multi = if is_read1 {
-                    is_multi
-                } else {
-                    mate_info.is_multi
-                };
-                result.n_multi_dup += 1;
-                result.n_unique_dup += 1;
-                if !frag_is_dup {
-                    result.n_multi_nodup += 1;
-                    result.n_unique_nodup += 1;
-                }
-
-                // featureCounts union-with-both-end-preference voting
-                // (same logic as parallel path — see merge_gene_hits)
-                let combined_genes: Vec<GeneIdx> =
-                    merge_gene_hits(&mate_info.gene_hits, &gene_hits);
-
-                if combined_genes.is_empty() {
-                    result.stat_no_features += 1;
-                } else if combined_genes.len() > 1 {
-                    result.stat_ambiguous += 1;
-                } else if assign_fragment_to_gene(
-                    &combined_genes,
-                    &mut result.gene_counts,
-                    frag_is_dup,
-                    frag_is_multi,
-                ) {
-                    result.stat_assigned += 1;
-                }
-            } else {
-                // Take ownership of gene_hits instead of cloning (it's cleared at loop start)
-                mate_buffer.insert(
-                    buffer_key,
-                    MateInfo {
-                        gene_hits: std::mem::take(&mut gene_hits),
-                        is_dup,
-                        is_multi,
-                    },
-                );
-            }
+            process_counting_record(
+                &record,
+                &mut result,
+                &index,
+                chrom,
+                stranded,
+                paired,
+                &gene_to_biotype,
+                &mut aligned_blocks_buf,
+                &mut gene_hits,
+                &mut biotype_hits_buf,
+                &mut mate_buffer,
+            );
         }
 
         result.unmatched_mates = mate_buffer;
