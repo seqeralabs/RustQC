@@ -1262,8 +1262,8 @@ impl BamStatAccum {
         }
 
         // Per-cycle quality arrays (FFQ/LFQ)
-        merge_vec_arrays_64(&mut self.ffq, other.ffq);
-        merge_vec_arrays_64(&mut self.lfq, other.lfq);
+        merge_vec_arrays(&mut self.ffq, other.ffq);
+        merge_vec_arrays(&mut self.lfq, other.lfq);
 
         // GC content distributions (200 bins)
         for i in 0..200 {
@@ -1272,11 +1272,11 @@ impl BamStatAccum {
         }
 
         // Per-cycle base composition (FBC/LBC and read-oriented)
-        merge_vec_arrays_6(&mut self.fbc, other.fbc);
-        merge_vec_arrays_6(&mut self.lbc, other.lbc);
-        merge_vec_arrays_6(&mut self.fbc_ro, other.fbc_ro);
-        merge_vec_arrays_6(&mut self.lbc_ro, other.lbc_ro);
-        merge_vec_arrays_4(&mut self.gcc_rc, other.gcc_rc);
+        merge_vec_arrays(&mut self.fbc, other.fbc);
+        merge_vec_arrays(&mut self.lbc, other.lbc);
+        merge_vec_arrays(&mut self.fbc_ro, other.fbc_ro);
+        merge_vec_arrays(&mut self.lbc_ro, other.lbc_ro);
+        merge_vec_arrays(&mut self.gcc_rc, other.gcc_rc);
 
         // Total base counters
         for i in 0..5 {
@@ -1292,7 +1292,7 @@ impl BamStatAccum {
         }
 
         // Indels per cycle
-        merge_vec_arrays_4(&mut self.ic, other.ic);
+        merge_vec_arrays(&mut self.ic, other.ic);
 
         // CHK checksums (wrapping u32 addition)
         for i in 0..3 {
@@ -2312,37 +2312,13 @@ fn point_in(region_map: &HashMap<String, ChromIntervals>, chrom: &str, point: u6
 // Merge helpers for Vec<[u64; N]> per-cycle arrays
 // ===================================================================
 
-/// Merge two Vec<[u64; 64]> arrays element-wise, extending self if shorter.
-fn merge_vec_arrays_64(target: &mut Vec<[u64; 64]>, source: Vec<[u64; 64]>) {
+/// Merge two `Vec<[u64; N]>` arrays element-wise, extending target if shorter.
+fn merge_vec_arrays<const N: usize>(target: &mut Vec<[u64; N]>, source: Vec<[u64; N]>) {
     if source.len() > target.len() {
-        target.resize(source.len(), [0u64; 64]);
+        target.resize(source.len(), [0u64; N]);
     }
     for (i, arr) in source.into_iter().enumerate() {
-        for j in 0..64 {
-            target[i][j] += arr[j];
-        }
-    }
-}
-
-/// Merge two Vec<[u64; 6]> arrays element-wise, extending self if shorter.
-fn merge_vec_arrays_6(target: &mut Vec<[u64; 6]>, source: Vec<[u64; 6]>) {
-    if source.len() > target.len() {
-        target.resize(source.len(), [0u64; 6]);
-    }
-    for (i, arr) in source.into_iter().enumerate() {
-        for j in 0..6 {
-            target[i][j] += arr[j];
-        }
-    }
-}
-
-/// Merge two Vec<[u64; 4]> arrays element-wise, extending self if shorter.
-fn merge_vec_arrays_4(target: &mut Vec<[u64; 4]>, source: Vec<[u64; 4]>) {
-    if source.len() > target.len() {
-        target.resize(source.len(), [0u64; 4]);
-    }
-    for (i, arr) in source.into_iter().enumerate() {
-        for j in 0..4 {
+        for j in 0..N {
             target[i][j] += arr[j];
         }
     }
@@ -2510,7 +2486,7 @@ impl ReadDupAccum {
     /// so this just builds the duplication-level histograms from the raw counts.
     pub fn into_result(self) -> ReadDuplicationResult {
         let pos_histogram = build_dup_histogram(&self.pos_dup);
-        let seq_histogram = build_dup_histogram_from_hash(&self.seq_dup);
+        let seq_histogram = build_dup_histogram(&self.seq_dup);
         ReadDuplicationResult {
             pos_histogram,
             seq_histogram,
@@ -2520,16 +2496,7 @@ impl ReadDupAccum {
 
 /// Build duplication-level histogram from a count map.
 /// Key = duplication level, Value = number of positions/sequences at that level.
-fn build_dup_histogram(counts: &HashMap<u64, u64>) -> BTreeMap<u64, u64> {
-    let mut histogram = BTreeMap::new();
-    for &count in counts.values() {
-        *histogram.entry(count).or_insert(0) += 1;
-    }
-    histogram
-}
-
-/// Build duplication-level histogram from the hash-based sequence map.
-fn build_dup_histogram_from_hash(counts: &HashMap<u128, u64>) -> BTreeMap<u64, u64> {
+fn build_dup_histogram<K: Eq + std::hash::Hash>(counts: &HashMap<K, u64>) -> BTreeMap<u64, u64> {
     let mut histogram = BTreeMap::new();
     for &count in counts.values() {
         *histogram.entry(count).or_insert(0) += 1;
