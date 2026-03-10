@@ -32,6 +32,15 @@ jobs:
         id: tag
         run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
+      - name: Verify tag matches Cargo.toml version
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          CARGO_VERSION="v$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')"
+          if [ "$TAG" != "$CARGO_VERSION" ]; then
+            echo "::error::Tag $TAG does not match Cargo.toml version $CARGO_VERSION"
+            exit 1
+          fi
+
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
