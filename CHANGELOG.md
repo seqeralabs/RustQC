@@ -24,4 +24,4 @@ A single `rustqc rna` command runs 15 QC analyses in one pass over the BAM file,
 - YAML configuration for output control, chromosome name mapping, and tool parameters
 - Multiple BAM file support via positional arguments
 - Docker container at `ghcr.io/seqeralabs/rustqc`
-- Cross-platform builds (Linux x86_64/aarch64, macOS aarch64)
+- Cross-platform builds (Linux x86_64/aarch64, macOS x86_64/aarch64)

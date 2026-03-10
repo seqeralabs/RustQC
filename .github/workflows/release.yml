@@ -17,7 +17,7 @@ env:
 
 jobs:
   # ------------------------------------------------------------------
-  # 1. Create a draft GitHub release
+  # 1. Create a draft GitHub release (tags only)
   # ------------------------------------------------------------------
   create-release:
     name: Create release
@@ -47,12 +47,10 @@ jobs:
         run: gh release create "${{ steps.tag.outputs.tag }}" --draft --verify-tag --title "${{ steps.tag.outputs.tag }}"
 
   # ------------------------------------------------------------------
-  # 2. Build binaries for each target
+  # 2. Build binaries for each target (always)
   # ------------------------------------------------------------------
   build-binaries:
     name: Build ${{ matrix.name }}
-    if: startsWith(github.ref, 'refs/tags/')
-    needs: create-release
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -68,11 +66,15 @@ jobs:
             os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
 
+          # macOS x86_64 (cross-compiled on Apple Silicon runner)
+          - name: macos-x86_64
+            os: macos-latest
+            target: x86_64-apple-darwin
+
           # macOS aarch64 (Apple Silicon)
           - name: macos-aarch64
             os: macos-latest
             target: aarch64-apple-darwin
-
 
     steps:
       - uses: actions/checkout@v4
@@ -82,7 +84,7 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      # Linux build dependencies (native)
+      # Linux build dependencies
       - name: Install Linux build deps
         if: runner.os == 'Linux'
         run: |
@@ -119,10 +121,11 @@ jobs:
           echo "checksum=${ARCHIVE}.tar.gz.sha256" >> "$GITHUB_OUTPUT"
 
       - name: Upload to release
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${{ needs.create-release.outputs.tag }}" \
+          gh release upload "${GITHUB_REF#refs/tags/}" \
             "${{ steps.package.outputs.archive }}" \
             "${{ steps.package.outputs.checksum }}"
 
@@ -131,8 +134,6 @@ jobs:
   # ------------------------------------------------------------------
   docker-build:
     name: Docker ${{ matrix.platform }}
-    if: success() && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main')
-    needs: create-release
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -193,7 +194,6 @@ jobs:
   # ------------------------------------------------------------------
   docker-merge:
     name: Docker merge
-    if: success() && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main')
     needs: docker-build
     runs-on: ubuntu-latest
     steps:
@@ -237,7 +237,7 @@ jobs:
             $(printf 'ghcr.io/${{ env.IMAGE_NAME }}@sha256:%s ' *)
 
   # ------------------------------------------------------------------
-  # 4. Publish the release (undraft)
+  # 4. Publish the release (tags only)
   # ------------------------------------------------------------------
   publish-release:
     name: Publish release
