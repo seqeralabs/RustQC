@@ -607,7 +607,6 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
                     runtime_seconds: 0.0,
                     counting: None,
                     dupradar: None,
-                    strandedness: None,
                     outputs: vec![],
                 });
             }
@@ -766,7 +765,7 @@ struct SharedParams<'a> {
 
 /// Collected results from processing a single BAM file, used for the summary
 /// box display and JSON output.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct BamResult {
     /// Wall-clock processing time.
     duration: std::time::Duration,
@@ -843,7 +842,6 @@ impl BamResult {
             runtime_seconds: self.duration.as_secs_f64(),
             counting,
             dupradar,
-            strandedness: None, // TODO: populate from infer_experiment
             outputs: self
                 .outputs
                 .iter()

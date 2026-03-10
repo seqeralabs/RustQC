@@ -40,9 +40,6 @@ pub struct InputSummary {
     /// dupRadar summary (if successful and enabled).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dupradar: Option<DupradarSummary>,
-    /// Strandedness inference (if enabled).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub strandedness: Option<StrandednessSummary>,
     /// List of output files written.
     pub outputs: Vec<OutputFile>,
 }
@@ -87,21 +84,6 @@ pub struct DupradarSummary {
     /// Logistic regression slope (if fit succeeded).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub slope: Option<f64>,
-}
-
-/// Strandedness inference for a single BAM file.
-#[derive(Debug, Serialize)]
-pub struct StrandednessSummary {
-    /// Inferred strandedness ("forward", "reverse", "unstranded").
-    pub inferred: String,
-    /// Fraction of reads on the sense strand.
-    pub sense_pct: f64,
-    /// Fraction of reads on the antisense strand.
-    pub antisense_pct: f64,
-    /// Fraction of reads with undetermined strand.
-    pub undetermined_pct: f64,
-    /// Number of reads sampled.
-    pub reads_sampled: u64,
 }
 
 /// A single output file written during processing.

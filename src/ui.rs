@@ -31,6 +31,9 @@ pub enum Verbosity {
 ///
 /// Methods are no-ops in `Quiet` mode (except `warn` and `error`, which always
 /// print). `Verbose` mode shows additional detail beyond `Normal`.
+///
+/// **Note:** when processing multiple BAMs in parallel, output lines from
+/// different files may interleave on stderr.
 #[derive(Debug)]
 pub struct Ui {
     /// Current verbosity level.
@@ -108,20 +111,6 @@ impl Ui {
             "  {:<13}{}",
             self.style_label.apply_to(format!("{key}:")),
             value,
-        );
-    }
-
-    /// Print a key-value config line with a dim annotation.
-    #[allow(dead_code)]
-    pub fn config_detail(&self, key: &str, value: &str, detail: &str) {
-        if self.is_quiet() {
-            return;
-        }
-        eprintln!(
-            "  {:<13}{} {}",
-            self.style_label.apply_to(format!("{key}:")),
-            value,
-            self.style_dim.apply_to(detail),
         );
     }
 
@@ -213,8 +202,13 @@ impl Ui {
         if self.is_quiet() {
             return;
         }
-        // Calculate width: enough for the widest row
-        let inner_width = 56;
+        // Adapt box width to the terminal, clamped to [40, 80].
+        let inner_width = console::Term::stderr()
+            .size()
+            .1
+            .saturating_sub(6) // 2 indent + 2 border chars + 2 padding
+            as usize;
+        let inner_width = inner_width.clamp(40, 80);
         let border_h = "\u{2500}".repeat(inner_width + 2);
 
         eprintln!();
@@ -359,18 +353,6 @@ impl Ui {
             self.style_red.apply_to("\u{2717} error:"),
             self.style_red.apply_to(msg),
         );
-    }
-
-    /// Print a dim detail line for error context.
-    #[allow(dead_code)]
-    pub fn error_detail(&self, msg: &str) {
-        eprintln!("    {}", self.style_dim.apply_to(msg));
-    }
-
-    /// Print a bold suggestion line for error recovery.
-    #[allow(dead_code)]
-    pub fn error_hint(&self, msg: &str) {
-        eprintln!("    {}", self.style_bold.apply_to(msg));
     }
 }
 
