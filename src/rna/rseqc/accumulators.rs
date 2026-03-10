@@ -1828,12 +1828,12 @@ impl JuncSatAccum {
 /// A single read pair's inner distance record (same as inner_distance::PairRecord).
 #[derive(Debug)]
 pub struct InnerDistPair {
-    /// Read name.
-    pub name: String,
+    /// Read name (raw bytes from BAM, avoids per-read UTF-8 validation).
+    pub name: Vec<u8>,
     /// Inner distance (None if different chromosomes).
     pub distance: Option<i64>,
-    /// Classification string.
-    pub classification: String,
+    /// Classification label (always a static string literal).
+    pub classification: &'static str,
 }
 
 /// inner_distance accumulator — paired-end inner distance sampling.
@@ -1907,11 +1907,10 @@ impl InnerDistAccum {
 
             self.pair_num += 1;
 
-            let read_name = String::from_utf8_lossy(record.qname()).to_string();
             self.pairs.push(InnerDistPair {
-                name: read_name,
+                name: record.qname().to_vec(),
                 distance: None,
-                classification: "sameChrom=No".to_string(),
+                classification: "sameChrom=No",
             });
             return;
         }
@@ -1927,7 +1926,7 @@ impl InnerDistAccum {
 
         self.pair_num += 1;
 
-        let read_name = String::from_utf8_lossy(record.qname()).to_string();
+        let read_name = record.qname().to_vec();
 
         // Compute read1_end matching upstream RSeQC:
         //   read1_len = aligned_read.qlen  (= query_alignment_length: M+I+=/X)
@@ -1966,13 +1965,13 @@ impl InnerDistAccum {
         let read2_genes = transcript_tree.find_overlapping(chrom_upper, read2_start);
         let common_genes: HashSet<_> = read1_genes.intersection(&read2_genes).collect();
 
-        let classification: String;
+        let classification: &'static str;
 
         if common_genes.is_empty() {
-            classification = "sameTranscript=No,dist=genomic".to_string();
+            classification = "sameTranscript=No,dist=genomic";
         } else if inner_dist > 0 {
             if !exon_bitset.has_chrom(chrom_upper) {
-                classification = "unknownChromosome,dist=genomic".to_string();
+                classification = "unknownChromosome,dist=genomic";
             } else {
                 let exonic_bases =
                     exon_bitset.count_exonic_bases(chrom_upper, read1_end, read2_start);
@@ -1980,24 +1979,23 @@ impl InnerDistAccum {
                 if exonic_bases as i64 == inner_dist {
                     // sameExon: all bases between reads are exonic
                     // Upstream reports `size` which equals `inner_distance` here
-                    classification = "sameTranscript=Yes,sameExon=Yes,dist=mRNA".to_string();
+                    classification = "sameTranscript=Yes,sameExon=Yes,dist=mRNA";
                 } else if exonic_bases > 0 {
                     // Different exon: report mRNA distance (exonic bases only)
-                    classification = "sameTranscript=Yes,sameExon=No,dist=mRNA".to_string();
                     let mrna_dist = exonic_bases as i64;
                     self.pairs.push(InnerDistPair {
                         name: read_name,
                         distance: Some(mrna_dist),
-                        classification,
+                        classification: "sameTranscript=Yes,sameExon=No,dist=mRNA",
                     });
                     self.distances.push(mrna_dist);
                     return;
                 } else {
-                    classification = "sameTranscript=Yes,nonExonic=Yes,dist=genomic".to_string();
+                    classification = "sameTranscript=Yes,nonExonic=Yes,dist=genomic";
                 }
             }
         } else {
-            classification = "readPairOverlap".to_string();
+            classification = "readPairOverlap";
         }
 
         self.pairs.push(InnerDistPair {
@@ -2681,9 +2679,9 @@ impl InnerDistAccum {
             .pairs
             .into_iter()
             .map(|p| PairRecord {
-                name: p.name,
+                name: String::from_utf8_lossy(&p.name).into_owned(),
                 distance: p.distance,
-                classification: p.classification,
+                classification: p.classification.to_owned(),
             })
             .collect();
         let histogram = build_histogram(&self.distances, lower_bound, upper_bound, step)?;
