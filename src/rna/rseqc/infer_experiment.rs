@@ -1,8 +1,8 @@
 //! Infer library strandedness from RNA-Seq alignments.
 //!
 //! Reimplementation of RSeQC's `infer_experiment.py`. Samples reads that overlap
-//! gene models (BED12) and determines the fraction consistent with each strand
-//! protocol.
+//! gene models (from GTF annotation) and determines the fraction consistent with
+//! each strand protocol.
 
 use crate::gtf::Gene;
 use anyhow::{Context, Result};
@@ -10,14 +10,14 @@ use indexmap::IndexMap;
 use log::info;
 use std::collections::HashMap;
 use std::fs;
-use std::io::{BufRead, Write};
+use std::io::Write;
 use std::path::Path;
 
 // ============================================================================
-// BED12 gene model
+// Gene model
 // ============================================================================
 
-/// A genomic interval with strand information, parsed from a BED12 file.
+/// A genomic interval with strand information, derived from GTF annotation.
 #[derive(Debug, Clone)]
 struct TranscriptInterval {
     /// 0-based start position (BED start)
@@ -95,58 +95,6 @@ impl GeneModel {
 
         info!("Loaded {} transcript intervals from GTF annotation", count);
         model
-    }
-
-    /// Load a BED12 (or BED6+) file into the gene model.
-    ///
-    /// Extracts columns: chrom (0), start (1), end (2), strand (5).
-    pub fn from_bed(path: &str) -> Result<Self> {
-        let reader = crate::io::open_reader(path)
-            .with_context(|| format!("Failed to open BED file: {}", path))?;
-
-        let mut model = GeneModel::default();
-        let mut count: u64 = 0;
-
-        for line in reader.lines() {
-            let line = line.context("Failed to read BED line")?;
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') || line.starts_with("track") {
-                continue;
-            }
-
-            let fields: Vec<&str> = line.split('\t').collect();
-            if fields.len() < 6 {
-                continue; // Need at least 6 columns for strand
-            }
-
-            let chrom = fields[0].to_string();
-            let start: u64 = fields[1]
-                .parse()
-                .with_context(|| format!("Invalid BED start: {}", fields[1]))?;
-            let end: u64 = fields[2]
-                .parse()
-                .with_context(|| format!("Invalid BED end: {}", fields[2]))?;
-            let strand = match fields[5] {
-                "+" => b'+',
-                "-" => b'-',
-                _ => continue, // Skip unknown strand
-            };
-
-            model
-                .intervals
-                .entry(chrom)
-                .or_default()
-                .push(TranscriptInterval { start, end, strand });
-            count += 1;
-        }
-
-        // Sort intervals by start position for binary search
-        for intervals in model.intervals.values_mut() {
-            intervals.sort_by_key(|iv| iv.start);
-        }
-
-        info!("Loaded {} transcripts from BED file", count);
-        Ok(model)
     }
 
     /// Find all strands of transcripts overlapping the query interval [qstart, qend).
@@ -362,19 +310,6 @@ mod tests {
         // Query overlapping only GENE2 (BED coords: 550-600)
         let strands = model.find_strands("chr1", 550, 600);
         assert_eq!(strands, vec![b'-']);
-    }
-
-    #[test]
-    fn test_bed_loading() {
-        // Test that BED loading works with the small test file if available
-        let bed_path = "benchmark/input/small/chr6.bed";
-        if Path::new(bed_path).exists() {
-            let model = GeneModel::from_bed(bed_path).unwrap();
-            assert!(!model.intervals.is_empty(), "Should have loaded intervals");
-            // chr6.bed should have 8443 transcripts
-            let total: usize = model.intervals.values().map(|v| v.len()).sum();
-            assert!(total > 0, "Should have transcripts");
-        }
     }
 
     #[test]

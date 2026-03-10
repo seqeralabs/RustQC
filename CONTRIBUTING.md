@@ -89,7 +89,7 @@ src/
     rseqc/
       mod.rs                     Re-exports all RSeQC modules + common helpers
       accumulators.rs            Shared RSeQC accumulator infrastructure (read dispatch)
-      common.rs                  Shared junction/intron extraction, from_genes/from_bed builders
+      common.rs                  Shared junction/intron extraction, from_genes builders
       plots.rs                   RSeQC native plot generation (PNG/SVG)
       bam_stat.rs                Basic BAM alignment statistics
       flagstat.rs                samtools flagstat-compatible output
@@ -157,7 +157,7 @@ Please open a [GitHub issue](https://github.com/seqeralabs/RustQC/issues) with:
 
 - What you expected to happen
 - What actually happened
-- Steps to reproduce (SAM/BAM/CRAM/GTF/BED files or minimal examples if possible)
+- Steps to reproduce (SAM/BAM/CRAM/GTF files or minimal examples if possible)
 - Your OS and Rust version (`rustc --version`)
 
 ## License

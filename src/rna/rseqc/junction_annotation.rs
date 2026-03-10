@@ -3,7 +3,7 @@
 //! Reimplementation of RSeQC's `junction_annotation.py`: extracts splice junctions
 //! from BAM files (CIGAR N-operations) and classifies them as known (annotated),
 //! partial novel, or complete novel by comparing against a reference gene model
-//! (BED12 or GTF).
+//! derived from GTF annotation.
 
 use std::io::Write;
 use std::path::Path;

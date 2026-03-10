@@ -7,6 +7,8 @@
 //! inner_distance), TIN (Transcript Integrity Number), preseq library complexity
 //! extrapolation, samtools-compatible outputs (flagstat, idxstats, stats), and
 //! Qualimap RNA-seq QC. Individual tools can be disabled via the YAML config file.
+//!
+//! A GTF gene annotation file is required for all analyses.
 
 use clap::{Parser, Subcommand};
 
@@ -38,15 +40,9 @@ pub enum Commands {
     /// - junction_saturation: Junction discovery saturation curves
     /// - inner_distance: Insert size estimation for paired-end data
     ///
-    /// Provide --gtf for full analysis (dupRadar, featureCounts, and all RSeQC
-    /// tools). Provide --bed alone for RSeQC-only mode (dupRadar and
-    /// featureCounts are skipped). When both --gtf and --bed are provided,
-    /// --gtf is used for dupRadar/featureCounts and --bed is used for
-    /// read_distribution (matching the nf-core/rnaseq pipeline behavior where
-    /// GTF is converted to BED12 for RSeQC tools).
-    ///
-    /// Input alignment files must have duplicates marked (SAM flag 0x400) but NOT
-    /// removed. Use tools like Picard MarkDuplicates or samblaster first.
+    /// A GTF gene annotation file (--gtf) is required. Input alignment files
+    /// must have duplicates marked (SAM flag 0x400) but NOT removed. Use tools
+    /// like Picard MarkDuplicates or samblaster first.
     Rna(RnaArgs),
 }
 
@@ -63,25 +59,11 @@ pub struct RnaArgs {
 
     /// Path to a GTF gene annotation file (plain or gzip-compressed).
     ///
-    /// When provided, all analyses are run: dupRadar, featureCounts, and all
-    /// RSeQC tools. The GTF must contain exon features with gene_id attributes.
-    /// CDS features are used for read_distribution UTR/CDS classification.
-    /// Gzip-compressed files (.gtf.gz) are detected and decompressed automatically.
-    /// Can be combined with --bed (BED is used for read_distribution when both
-    /// are provided, matching the nf-core/rnaseq pipeline behavior).
-    #[arg(short, long, value_name = "GTF", required_unless_present = "bed")]
-    pub gtf: Option<String>,
-
-    /// Path to a BED12 gene model file (plain or gzip-compressed).
-    ///
-    /// When provided alone (without --gtf), only RSeQC tools are run (dupRadar
-    /// and featureCounts are skipped because BED files lack gene-level grouping
-    /// and biotype information). When provided alongside --gtf, the BED file is
-    /// used for read_distribution while the GTF is used for dupRadar and
-    /// featureCounts. Gzip-compressed files (.bed.gz) are detected and
-    /// decompressed automatically.
-    #[arg(short, long, value_name = "BED", required_unless_present = "gtf")]
-    pub bed: Option<String>,
+    /// The GTF must contain exon features with gene_id attributes. CDS features
+    /// are used for read_distribution UTR/CDS classification. Gzip-compressed
+    /// files (.gtf.gz) are detected and decompressed automatically.
+    #[arg(short, long, value_name = "GTF")]
+    pub gtf: String,
 
     /// Library strandedness: 0=unstranded, 1=forward, 2=reverse
     #[arg(short, long, value_parser = clap::value_parser!(u8).range(0..=2))]
@@ -232,32 +214,16 @@ mod tests {
         match cli.command {
             Commands::Rna(args) => {
                 assert_eq!(args.input, vec!["test.bam"]);
-                assert_eq!(args.gtf, Some("genes.gtf".to_string()));
+                assert_eq!(args.gtf, "genes.gtf");
                 assert_eq!(args.stranded, None);
                 assert!(!args.paired);
                 assert_eq!(args.threads, 1);
                 assert_eq!(args.outdir, ".");
                 assert!(args.biotype_attribute.is_none());
-                assert!(args.bed.is_none());
                 assert_eq!(args.mapq_cut, 30);
                 assert_eq!(args.infer_experiment_sample_size, 200_000);
                 assert_eq!(args.min_intron, 50);
                 assert_eq!(args.inner_distance_step, 5);
-            }
-            #[allow(unreachable_patterns)]
-            _ => panic!("Expected Rna subcommand"),
-        }
-    }
-
-    #[test]
-    fn test_rna_default_args_bed() {
-        // Test that BED-only mode works
-        let cli = Cli::parse_from(["rustqc", "rna", "test.bam", "--bed", "model.bed"]);
-        match cli.command {
-            Commands::Rna(args) => {
-                assert_eq!(args.input, vec!["test.bam"]);
-                assert!(args.gtf.is_none());
-                assert_eq!(args.bed, Some("model.bed".to_string()));
             }
             #[allow(unreachable_patterns)]
             _ => panic!("Expected Rna subcommand"),
@@ -279,7 +245,7 @@ mod tests {
         match cli.command {
             Commands::Rna(args) => {
                 assert_eq!(args.input, vec!["a.bam", "b.bam", "c.bam"]);
-                assert_eq!(args.gtf, Some("genes.gtf".to_string()));
+                assert_eq!(args.gtf, "genes.gtf");
             }
             #[allow(unreachable_patterns)]
             _ => panic!("Expected Rna subcommand"),
@@ -308,8 +274,7 @@ mod tests {
         ]);
         match cli.command {
             Commands::Rna(args) => {
-                assert_eq!(args.gtf, Some("genes.gtf".to_string()));
-                assert!(args.bed.is_none());
+                assert_eq!(args.gtf, "genes.gtf");
                 assert_eq!(args.stranded, Some(2));
                 assert!(args.paired);
                 assert_eq!(args.threads, 4);
@@ -323,72 +288,10 @@ mod tests {
     }
 
     #[test]
-    fn test_rna_bed_all_args() {
-        let cli = Cli::parse_from([
-            "rustqc",
-            "rna",
-            "test.bam",
-            "--bed",
-            "model.bed",
-            "--stranded",
-            "2",
-            "--paired",
-            "--threads",
-            "4",
-            "--outdir",
-            "/tmp/out",
-            "--reference",
-            "genome.fa",
-            "-q",
-            "20",
-        ]);
-        match cli.command {
-            Commands::Rna(args) => {
-                assert!(args.gtf.is_none());
-                assert_eq!(args.bed, Some("model.bed".to_string()));
-                assert_eq!(args.stranded, Some(2));
-                assert!(args.paired);
-                assert_eq!(args.threads, 4);
-                assert_eq!(args.outdir, "/tmp/out");
-                assert_eq!(args.reference, Some("genome.fa".to_string()));
-                assert_eq!(args.mapq_cut, 20);
-            }
-            #[allow(unreachable_patterns)]
-            _ => panic!("Expected Rna subcommand"),
-        }
-    }
-
-    #[test]
-    fn test_rna_gtf_and_bed_together() {
-        // Providing both --gtf and --bed is now allowed: GTF for dupRadar/featureCounts,
-        // BED for read_distribution (matching nf-core/rnaseq behavior).
-        let cli = Cli::parse_from([
-            "rustqc",
-            "rna",
-            "test.bam",
-            "--gtf",
-            "genes.gtf",
-            "--bed",
-            "model.bed",
-        ]);
-        match cli.command {
-            Commands::Rna(args) => {
-                assert_eq!(args.gtf, Some("genes.gtf".to_string()));
-                assert_eq!(args.bed, Some("model.bed".to_string()));
-            }
-            #[allow(unreachable_patterns)]
-            _ => panic!("Expected Rna subcommand"),
-        }
-    }
-
-    #[test]
-    fn test_rna_neither_gtf_nor_bed() {
-        // Providing neither --gtf nor --bed should fail
+    fn test_rna_missing_gtf() {
+        // --gtf is required, so omitting it should fail
         let result = Cli::try_parse_from(["rustqc", "rna", "test.bam"]);
-        assert!(
-            result.is_err(),
-            "Expected error when neither --gtf nor --bed is provided"
-        );
+        assert!(result.is_err(), "Expected error when --gtf is not provided");
     }
 
     #[test]

@@ -23,25 +23,25 @@ Average wall times from an nf-core/rnaseq pipeline run with 8 samples.
 Staging overhead (2m 30s per tool for BAM loading/indexing) is added to
 each tool's runtime. RustQC runs all analyses in a single pass.
 
-| Tool | Wall time |
-|------|----------:|
-| tin.py (RSeQC) | 45m |
-| read_duplication (RSeQC) | 16m 45s |
-| junction_saturation (RSeQC) | 7m 41s |
-| bam_stat (RSeQC) | 7m 17s |
-| read_distribution (RSeQC) | 8m 14s |
-| junction_annotation (RSeQC) | 6m 21s |
-| inner_distance (RSeQC) | 59s |
-| infer_experiment (RSeQC) | 4s |
-| dupRadar (R) | 1h 15m 58s |
-| Qualimap | 30m 13s |
-| samtools stats | 3m 34s |
-| samtools flagstat | 1m 13s |
-| samtools idxstats | 4s |
-| preseq lc_extrap | 4m |
-| featureCounts (Subread) | 56s |
-| + Staging overhead | 2m 30s/tool |
-| **Traditional total** | **~4h 06m** |
+| Tool                        |   Wall time |
+| --------------------------- | ----------: |
+| tin.py (RSeQC)              |         45m |
+| read_duplication (RSeQC)    |     16m 45s |
+| junction_saturation (RSeQC) |      7m 41s |
+| bam_stat (RSeQC)            |      7m 17s |
+| read_distribution (RSeQC)   |      8m 14s |
+| junction_annotation (RSeQC) |      6m 21s |
+| inner_distance (RSeQC)      |         59s |
+| infer_experiment (RSeQC)    |          4s |
+| dupRadar (R)                |  1h 15m 58s |
+| Qualimap                    |     30m 13s |
+| samtools stats              |      3m 34s |
+| samtools flagstat           |      1m 13s |
+| samtools idxstats           |          4s |
+| preseq lc_extrap            |          4m |
+| featureCounts (Subread)     |         56s |
+| + Staging overhead          | 2m 30s/tool |
+| **Traditional total**       | **~4h 06m** |
 | **RustQC RNA (10 threads)** | **~7m 10s** |
 
 > **Note:** Timings are averages from a real nf-core/rnaseq pipeline run
@@ -53,7 +53,7 @@ each tool's runtime. RustQC runs all analyses in a single pass.
 
 ```
 benchmark/
-  input/            — Shared input files (BAM, GTF, BED, config)
+  input/            — Shared input files (BAM, GTF, config)
     large/          — Full-size GM12878 dataset (~10 GB BAM)
     small/          — Small chr6 test dataset
   RustQC/           — RustQC output (all tools, single-pass)
@@ -89,10 +89,10 @@ benchmark/
 
 ### Small benchmark
 
-Included in this repository. A test BAM file with chr6 reads, a chr6-only GTF
-annotation (2,905 genes), and a BED12 gene model for RSeQC tools.
+Included in this repository. A test BAM file with chr6 reads and a chr6-only GTF
+annotation (2,905 genes).
 
-- `input/small/test.bam` + `input/small/chr6.gtf` + `input/small/chr6.bed`
+- `input/small/test.bam` + `input/small/chr6.gtf`
 - `dupRadar/small/` — R dupRadar reference output
 - `rseqc/small/` — Python RSeQC reference output (per-tool subdirectories)
 - `samtools/small/` — samtools reference output
@@ -106,14 +106,14 @@ GM12878 REP1 — a full-size RNA-seq BAM (~10 GB) from the
 [nf-core/rnaseq](https://nf-co.re/rnaseq) pipeline, duplicate-marked with
 Picard. Paired-end, unstranded, aligned to GRCh37 (Ensembl chromosome names).
 
-| File | Size | URL |
-| ---- | ---- | --- |
-| BAM  | ~10 GB | <https://nf-core-awsmegatests.s3-eu-west-1.amazonaws.com/rnaseq/results-3816d48abd9fab2eee41775b60b4eb8745e1fcaa/aligner_star_salmon/star_salmon/GM12878_REP1.markdup.sorted.bam> |
-| GTF  | ~1.5 GB | <https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_46/gencode.v46.annotation.gtf.gz> |
+| File | Size    | URL                                                                                                                                                                               |
+| ---- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| BAM  | ~10 GB  | <https://nf-core-awsmegatests.s3-eu-west-1.amazonaws.com/rnaseq/results-3816d48abd9fab2eee41775b60b4eb8745e1fcaa/aligner_star_salmon/star_salmon/GM12878_REP1.markdup.sorted.bam> |
+| GTF  | ~1.5 GB | <https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_46/gencode.v46.annotation.gtf.gz>                                                                              |
 
-The dupRadar/featureCounts pipeline uses a GENCODE v46 GTF (`input/large/genes.gtf`). The
-RSeQC tools use a BED12 gene model (`input/large/genes.bed`) converted from a
-genome-matched GTF with matching Ensembl chromosome names.
+RustQC uses a GENCODE v46 GTF (`input/large/genes.gtf`) for all analyses. The
+upstream RSeQC Python tools use a BED12 gene model (`input/large/genes.bed`)
+converted from the same GTF.
 
 ### RSeQC reference outputs
 
@@ -124,27 +124,27 @@ Reference outputs for validating RSeQC reimplementations are stored in
 
 **Small BAM** — All 7 tools have reference output:
 
-| Tool | Key metrics |
-| ---- | ----------- |
-| `bam_stat` | 43,476 total reads, 6,032 duplicates |
-| `infer_experiment` | Undetermined (50/50 strand split) |
-| `read_duplication` | Position-based and sequence-based histograms |
-| `read_distribution` | 68,660 tags, 66,693 assigned (49,589 CDS) |
+| Tool                  | Key metrics                                                |
+| --------------------- | ---------------------------------------------------------- |
+| `bam_stat`            | 43,476 total reads, 6,032 duplicates                       |
+| `infer_experiment`    | Undetermined (50/50 strand split)                          |
+| `read_duplication`    | Position-based and sequence-based histograms               |
+| `read_distribution`   | 68,660 tags, 66,693 assigned (49,589 CDS)                  |
 | `junction_annotation` | 3,261 junctions (2,982 known, 88 partial novel, 191 novel) |
-| `junction_saturation` | Saturation curve, 20 sampling points |
-| `inner_distance` | 20,861 pairs (mean -38.85, median -72.5) |
+| `junction_saturation` | Saturation curve, 20 sampling points                       |
+| `inner_distance`      | 20,861 pairs (mean -38.85, median -72.5)                   |
 
 **Large BAM** — 6 of 7 tools have reference output (`read_duplication`
 pending):
 
-| Tool | Key metrics |
-| ---- | ----------- |
-| `bam_stat` | 185,718,543 total records, 133,912,519 duplicates, 39,827,099 unique (MAPQ>=30) |
-| `infer_experiment` | Reverse stranded (92.2% / 1.2%) |
-| `read_distribution` | 55,374,023 tags, 52,400,513 assigned (33.3M CDS, 8.5M 3'UTR) |
-| `junction_annotation` | 256,466 junctions (178,797 known, 50,936 partial novel, 26,733 novel) |
-| `junction_saturation` | 256,466 junctions at 100% (163,710 known, 92,756 novel) |
-| `inner_distance` | 1,000,000 pairs sampled (mean 29.43, median 27.5, SD 32.80) |
+| Tool                  | Key metrics                                                                     |
+| --------------------- | ------------------------------------------------------------------------------- |
+| `bam_stat`            | 185,718,543 total records, 133,912,519 duplicates, 39,827,099 unique (MAPQ>=30) |
+| `infer_experiment`    | Reverse stranded (92.2% / 1.2%)                                                 |
+| `read_distribution`   | 55,374,023 tags, 52,400,513 assigned (33.3M CDS, 8.5M 3'UTR)                    |
+| `junction_annotation` | 256,466 junctions (178,797 known, 50,936 partial novel, 26,733 novel)           |
+| `junction_saturation` | 256,466 junctions at 100% (163,710 known, 92,756 novel)                         |
+| `inner_distance`      | 1,000,000 pairs sampled (mean 29.43, median 27.5, SD 32.80)                     |
 
 ## Running benchmarks
 
@@ -188,7 +188,10 @@ gunzip benchmark/input/large/genes.gtf.gz
 samtools index benchmark/input/large/GM12878_REP1.markdup.sorted.bam
 ```
 
-### 2. Generate BED12 for RSeQC tools
+### 2. Generate BED12 for upstream RSeQC Python tools
+
+The upstream RSeQC Python tools require BED12 input. RustQC does not need this
+file (it uses the GTF directly), but it's needed for generating reference outputs.
 
 Convert the GTF to BED12 format using UCSC tools. This can be done via Docker
 with the [wave CLI](https://github.com/seqeralabs/wave-cli):
@@ -240,7 +243,7 @@ cargo build --release
 
 All 7 RSeQC tools are integrated into `rustqc rna` and run automatically when
 `--gtf` is provided (the commands in step 4 already include all RSeQC analyses).
-No separate `--bed` file is needed — all required data is derived from the GTF.
+All required data is derived from the GTF.
 
 ### 6. Generate RSeQC Python reference outputs
 
@@ -313,9 +316,9 @@ in `preseq/small/` and `preseq/large/`. These were generated with
 
 Two reference files are provided per dataset:
 
-| File | Mode | Command |
-| ---- | ---- | ------- |
-| `lc_extrap_se.txt` | SE (default) | `preseq lc_extrap -bam -seed 1` |
+| File               | Mode               | Command                                                |
+| ------------------ | ------------------ | ------------------------------------------------------ |
+| `lc_extrap_se.txt` | SE (default)       | `preseq lc_extrap -bam -seed 1`                        |
 | `lc_extrap_pe.txt` | PE (nf-core style) | `preseq lc_extrap -bam -pe -seed 1 -seg_len 100000000` |
 
 The **PE reference** matches the invocation used by

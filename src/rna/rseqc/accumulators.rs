@@ -34,8 +34,7 @@ use crate::rna::bam_flags::*;
 
 /// Read-only annotation data shared across all chromosome workers.
 ///
-/// Each field is `Option` — `None` when the corresponding tool is disabled
-/// or the annotation source doesn't support it (e.g., BED mode has no GTF).
+/// Each field is `Option` — `None` when the corresponding tool is disabled.
 pub struct RseqcAnnotations<'a> {
     /// Gene model for infer_experiment.
     pub gene_model: Option<&'a GeneModel>,

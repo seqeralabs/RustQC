@@ -43,7 +43,7 @@ Run RustQC without any local installation using Docker:
 ```bash
 # Run all RNA-seq QC (dupRadar + featureCounts + RSeQC) in a single pass
 docker run -v $(pwd):/data ghcr.io/seqeralabs/rustqc:latest \
-  rna /data/sample.bam --gtf /data/genes.gtf --bed /data/genes.bed -p -o /data/output/
+  rna /data/sample.bam --gtf /data/genes.gtf -p -o /data/output/
 ```
 
 ## Build from source
@@ -147,8 +147,7 @@ Both `target-cpu=native` and PGO produce binaries that are specific to the machi
 The `rustqc rna` command runs all analyses in a single pass. Input requirements:
 
 - **BAM file(s)** — must have PCR duplicates **marked** (SAM flag `0x400`) but **not removed**. RustQC needs both duplicate and non-duplicate reads to calculate duplication rates.
-- **GTF annotation file** (`--gtf`) — provides all annotation needed for every tool. When a GTF is provided, gene models are derived internally so all analyses run (dupRadar, featureCounts, Qualimap gene body coverage, all 8 RSeQC tools including TIN, preseq, and samtools outputs). This is the typical input.
-- **BED12 gene model file** (`--bed`, optional) — can be provided alongside `--gtf` (the BED file is then used for read_distribution while the GTF handles everything else) or on its own. If only `--bed` is given, dupRadar, featureCounts, and Qualimap gene body coverage are skipped because they require gene-level annotation with biotype/exon attributes that BED12 cannot provide.
+- **GTF annotation file** (`--gtf`, required) — provides all annotation needed for every tool. Gene models are derived internally so all analyses run: dupRadar, featureCounts, Qualimap gene body coverage, all 8 RSeQC tools including TIN, preseq, and samtools outputs.
 
 Compatible duplicate-marking tools:
 

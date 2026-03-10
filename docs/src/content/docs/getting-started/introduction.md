@@ -29,13 +29,13 @@ Key advantages:
 - **Single-pass architecture**: The `rna` subcommand performs read counting and duplicate analysis simultaneously, eliminating the need for a separate featureCounts run
 - **Identical output**: Produces bit-for-bit identical results to the original tools (verified across 820,000+ values with zero mismatches for dupRadar)
 - **Multiple input support**: Process several BAM files in a single command with automatic parallelisation
-- **Modern format support**: Accepts SAM, BAM, and CRAM input files; annotation files (GTF and BED) can be plain or gzip-compressed
+- **Modern format support**: Accepts SAM, BAM, and CRAM input files; GTF annotation files can be plain or gzip-compressed
 
 ## Available tools
 
 ### `rustqc rna` -- RNA-Seq quality control pipeline
 
-Given a duplicate-marked BAM file and a GTF or BED12 annotation, `rustqc rna` runs all of the following in a single pass:
+Given a duplicate-marked BAM file and a GTF annotation, `rustqc rna` runs all of the following in a single pass:
 
 1. **Counts reads** per gene (equivalent to Subread featureCounts)
 2. **Computes duplication rates** per gene at multiple counting levels (dupRadar)
@@ -73,7 +73,7 @@ Eight reimplementations of [RSeQC](https://rseqc.sourceforge.net/) tools (includ
 | idxstats        | `samtools idxstats`                                                | Per-chromosome read counts                                                                                                                                                                                        |
 | stats           | `samtools stats`                                                   | Full samtools stats output including all histogram sections                                                                                                                                                       |
 
-When a GTF file is provided via `--gtf`, all tools run automatically — transcript-level structure is extracted from the GTF. Alternatively, a BED12 gene model file can be provided via `--bed`, which runs the RSeQC tools (including TIN), preseq, and samtools outputs, but skips dupRadar, featureCounts, and Qualimap (they require a GTF). Both `--gtf` and `--bed` can be used together: the GTF is used for dupRadar, featureCounts, and Qualimap, while the BED file is used for read_distribution. Both GTF and BED files can be provided plain or gzip-compressed (`.gz`) — compression is detected automatically. Individual tools can be disabled via the YAML configuration file.
+A GTF file is required (`--gtf`) and all tools run automatically — transcript-level structure is extracted from the GTF. GTF files can be provided plain or gzip-compressed (`.gz`) — compression is detected automatically. Individual tools can be disabled via the YAML configuration file.
 
 ## Credits
 

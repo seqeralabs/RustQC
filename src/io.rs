@@ -48,27 +48,6 @@ pub fn open_reader<P: AsRef<Path>>(path: P) -> Result<Box<dyn BufRead>> {
     }
 }
 
-/// Read the entire contents of a file into a `String`, transparently
-/// decompressing gzip if the magic bytes are present.
-///
-/// This is the gzip-aware equivalent of [`std::fs::read_to_string`].
-///
-/// # Arguments
-/// * `path` - Path to the file (plain-text or gzip-compressed)
-///
-/// # Returns
-/// The full file contents as a `String`.
-pub fn read_to_string<P: AsRef<Path>>(path: P) -> Result<String> {
-    let path = path.as_ref();
-    let mut reader =
-        open_reader(path).with_context(|| format!("Failed to open file: {}", path.display()))?;
-    let mut contents = String::new();
-    reader
-        .read_to_string(&mut contents)
-        .with_context(|| format!("Failed to read file: {}", path.display()))?;
-    Ok(contents)
-}
-
 // ============================================================
 // Formatting helpers
 // ============================================================
@@ -166,22 +145,6 @@ mod tests {
         let reader = open_reader(&path).unwrap();
         let lines: Vec<String> = reader.lines().map(|l| l.unwrap()).collect();
         assert_eq!(lines, vec!["line1", "line2", "line3"]);
-    }
-
-    #[test]
-    fn test_read_to_string_plain() {
-        let content = "hello world\n";
-        let path = write_temp_plain("rustqc_test_io_rts_plain.txt", content);
-        let result = read_to_string(&path).unwrap();
-        assert_eq!(result, content);
-    }
-
-    #[test]
-    fn test_read_to_string_gzip() {
-        let content = "hello world\n";
-        let path = write_temp_gz("rustqc_test_io_rts_gzip.txt.gz", content);
-        let result = read_to_string(&path).unwrap();
-        assert_eq!(result, content);
     }
 
     #[test]

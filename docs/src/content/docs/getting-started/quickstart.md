@@ -10,7 +10,7 @@ This guide walks you through a basic RustQC analysis from start to finish.
 The `rustqc rna` command runs all analyses in a single pass. It requires:
 
 - A **coordinate-sorted, duplicate-marked** alignment file (BAM, SAM, or CRAM). Duplicates must be flagged with SAM flag 0x400 by a tool like [Picard MarkDuplicates](https://broadinstitute.github.io/picard/), [samblaster](https://github.com/GregoryFaust/samblaster), or [sambamba](https://github.com/biod/sambamba). A BAM index (`.bai` / `.csi`) is recommended for multi-threaded performance; without one, only a single counting thread is used.
-- A **GTF annotation** file (`--gtf`) and/or a **BED12 gene model** file (`--bed`). At least one must be provided. Both can be plain or gzip-compressed (`.gz`) — compression is detected automatically. With a GTF, all analyses run (dupRadar, featureCounts, all 8 RSeQC tools including TIN, Qualimap, preseq, and samtools). With a BED file alone, the RSeQC tools (including TIN), preseq, and samtools run, but dupRadar, featureCounts, and Qualimap are skipped. When both are provided, the GTF is used for dupRadar/featureCounts/Qualimap and the BED is used for read_distribution.
+- A **GTF annotation** file (`--gtf`). Can be plain or gzip-compressed (`.gz`) — compression is detected automatically. The GTF provides all annotation needed for every analysis: dupRadar, featureCounts, all 8 RSeQC tools including TIN, Qualimap, preseq, and samtools.
 
 ## RNA-seq duplicate analysis
 
@@ -66,11 +66,7 @@ integrated into the `rustqc rna` command. They run automatically alongside
 dupRadar, featureCounts, Qualimap, preseq, and samtools analyses:
 
 ```bash
-# Run everything with a GTF: dupRadar + featureCounts + all 8 RSeQC tools
 rustqc rna sample.markdup.bam --gtf genes.gtf -p -o results/
-
-# Or run with a BED file (RSeQC + preseq + samtools; no dupRadar/featureCounts/Qualimap)
-rustqc rna sample.markdup.bam --bed genes.bed -p -o results/
 ```
 
 To disable specific RSeQC tools, use a YAML config file:
@@ -112,9 +108,8 @@ rustqc rna sample.bam --gtf genes.gtf -p -t 8
 # CRAM input with reference
 rustqc rna sample.cram --gtf genes.gtf -p --reference genome.fa
 
-# Gzip-compressed annotation files (auto-detected)
+# Gzip-compressed annotation file (auto-detected)
 rustqc rna sample.bam --gtf genes.gtf.gz -p -o results/
-rustqc rna sample.bam --bed genes.bed.gz -p -o results/
 
 # Skip duplicate-marking validation
 rustqc rna sample.bam --gtf genes.gtf -p --skip-dup-check

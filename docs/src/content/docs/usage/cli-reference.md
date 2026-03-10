@@ -18,7 +18,7 @@ outputs.
 ### Synopsis
 
 ```
-rustqc rna <INPUT>... (--gtf <GTF> [--bed <BED>] | --bed <BED>) [OPTIONS]
+rustqc rna <INPUT>... --gtf <GTF> [OPTIONS]
 ```
 
 ### Positional arguments
@@ -35,11 +35,8 @@ producing its own set of output files. Threads are divided evenly among
 concurrent jobs.
 
 ```bash
-# Single file with GTF (all analyses)
+# Single file
 rustqc rna sample.bam --gtf genes.gtf
-
-# Single file with BED (RSeQC tools only; dupRadar/featureCounts skipped)
-rustqc rna sample.bam --bed genes.bed
 
 # Multiple files
 rustqc rna sample1.bam sample2.bam sample3.bam --gtf genes.gtf
@@ -47,27 +44,13 @@ rustqc rna sample1.bam sample2.bam sample3.bam --gtf genes.gtf
 
 ### Annotation options
 
-At least one of `--gtf` or `--bed` must be provided. They can be **used together**: when both are supplied, the GTF is used for dupRadar, featureCounts, and Qualimap, while the BED file is used for read_distribution.
-
 #### `--gtf <GTF>` / `-g <GTF>`
 
-Path to a GTF gene annotation file (plain or gzip-compressed). The GTF must
-contain `exon` features with a `gene_id` attribute. When a GTF is provided,
-**all analyses run**: dupRadar, featureCounts, all 8 RSeQC tools (including TIN), Qualimap, preseq, and samtools.
+Path to a GTF gene annotation file (plain or gzip-compressed). **Required.**
+The GTF must contain `exon` features with a `gene_id` attribute.
 Transcript-level structure (exon blocks, CDS features) is extracted automatically
-and used by the RSeQC tools that previously required a separate BED file.
-
-Gzip compression is detected automatically by inspecting the file header (magic
-bytes), so the `.gz` extension is not required.
-
-#### `-b, --bed <BED>`
-
-Path to a BED12-format gene model file (plain or gzip-compressed). When a BED
-file is provided **without** a GTF, the RSeQC tools (including TIN), preseq, and samtools
-outputs run. dupRadar, featureCounts, and Qualimap are skipped because BED files
-lack gene-level grouping and biotype information. When provided **together with**
-a GTF, the BED file is used for read_distribution while the GTF handles
-dupRadar, featureCounts, and Qualimap.
+and used by all analyses: dupRadar, featureCounts, all 8 RSeQC tools (including TIN),
+Qualimap, preseq, and samtools.
 
 Gzip compression is detected automatically by inspecting the file header (magic
 bytes), so the `.gz` extension is not required.
@@ -216,11 +199,8 @@ Preseq runs by default and can be skipped entirely with `--skip-preseq`.
 ### Examples
 
 ```bash
-# Basic paired-end analysis with GTF (all tools)
+# Basic paired-end analysis
 rustqc rna sample.bam --gtf genes.gtf -p -o results/
-
-# BED-only mode (RSeQC + preseq + samtools; dupRadar/featureCounts/Qualimap skipped)
-rustqc rna sample.bam --bed genes.bed -p -o results/
 
 # Reverse-stranded library with 8 threads
 rustqc rna sample.bam --gtf genes.gtf -p -s 2 -t 8 -o results/
@@ -246,9 +226,8 @@ rustqc rna sample.bam --gtf genes.gtf -p \
 # Multiple BAM files with parallel processing
 rustqc rna *.bam --gtf genes.gtf -p -t 8 -o results/
 
-# Gzip-compressed annotation files (auto-detected)
+# Gzip-compressed annotation file (auto-detected)
 rustqc rna sample.bam --gtf genes.gtf.gz -p -o results/
-rustqc rna sample.bam --bed genes.bed.gz -p -o results/
 ```
 
 ---

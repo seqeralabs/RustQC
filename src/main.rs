@@ -122,12 +122,7 @@ fn reconstruct_command_line(args: &cli::RnaArgs) -> String {
             .collect::<Vec<_>>()
             .join(" "),
     )];
-    if let Some(ref gtf) = args.gtf {
-        parts.push(format!("--gtf {}", shell_escape(gtf)));
-    }
-    if let Some(ref bed) = args.bed {
-        parts.push(format!("--bed {}", shell_escape(bed)));
-    }
+    parts.push(format!("--gtf {}", shell_escape(&args.gtf)));
     if let Some(s) = args.stranded {
         parts.push(format!("-s {}", s));
     }
@@ -240,16 +235,7 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         if n_bams > 1 { "s" } else { "" },
         args.input.join(", ")
     );
-    if let Some(ref gtf) = args.gtf {
-        info!("GTF file: {}", gtf);
-    }
-    if let Some(ref bed) = args.bed {
-        info!("BED file: {}", bed);
-        warn!(
-            "BED-only mode: dupRadar and featureCounts analyses will be skipped. \
-             Use --gtf instead to run all analyses."
-        );
-    }
+    info!("GTF file: {}", args.gtf);
     if let Some(ref reference) = args.reference {
         info!("Reference FASTA: {}", reference);
     }
@@ -287,157 +273,123 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
     let mut biotype_attribute = configured_biotype.clone();
     let need_biotype = config.any_biotype_output();
 
-    // GTF mode: parse GTF and detect biotype attributes
-    let genes: Option<IndexMap<String, gtf::Gene>> = if let Some(ref gtf_path) = args.gtf {
-        if need_biotype {
-            // Check if the configured biotype attribute exists in the GTF.
-            // If not found and the user didn't explicitly set it, try common alternatives:
-            // Ensembl GTFs use "gene_biotype", GENCODE GTFs use "gene_type".
-            let user_explicit = args.biotype_attribute.is_some();
-            if gtf::attribute_exists_in_gtf(gtf_path, &biotype_attribute, 1000) {
-                extra_attributes.push(biotype_attribute.clone());
-                info!("Biotype attribute: {}", biotype_attribute);
-            } else if !user_explicit {
-                // Auto-detect: try known alternatives
-                let alternatives = if biotype_attribute == "gene_biotype" {
-                    vec!["gene_type"]
-                } else if biotype_attribute == "gene_type" {
-                    vec!["gene_biotype"]
-                } else {
-                    vec!["gene_biotype", "gene_type"]
-                };
-                let mut found = false;
-                for alt in alternatives {
-                    if gtf::attribute_exists_in_gtf(gtf_path, alt, 1000) {
-                        info!(
-                            "Biotype attribute '{}' not found in GTF, using '{}' instead",
-                            biotype_attribute, alt
-                        );
-                        biotype_attribute = alt.to_string();
-                        extra_attributes.push(biotype_attribute.clone());
-                        found = true;
-                        break;
-                    }
-                }
-                if !found {
-                    warn!(
-                        "Biotype attribute '{}' not found in GTF, skipping biotype outputs",
-                        configured_biotype
-                    );
-                }
+    // Detect biotype attributes in GTF
+    let gtf_path = &args.gtf;
+    if need_biotype {
+        // Check if the configured biotype attribute exists in the GTF.
+        // If not found and the user didn't explicitly set it, try common alternatives:
+        // Ensembl GTFs use "gene_biotype", GENCODE GTFs use "gene_type".
+        let user_explicit = args.biotype_attribute.is_some();
+        if gtf::attribute_exists_in_gtf(gtf_path, &biotype_attribute, 1000) {
+            extra_attributes.push(biotype_attribute.clone());
+            info!("Biotype attribute: {}", biotype_attribute);
+        } else if !user_explicit {
+            // Auto-detect: try known alternatives
+            let alternatives = if biotype_attribute == "gene_biotype" {
+                vec!["gene_type"]
+            } else if biotype_attribute == "gene_type" {
+                vec!["gene_biotype"]
             } else {
+                vec!["gene_biotype", "gene_type"]
+            };
+            let mut found = false;
+            for alt in alternatives {
+                if gtf::attribute_exists_in_gtf(gtf_path, alt, 1000) {
+                    info!(
+                        "Biotype attribute '{}' not found in GTF, using '{}' instead",
+                        biotype_attribute, alt
+                    );
+                    biotype_attribute = alt.to_string();
+                    extra_attributes.push(biotype_attribute.clone());
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
                 warn!(
                     "Biotype attribute '{}' not found in GTF, skipping biotype outputs",
-                    biotype_attribute
+                    configured_biotype
                 );
             }
+        } else {
+            warn!(
+                "Biotype attribute '{}' not found in GTF, skipping biotype outputs",
+                biotype_attribute
+            );
         }
-
-        // Step 1: Parse GTF annotation (shared across all BAM files)
-        info!("Parsing GTF annotation...");
-        let gtf_start = Instant::now();
-        let parsed = gtf::parse_gtf(gtf_path, &extra_attributes)?;
-        info!(
-            "Parsed {} genes in {:.2}s",
-            parsed.len(),
-            gtf_start.elapsed().as_secs_f64()
-        );
-        Some(parsed)
-    } else {
-        None
-    };
-
-    // Build RSeQC data structures from annotation (GTF or BED).
-    // These are built once and shared across all BAM files.
-    // Each tool's data is only built when enabled in the config.
-    macro_rules! build_rseqc_data {
-        ($enabled:expr, $gtf_msg:expr, $gtf_builder:expr, $bed_msg:expr, $bed_builder:expr) => {
-            if $enabled {
-                if let Some(ref genes) = genes {
-                    info!($gtf_msg);
-                    Some($gtf_builder(genes))
-                } else if let Some(ref bed_path) = args.bed {
-                    info!($bed_msg);
-                    Some($bed_builder(bed_path)?)
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        };
     }
 
-    let gene_model = build_rseqc_data!(
-        config.infer_experiment.enabled,
-        "Building gene model from GTF for infer_experiment...",
-        rna::rseqc::infer_experiment::GeneModel::from_genes,
-        "Loading gene model from BED file for infer_experiment...",
-        rna::rseqc::infer_experiment::GeneModel::from_bed
+    // Step 1: Parse GTF annotation (shared across all BAM files)
+    info!("Parsing GTF annotation...");
+    let gtf_start = Instant::now();
+    let genes = gtf::parse_gtf(gtf_path, &extra_attributes)?;
+    info!(
+        "Parsed {} genes in {:.2}s",
+        genes.len(),
+        gtf_start.elapsed().as_secs_f64()
     );
 
-    let ref_junctions = build_rseqc_data!(
-        config.junction_annotation.enabled,
-        "Building reference junctions from GTF...",
-        rna::rseqc::common::build_reference_junctions_from_genes,
-        "Parsing reference junctions from BED...",
-        rna::rseqc::common::parse_reference_junctions_from_bed
-    );
-
-    let known_junctions = build_rseqc_data!(
-        config.junction_saturation.enabled,
-        "Building known junction set from GTF...",
-        rna::rseqc::common::build_known_junctions_from_genes,
-        "Parsing known junction set from BED...",
-        rna::rseqc::common::parse_known_junctions_from_bed
-    );
-
-    // read_distribution: prefer BED when available (even if GTF is also provided).
-    // This matches nf-core/rnaseq pipeline behavior where the GTF is converted to
-    // BED12 for RSeQC tools. BED12 encodes exact transcript structures including
-    // thickStart/thickEnd for CDS boundaries, ensuring consistent region definitions.
-    let rd_regions = if config.read_distribution.enabled {
-        if let Some(ref bed_path) = args.bed {
-            info!("Building genomic region sets from BED...");
-            Some(rna::rseqc::read_distribution::build_regions_from_bed(
-                bed_path,
-            )?)
-        } else if let Some(ref genes) = genes {
-            info!("Building genomic region sets from GTF...");
-            Some(rna::rseqc::read_distribution::build_regions_from_genes(
-                genes,
-            ))
-        } else {
-            None
-        }
+    // Build RSeQC data structures from GTF annotation.
+    // These are built once and shared across all BAM files.
+    // Each tool's data is only built when enabled in the config.
+    let gene_model = if config.infer_experiment.enabled {
+        info!("Building gene model from GTF for infer_experiment...");
+        Some(rna::rseqc::infer_experiment::GeneModel::from_genes(&genes))
     } else {
         None
     };
 
-    let exon_bitset = build_rseqc_data!(
-        config.inner_distance.enabled,
-        "Building exon bitset from GTF...",
-        rna::rseqc::inner_distance::ExonBitset::from_genes,
-        "Building exon bitset from BED...",
-        rna::rseqc::inner_distance::ExonBitset::from_bed
-    );
+    let ref_junctions = if config.junction_annotation.enabled {
+        info!("Building reference junctions from GTF...");
+        Some(rna::rseqc::common::build_reference_junctions_from_genes(
+            &genes,
+        ))
+    } else {
+        None
+    };
 
-    let transcript_tree = build_rseqc_data!(
-        config.inner_distance.enabled,
-        "Building transcript tree from GTF...",
-        rna::rseqc::inner_distance::TranscriptTree::from_genes,
-        "Building transcript tree from BED...",
-        rna::rseqc::inner_distance::TranscriptTree::from_bed
-    );
+    let known_junctions = if config.junction_saturation.enabled {
+        info!("Building known junction set from GTF...");
+        Some(rna::rseqc::common::build_known_junctions_from_genes(&genes))
+    } else {
+        None
+    };
+
+    let rd_regions = if config.read_distribution.enabled {
+        info!("Building genomic region sets from GTF...");
+        Some(rna::rseqc::read_distribution::build_regions_from_genes(
+            &genes,
+        ))
+    } else {
+        None
+    };
+
+    let exon_bitset = if config.inner_distance.enabled {
+        info!("Building exon bitset from GTF...");
+        Some(rna::rseqc::inner_distance::ExonBitset::from_genes(&genes))
+    } else {
+        None
+    };
+
+    let transcript_tree = if config.inner_distance.enabled {
+        info!("Building transcript tree from GTF...");
+        Some(rna::rseqc::inner_distance::TranscriptTree::from_genes(
+            &genes,
+        ))
+    } else {
+        None
+    };
 
     let tin_sample_size = config.tin.sample_size.unwrap_or(100) as usize;
-    let tin_index = build_rseqc_data!(
-        config.tin.enabled,
-        "Building TIN index from GTF...",
-        |genes| rna::rseqc::tin::TinIndex::from_genes(genes, tin_sample_size),
-        "Building TIN index from BED...",
-        |bed_path| rna::rseqc::tin::TinIndex::from_bed(bed_path, tin_sample_size)
-    );
+    let tin_index = if config.tin.enabled {
+        info!("Building TIN index from GTF...");
+        Some(rna::rseqc::tin::TinIndex::from_genes(
+            &genes,
+            tin_sample_size,
+        ))
+    } else {
+        None
+    };
 
     let chrom_mapping = config.alignment_to_gtf_mapping();
     let chrom_prefix = config.chromosome_prefix().map(|s| s.to_owned());
@@ -525,7 +477,7 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         tin_index: tin_index.as_ref(),
         tin_sample_size,
         tin_min_coverage: config.tin.min_coverage.unwrap_or(10),
-        gtf_path: args.gtf.as_deref(),
+        gtf_path: &args.gtf,
     };
 
     // Step 2: Process all alignment files (in parallel when multiple)
@@ -533,7 +485,7 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         // Single file: use all threads directly, no outer rayon pool needed
         vec![process_single_bam(
             &args.input[0],
-            genes.as_ref(),
+            &genes,
             args.threads,
             &shared,
         )]
@@ -547,9 +499,7 @@ fn run_rna(args: cli::RnaArgs) -> Result<()> {
         pool.install(|| {
             args.input
                 .par_iter()
-                .map(|bam_path| {
-                    process_single_bam(bam_path, genes.as_ref(), threads_per_bam, &shared)
-                })
+                .map(|bam_path| process_single_bam(bam_path, &genes, threads_per_bam, &shared))
                 .collect()
         })
     };
@@ -619,17 +569,17 @@ struct SharedParams<'a> {
     biotype_in_gtf: bool,
     /// Reconstructed command line for featureCounts header.
     command_line: &'a str,
-    /// Pre-built gene model for infer_experiment (from GTF or BED).
+    /// Pre-built gene model for infer_experiment (from GTF).
     gene_model: Option<&'a rna::rseqc::infer_experiment::GeneModel>,
-    /// Pre-built reference junctions for junction_annotation (from GTF or BED).
+    /// Pre-built reference junctions for junction_annotation (from GTF).
     ref_junctions: Option<&'a rna::rseqc::common::ReferenceJunctions>,
-    /// Pre-built known junction set for junction_saturation (from GTF or BED).
+    /// Pre-built known junction set for junction_saturation (from GTF).
     known_junctions: Option<&'a rna::rseqc::common::KnownJunctionSet>,
-    /// Pre-built genomic region sets for read_distribution (from GTF or BED).
+    /// Pre-built genomic region sets for read_distribution (from GTF).
     rd_regions: Option<&'a rna::rseqc::read_distribution::RegionSets>,
-    /// Pre-built exon bitset for inner_distance (from GTF or BED).
+    /// Pre-built exon bitset for inner_distance (from GTF).
     exon_bitset: Option<&'a rna::rseqc::inner_distance::ExonBitset>,
-    /// Pre-built transcript tree for inner_distance (from GTF or BED).
+    /// Pre-built transcript tree for inner_distance (from GTF).
     transcript_tree: Option<&'a rna::rseqc::inner_distance::TranscriptTree>,
     /// MAPQ cutoff for read quality filtering.
     mapq_cut: u8,
@@ -653,14 +603,14 @@ struct SharedParams<'a> {
     inner_distance_upper_bound: i64,
     /// Bin width for inner distance histogram.
     inner_distance_step: i64,
-    /// Pre-built TIN index for transcript integrity analysis (from GTF or BED).
+    /// Pre-built TIN index for transcript integrity analysis (from GTF).
     tin_index: Option<&'a rna::rseqc::tin::TinIndex>,
     /// Number of equally-spaced positions to sample per transcript for TIN.
     tin_sample_size: usize,
     /// Minimum read-start count per transcript to compute TIN.
     tin_min_coverage: u32,
     /// Path to GTF file (for Qualimap report output).
-    gtf_path: Option<&'a str>,
+    gtf_path: &'a str,
 }
 
 // ============================================================================
@@ -673,18 +623,15 @@ struct SharedParams<'a> {
 /// biotype counting, duplication matrix, model fitting, plotting, MultiQC output,
 /// and all enabled RSeQC analyses.
 ///
-/// When `genes` is `None` (BED-only mode), the dupRadar and featureCounts
-/// analyses are skipped entirely and only RSeQC tools are run.
-///
 /// # Arguments
 ///
 /// * `bam_path` - Path to the duplicate-marked alignment file (SAM/BAM/CRAM)
-/// * `genes` - Parsed GTF gene annotations (None in BED-only mode)
+/// * `genes` - Parsed GTF gene annotations
 /// * `threads` - Number of threads for this file's read counting
 /// * `params` - Shared parameters (config, annotations, tool settings)
 fn process_single_bam(
     bam_path: &str,
-    genes: Option<&IndexMap<String, gtf::Gene>>,
+    genes: &IndexMap<String, gtf::Gene>,
     threads: usize,
     params: &SharedParams,
 ) -> Result<()> {
@@ -752,441 +699,403 @@ fn process_single_bam(
         || rseqc_config.preseq_enabled
         || rseqc_config.tin_enabled;
 
-    // === Build Qualimap exon index (if enabled, GTF-only) ===
+    // === Build Qualimap exon index (if enabled) ===
     let qualimap_index = if params.config.qualimap.enabled {
-        genes.map(rna::qualimap::QualimapIndex::from_genes)
+        Some(rna::qualimap::QualimapIndex::from_genes(genes))
     } else {
         None
     };
 
-    // === dupRadar counting (requires GTF) ===
-    let mut count_result = if let Some(genes) = genes {
+    // === dupRadar counting ===
+    info!(
+        "[{}] Counting reads (dupRadar + featureCounts + RSeQC)...",
+        bam_stem
+    );
+    let count_start = Instant::now();
+    let mut count_result = rna::dupradar::counting::count_reads(
+        bam_path,
+        genes,
+        params.stranded,
+        params.paired,
+        threads,
+        params.chrom_mapping,
+        params.chrom_prefix,
+        params.reference,
+        params.skip_dup_check,
+        params.biotype_attribute,
+        if any_rseqc_enabled {
+            Some(&rseqc_config)
+        } else {
+            None
+        },
+        if any_rseqc_enabled {
+            Some(&rseqc_annotations)
+        } else {
+            None
+        },
+        qualimap_index.as_ref(),
+    )?;
+    info!(
+        "[{}] Counting complete in {:.2}s",
+        bam_stem,
+        count_start.elapsed().as_secs_f64()
+    );
+
+    // Extract RSeQC accumulators from count_result.
+    let rseqc_accums = count_result.rseqc.take();
+
+    // === dupRadar + featureCounts outputs ===
+
+    // Log counting summary stats
+    info!(
+        "[{}] Total reads processed: {} ({} fragments)",
+        bam_stem, count_result.stat_total_reads, count_result.stat_total_fragments
+    );
+    info!("[{}] Assigned: {}", bam_stem, count_result.stat_assigned);
+    info!(
+        "[{}] No features: {}",
+        bam_stem, count_result.stat_no_features
+    );
+    info!("[{}] Ambiguous: {}", bam_stem, count_result.stat_ambiguous);
+
+    // Output directories: nested subdirectories by default, flat if requested
+    let fc_dir = if params.flat_output {
+        outdir.to_path_buf()
+    } else {
+        outdir.join("featurecounts")
+    };
+    let dr_dir = if params.flat_output {
+        outdir.to_path_buf()
+    } else {
+        outdir.join("dupradar")
+    };
+
+    // === featureCounts outputs ===
+    if config.any_featurecounts_output() {
+        std::fs::create_dir_all(&fc_dir).with_context(|| {
+            format!(
+                "Failed to create featurecounts output directory: {}",
+                fc_dir.display()
+            )
+        })?;
         info!(
-            "[{}] Counting reads (dupRadar + featureCounts + RSeQC)...",
+            "[{}] Writing featureCounts-compatible output files...",
             bam_stem
         );
-        let count_start = Instant::now();
-        let result = rna::dupradar::counting::count_reads(
-            bam_path,
-            genes,
-            params.stranded,
-            params.paired,
-            threads,
-            params.chrom_mapping,
-            params.chrom_prefix,
-            params.reference,
-            params.skip_dup_check,
-            params.biotype_attribute,
-            if any_rseqc_enabled {
-                Some(&rseqc_config)
-            } else {
-                None
-            },
-            if any_rseqc_enabled {
-                Some(&rseqc_annotations)
-            } else {
-                None
-            },
-            qualimap_index.as_ref(),
-        )?;
-        info!(
-            "[{}] Counting complete in {:.2}s",
-            bam_stem,
-            count_start.elapsed().as_secs_f64()
-        );
-        Some(result)
-    } else {
-        None
-    };
 
-    // Extract RSeQC accumulators from count_result (available in GTF mode).
-    // In BED-only mode, we'll run a separate single-pass below.
-    let rseqc_accums = count_result.as_mut().and_then(|cr| cr.rseqc.take());
-
-    // === dupRadar + featureCounts outputs (GTF-only mode) ===
-    // When genes are available (GTF mode), we have count_result and can produce
-    // all counting-based outputs. In BED-only mode both are None and we skip.
-    if let Some(count_result) = count_result {
-        // genes is guaranteed to be Some when count_result is Some
-        let genes = genes.expect("genes must be Some when count_result is Some");
-
-        // Log counting summary stats
-        info!(
-            "[{}] Total reads processed: {} ({} fragments)",
-            bam_stem, count_result.stat_total_reads, count_result.stat_total_fragments
-        );
-        info!("[{}] Assigned: {}", bam_stem, count_result.stat_assigned);
-        info!(
-            "[{}] No features: {}",
-            bam_stem, count_result.stat_no_features
-        );
-        info!("[{}] Ambiguous: {}", bam_stem, count_result.stat_ambiguous);
-
-        // Output directories: nested subdirectories by default, flat if requested
-        let fc_dir = if params.flat_output {
-            outdir.to_path_buf()
-        } else {
-            outdir.join("featurecounts")
-        };
-        let dr_dir = if params.flat_output {
-            outdir.to_path_buf()
-        } else {
-            outdir.join("dupradar")
-        };
-
-        // === featureCounts outputs ===
-        if config.any_featurecounts_output() {
-            std::fs::create_dir_all(&fc_dir).with_context(|| {
-                format!(
-                    "Failed to create featurecounts output directory: {}",
-                    fc_dir.display()
-                )
-            })?;
-            info!(
-                "[{}] Writing featureCounts-compatible output files...",
-                bam_stem
-            );
-
-            if config.featurecounts.counts_file {
-                let counts_path = fc_dir.join(format!("{}.featureCounts.tsv", bam_stem));
-                rna::featurecounts::output::write_counts_file(
-                    &counts_path,
-                    genes,
-                    &count_result,
-                    bam_path,
-                    params.command_line,
-                )?;
-                info!(
-                    "[{}] Counts file written to {}",
-                    bam_stem,
-                    counts_path.display()
-                );
-            }
-
-            if config.featurecounts.summary_file {
-                let summary_path = fc_dir.join(format!("{}.featureCounts.tsv.summary", bam_stem));
-                rna::featurecounts::output::write_summary_file(
-                    &summary_path,
-                    &count_result,
-                    bam_path,
-                )?;
-                info!(
-                    "[{}] Summary file written to {}",
-                    bam_stem,
-                    summary_path.display()
-                );
-            }
-
-            // Biotype outputs (only if attribute was found in GTF)
-            if params.biotype_in_gtf && config.any_biotype_output() {
-                let biotype_counts =
-                    rna::featurecounts::output::aggregate_biotype_counts(&count_result);
-                info!(
-                    "[{}] Biotype counting: {} biotypes found",
-                    bam_stem,
-                    biotype_counts.len()
-                );
-
-                if config.featurecounts.biotype_counts {
-                    let biotype_path = fc_dir.join(format!("{}.biotype_counts.tsv", bam_stem));
-                    rna::featurecounts::output::write_biotype_counts(
-                        &biotype_path,
-                        &biotype_counts,
-                    )?;
-                    info!(
-                        "[{}] Biotype counts written to {}",
-                        bam_stem,
-                        biotype_path.display()
-                    );
-                }
-
-                if config.featurecounts.biotype_counts_mqc {
-                    let mqc_biotype_path =
-                        fc_dir.join(format!("{}.biotype_counts_mqc.tsv", bam_stem));
-                    rna::featurecounts::output::write_biotype_counts_mqc(
-                        &mqc_biotype_path,
-                        &biotype_counts,
-                    )?;
-                    info!(
-                        "[{}] Biotype MultiQC file written to {}",
-                        bam_stem,
-                        mqc_biotype_path.display()
-                    );
-                }
-
-                if config.featurecounts.biotype_rrna_mqc {
-                    let mqc_rrna_path =
-                        fc_dir.join(format!("{}.biotype_counts_rrna_mqc.tsv", bam_stem));
-                    rna::featurecounts::output::write_biotype_rrna_mqc(
-                        &mqc_rrna_path,
-                        &biotype_counts,
-                        count_result.fc_biotype_assigned,
-                        bam_stem,
-                    )?;
-                    info!(
-                        "[{}] rRNA MultiQC file written to {}",
-                        bam_stem,
-                        mqc_rrna_path.display()
-                    );
-                }
-            }
-        }
-
-        // === dupRadar outputs ===
-        if config.any_dupradar_output() {
-            std::fs::create_dir_all(&dr_dir).with_context(|| {
-                format!(
-                    "Failed to create dupradar output directory: {}",
-                    dr_dir.display()
-                )
-            })?;
-            info!("[{}] Building duplication matrix...", bam_stem);
-            let dup_matrix = rna::dupradar::dupmatrix::DupMatrix::build(genes, &count_result);
-
-            let stats = dup_matrix.get_stats();
-            info!(
-                "[{}] Matrix built for {} genes ({} with reads)",
-                bam_stem, stats.n_regions, stats.n_regions_covered
-            );
-
-            // Write duplication matrix
-            if config.dupradar.dup_matrix {
-                let matrix_path = dr_dir.join(format!("{}_dupMatrix.txt", bam_stem));
-                dup_matrix.write_tsv(&matrix_path)?;
-                info!(
-                    "[{}] Duplication matrix written to {}",
-                    bam_stem,
-                    matrix_path.display()
-                );
-            }
-
-            // Fit logistic regression model (needed for intercept/slope, density plot, and MultiQC)
-            let need_fit = config.dupradar.intercept_slope
-                || config.dupradar.density_scatter_plot
-                || config.dupradar.multiqc_intercept
-                || config.dupradar.multiqc_curve;
-
-            let fit_ok = if need_fit {
-                info!("[{}] Fitting duplication rate model...", bam_stem);
-                let rpk_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.rpk).collect();
-                let dup_rate_values: Vec<f64> =
-                    dup_matrix.rows.iter().map(|r| r.dup_rate).collect();
-
-                let fit_result =
-                    rna::dupradar::fitting::duprate_exp_fit(&rpk_values, &dup_rate_values);
-                match &fit_result {
-                    Ok(fit) => {
-                        info!(
-                            "[{}] Model fit: intercept={:.6}, slope={:.6}",
-                            bam_stem, fit.intercept, fit.slope
-                        );
-                        if config.dupradar.intercept_slope {
-                            let fit_path = dr_dir.join(format!("{}_intercept_slope.txt", bam_stem));
-                            rna::dupradar::plots::write_intercept_slope(
-                                fit,
-                                &sample_name,
-                                &fit_path,
-                            )?;
-                            info!(
-                                "[{}] Fit results written to {}",
-                                bam_stem,
-                                fit_path.display()
-                            );
-                        }
-                        Some(fit.clone())
-                    }
-                    Err(e) => {
-                        warn!("[{}] Could not fit model: {}", bam_stem, e);
-                        None
-                    }
-                }
-            } else {
-                None
-            };
-
-            // Generate plots (in parallel — all plots read shared immutable data)
-            let any_plot = config.dupradar.density_scatter_plot
-                || config.dupradar.boxplot
-                || config.dupradar.expression_histogram;
-
-            if any_plot {
-                info!("[{}] Generating plots...", bam_stem);
-                let plot_start = Instant::now();
-
-                let rpkm_threshold = 0.5;
-                let rpkm_threshold_rpk = fit_ok.as_ref().and_then(|_fit| {
-                    let rpk_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.rpk).collect();
-                    let rpkm_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.rpkm).collect();
-                    rna::dupradar::fitting::compute_rpkm_threshold_rpk(
-                        &rpk_values,
-                        &rpkm_values,
-                        rpkm_threshold,
-                    )
-                });
-
-                let density_path = dr_dir.join(format!("{}_duprateExpDens.png", bam_stem));
-                let boxplot_path = dr_dir.join(format!("{}_duprateExpBoxplot.png", bam_stem));
-                let histogram_path = dr_dir.join(format!("{}_expressionHist.png", bam_stem));
-
-                std::thread::scope(|s| -> Result<()> {
-                    // Density scatter plot (only if fit succeeded and enabled)
-                    let density_handle = if config.dupradar.density_scatter_plot {
-                        fit_ok.as_ref().map(|fit| {
-                            let dm_ref = &dup_matrix;
-                            let thresh = rpkm_threshold_rpk;
-                            let path = &density_path;
-                            s.spawn(move || {
-                                rna::dupradar::plots::density_scatter_plot(
-                                    dm_ref,
-                                    fit,
-                                    thresh,
-                                    rpkm_threshold,
-                                    bam_stem,
-                                    path,
-                                )
-                            })
-                        })
-                    } else {
-                        None
-                    };
-
-                    // Boxplot
-                    let boxplot_handle = if config.dupradar.boxplot {
-                        let dm_ref = &dup_matrix;
-                        let path = &boxplot_path;
-                        Some(s.spawn(move || {
-                            rna::dupradar::plots::duprate_boxplot(dm_ref, bam_stem, path)
-                        }))
-                    } else {
-                        None
-                    };
-
-                    // Histogram
-                    let histogram_handle = if config.dupradar.expression_histogram {
-                        let dm_ref = &dup_matrix;
-                        let path = &histogram_path;
-                        Some(s.spawn(move || {
-                            rna::dupradar::plots::expression_histogram(dm_ref, bam_stem, path)
-                        }))
-                    } else {
-                        None
-                    };
-
-                    // Collect results
-                    if let Some(handle) = density_handle {
-                        handle.join().map_err(|_| {
-                            anyhow::anyhow!("density scatter plot thread panicked")
-                        })??;
-                    }
-                    if let Some(handle) = boxplot_handle {
-                        handle
-                            .join()
-                            .map_err(|_| anyhow::anyhow!("boxplot thread panicked"))??;
-                    }
-                    if let Some(handle) = histogram_handle {
-                        handle
-                            .join()
-                            .map_err(|_| anyhow::anyhow!("histogram thread panicked"))??;
-                    }
-
-                    Ok(())
-                })?;
-
-                info!(
-                    "[{}] Plots generated in {:.2}s",
-                    bam_stem,
-                    plot_start.elapsed().as_secs_f64()
-                );
-            }
-
-            // Write MultiQC-compatible output files
-            if let Some(ref fit) = fit_ok {
-                if config.dupradar.multiqc_intercept {
-                    let mqc_intercept_path =
-                        dr_dir.join(format!("{}_dup_intercept_mqc.txt", bam_stem));
-                    rna::dupradar::plots::write_mqc_intercept(
-                        fit,
-                        &sample_name,
-                        &mqc_intercept_path,
-                    )?;
-                }
-
-                if config.dupradar.multiqc_curve {
-                    let mqc_curve_path =
-                        dr_dir.join(format!("{}_duprateExpDensCurve_mqc.txt", bam_stem));
-                    rna::dupradar::plots::write_mqc_curve(fit, &dup_matrix, &mqc_curve_path)?;
-                }
-
-                if config.dupradar.multiqc_intercept || config.dupradar.multiqc_curve {
-                    info!("[{}] MultiQC output files written", bam_stem);
-                }
-            }
-
-            // Print dupRadar summary statistics
-            info!("[{}] --- dupRadar Summary ---", bam_stem);
-            info!("[{}] Total genes: {}", bam_stem, stats.n_regions);
-            info!(
-                "[{}] Genes with reads: {} ({:.1}%)",
-                bam_stem,
-                stats.n_regions_covered,
-                stats.f_regions_covered * 100.0
-            );
-            info!(
-                "[{}] Genes with duplication: {} ({:.1}%)",
-                bam_stem,
-                stats.n_regions_duplication,
-                stats.f_regions_duplication * 100.0
-            );
-        }
-        // === Qualimap RNA-Seq QC output ===
-        if let (Some(ref qm_result), Some(ref qm_index)) = (&count_result.qualimap, &qualimap_index)
-        {
-            let qm_dir = if params.flat_output {
-                outdir.to_path_buf()
-            } else {
-                outdir.join("qualimap")
-            };
-
-            // Extract junction event counts from the RSeQC accumulator (if available)
-            let junction_counts = rseqc_accums
-                .as_ref()
-                .and_then(|a| a.junc_annot.as_ref())
-                .map(|ja| {
-                    (
-                        ja.known_events,
-                        ja.partial_novel_events,
-                        ja.complete_novel_events,
-                    )
-                });
-
-            rna::qualimap::output::write_qualimap_results(
-                qm_result,
-                qm_index,
+        if config.featurecounts.counts_file {
+            let counts_path = fc_dir.join(format!("{}.featureCounts.tsv", bam_stem));
+            rna::featurecounts::output::write_counts_file(
+                &counts_path,
+                genes,
+                &count_result,
                 bam_path,
-                params.gtf_path.unwrap_or(""),
-                params.stranded,
-                &qm_dir,
-                bam_stem,
-                junction_counts,
+                params.command_line,
             )?;
             info!(
-                "[{}] Qualimap RNA-Seq QC results written to {:?}",
-                bam_stem, qm_dir
+                "[{}] Counts file written to {}",
+                bam_stem,
+                counts_path.display()
             );
         }
-    } // end if let Some(count_result) — GTF-only outputs
+
+        if config.featurecounts.summary_file {
+            let summary_path = fc_dir.join(format!("{}.featureCounts.tsv.summary", bam_stem));
+            rna::featurecounts::output::write_summary_file(&summary_path, &count_result, bam_path)?;
+            info!(
+                "[{}] Summary file written to {}",
+                bam_stem,
+                summary_path.display()
+            );
+        }
+
+        // Biotype outputs (only if attribute was found in GTF)
+        if params.biotype_in_gtf && config.any_biotype_output() {
+            let biotype_counts =
+                rna::featurecounts::output::aggregate_biotype_counts(&count_result);
+            info!(
+                "[{}] Biotype counting: {} biotypes found",
+                bam_stem,
+                biotype_counts.len()
+            );
+
+            if config.featurecounts.biotype_counts {
+                let biotype_path = fc_dir.join(format!("{}.biotype_counts.tsv", bam_stem));
+                rna::featurecounts::output::write_biotype_counts(&biotype_path, &biotype_counts)?;
+                info!(
+                    "[{}] Biotype counts written to {}",
+                    bam_stem,
+                    biotype_path.display()
+                );
+            }
+
+            if config.featurecounts.biotype_counts_mqc {
+                let mqc_biotype_path = fc_dir.join(format!("{}.biotype_counts_mqc.tsv", bam_stem));
+                rna::featurecounts::output::write_biotype_counts_mqc(
+                    &mqc_biotype_path,
+                    &biotype_counts,
+                )?;
+                info!(
+                    "[{}] Biotype MultiQC file written to {}",
+                    bam_stem,
+                    mqc_biotype_path.display()
+                );
+            }
+
+            if config.featurecounts.biotype_rrna_mqc {
+                let mqc_rrna_path =
+                    fc_dir.join(format!("{}.biotype_counts_rrna_mqc.tsv", bam_stem));
+                rna::featurecounts::output::write_biotype_rrna_mqc(
+                    &mqc_rrna_path,
+                    &biotype_counts,
+                    count_result.fc_biotype_assigned,
+                    bam_stem,
+                )?;
+                info!(
+                    "[{}] rRNA MultiQC file written to {}",
+                    bam_stem,
+                    mqc_rrna_path.display()
+                );
+            }
+        }
+    }
+
+    // === dupRadar outputs ===
+    if config.any_dupradar_output() {
+        std::fs::create_dir_all(&dr_dir).with_context(|| {
+            format!(
+                "Failed to create dupradar output directory: {}",
+                dr_dir.display()
+            )
+        })?;
+        info!("[{}] Building duplication matrix...", bam_stem);
+        let dup_matrix = rna::dupradar::dupmatrix::DupMatrix::build(genes, &count_result);
+
+        let stats = dup_matrix.get_stats();
+        info!(
+            "[{}] Matrix built for {} genes ({} with reads)",
+            bam_stem, stats.n_regions, stats.n_regions_covered
+        );
+
+        // Write duplication matrix
+        if config.dupradar.dup_matrix {
+            let matrix_path = dr_dir.join(format!("{}_dupMatrix.txt", bam_stem));
+            dup_matrix.write_tsv(&matrix_path)?;
+            info!(
+                "[{}] Duplication matrix written to {}",
+                bam_stem,
+                matrix_path.display()
+            );
+        }
+
+        // Fit logistic regression model (needed for intercept/slope, density plot, and MultiQC)
+        let need_fit = config.dupradar.intercept_slope
+            || config.dupradar.density_scatter_plot
+            || config.dupradar.multiqc_intercept
+            || config.dupradar.multiqc_curve;
+
+        let fit_ok = if need_fit {
+            info!("[{}] Fitting duplication rate model...", bam_stem);
+            let rpk_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.rpk).collect();
+            let dup_rate_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.dup_rate).collect();
+
+            let fit_result = rna::dupradar::fitting::duprate_exp_fit(&rpk_values, &dup_rate_values);
+            match &fit_result {
+                Ok(fit) => {
+                    info!(
+                        "[{}] Model fit: intercept={:.6}, slope={:.6}",
+                        bam_stem, fit.intercept, fit.slope
+                    );
+                    if config.dupradar.intercept_slope {
+                        let fit_path = dr_dir.join(format!("{}_intercept_slope.txt", bam_stem));
+                        rna::dupradar::plots::write_intercept_slope(fit, &sample_name, &fit_path)?;
+                        info!(
+                            "[{}] Fit results written to {}",
+                            bam_stem,
+                            fit_path.display()
+                        );
+                    }
+                    Some(fit.clone())
+                }
+                Err(e) => {
+                    warn!("[{}] Could not fit model: {}", bam_stem, e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Generate plots (in parallel — all plots read shared immutable data)
+        let any_plot = config.dupradar.density_scatter_plot
+            || config.dupradar.boxplot
+            || config.dupradar.expression_histogram;
+
+        if any_plot {
+            info!("[{}] Generating plots...", bam_stem);
+            let plot_start = Instant::now();
+
+            let rpkm_threshold = 0.5;
+            let rpkm_threshold_rpk = fit_ok.as_ref().and_then(|_fit| {
+                let rpk_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.rpk).collect();
+                let rpkm_values: Vec<f64> = dup_matrix.rows.iter().map(|r| r.rpkm).collect();
+                rna::dupradar::fitting::compute_rpkm_threshold_rpk(
+                    &rpk_values,
+                    &rpkm_values,
+                    rpkm_threshold,
+                )
+            });
+
+            let density_path = dr_dir.join(format!("{}_duprateExpDens.png", bam_stem));
+            let boxplot_path = dr_dir.join(format!("{}_duprateExpBoxplot.png", bam_stem));
+            let histogram_path = dr_dir.join(format!("{}_expressionHist.png", bam_stem));
+
+            std::thread::scope(|s| -> Result<()> {
+                // Density scatter plot (only if fit succeeded and enabled)
+                let density_handle = if config.dupradar.density_scatter_plot {
+                    fit_ok.as_ref().map(|fit| {
+                        let dm_ref = &dup_matrix;
+                        let thresh = rpkm_threshold_rpk;
+                        let path = &density_path;
+                        s.spawn(move || {
+                            rna::dupradar::plots::density_scatter_plot(
+                                dm_ref,
+                                fit,
+                                thresh,
+                                rpkm_threshold,
+                                bam_stem,
+                                path,
+                            )
+                        })
+                    })
+                } else {
+                    None
+                };
+
+                // Boxplot
+                let boxplot_handle = if config.dupradar.boxplot {
+                    let dm_ref = &dup_matrix;
+                    let path = &boxplot_path;
+                    Some(s.spawn(move || {
+                        rna::dupradar::plots::duprate_boxplot(dm_ref, bam_stem, path)
+                    }))
+                } else {
+                    None
+                };
+
+                // Histogram
+                let histogram_handle = if config.dupradar.expression_histogram {
+                    let dm_ref = &dup_matrix;
+                    let path = &histogram_path;
+                    Some(s.spawn(move || {
+                        rna::dupradar::plots::expression_histogram(dm_ref, bam_stem, path)
+                    }))
+                } else {
+                    None
+                };
+
+                // Collect results
+                if let Some(handle) = density_handle {
+                    handle
+                        .join()
+                        .map_err(|_| anyhow::anyhow!("density scatter plot thread panicked"))??;
+                }
+                if let Some(handle) = boxplot_handle {
+                    handle
+                        .join()
+                        .map_err(|_| anyhow::anyhow!("boxplot thread panicked"))??;
+                }
+                if let Some(handle) = histogram_handle {
+                    handle
+                        .join()
+                        .map_err(|_| anyhow::anyhow!("histogram thread panicked"))??;
+                }
+
+                Ok(())
+            })?;
+
+            info!(
+                "[{}] Plots generated in {:.2}s",
+                bam_stem,
+                plot_start.elapsed().as_secs_f64()
+            );
+        }
+
+        // Write MultiQC-compatible output files
+        if let Some(ref fit) = fit_ok {
+            if config.dupradar.multiqc_intercept {
+                let mqc_intercept_path = dr_dir.join(format!("{}_dup_intercept_mqc.txt", bam_stem));
+                rna::dupradar::plots::write_mqc_intercept(fit, &sample_name, &mqc_intercept_path)?;
+            }
+
+            if config.dupradar.multiqc_curve {
+                let mqc_curve_path =
+                    dr_dir.join(format!("{}_duprateExpDensCurve_mqc.txt", bam_stem));
+                rna::dupradar::plots::write_mqc_curve(fit, &dup_matrix, &mqc_curve_path)?;
+            }
+
+            if config.dupradar.multiqc_intercept || config.dupradar.multiqc_curve {
+                info!("[{}] MultiQC output files written", bam_stem);
+            }
+        }
+
+        // Print dupRadar summary statistics
+        info!("[{}] --- dupRadar Summary ---", bam_stem);
+        info!("[{}] Total genes: {}", bam_stem, stats.n_regions);
+        info!(
+            "[{}] Genes with reads: {} ({:.1}%)",
+            bam_stem,
+            stats.n_regions_covered,
+            stats.f_regions_covered * 100.0
+        );
+        info!(
+            "[{}] Genes with duplication: {} ({:.1}%)",
+            bam_stem,
+            stats.n_regions_duplication,
+            stats.f_regions_duplication * 100.0
+        );
+    }
+    // === Qualimap RNA-Seq QC output ===
+    if let (Some(ref qm_result), Some(ref qm_index)) = (&count_result.qualimap, &qualimap_index) {
+        let qm_dir = if params.flat_output {
+            outdir.to_path_buf()
+        } else {
+            outdir.join("qualimap")
+        };
+
+        // Extract junction event counts from the RSeQC accumulator (if available)
+        let junction_counts = rseqc_accums
+            .as_ref()
+            .and_then(|a| a.junc_annot.as_ref())
+            .map(|ja| {
+                (
+                    ja.known_events,
+                    ja.partial_novel_events,
+                    ja.complete_novel_events,
+                )
+            });
+
+        rna::qualimap::output::write_qualimap_results(
+            qm_result,
+            qm_index,
+            bam_path,
+            params.gtf_path,
+            params.stranded,
+            &qm_dir,
+            bam_stem,
+            junction_counts,
+        )?;
+        info!(
+            "[{}] Qualimap RNA-Seq QC results written to {:?}",
+            bam_stem, qm_dir
+        );
+    }
 
     // === RSeQC analyses (post-processing of single-pass accumulators) ===
-    let rseqc_accums = if let Some(accums) = rseqc_accums {
-        accums
-    } else if genes.is_none() {
-        // BED-only mode: run a standalone single-pass for RSeQC
-        run_rseqc_single_pass(bam_path, bam_stem, params, threads)?
-    } else {
-        // No RSeQC tools enabled — skip
+    let rseqc_accums = rseqc_accums.unwrap_or_else(|| {
         info!("[{}] No RSeQC tools enabled, skipping", bam_stem);
         RseqcAccumulators::empty()
-    };
+    });
     // Extract BAM header info (reference names + lengths) for samtools-compatible outputs
     let bam_header_refs = {
         let reader = rust_htslib::bam::Reader::from_path(bam_path)
@@ -1529,136 +1438,6 @@ fn write_rseqc_outputs(
     }
 
     Ok(())
-}
-
-// ============================================================================
-// BED-only mode: standalone single-pass for RSeQC
-// ============================================================================
-
-/// Run RSeQC analyses via a standalone single-pass BAM read (BED-only mode).
-///
-/// When no GTF is provided, dupRadar/featureCounts are skipped but RSeQC tools
-/// still need to run. This function does a single sequential BAM pass using the
-/// accumulator infrastructure, then returns the results for output writing.
-fn run_rseqc_single_pass(
-    bam_path: &str,
-    bam_stem: &str,
-    params: &SharedParams,
-    threads: usize,
-) -> Result<RseqcAccumulators> {
-    use rust_htslib::bam::{self, Read as BamRead};
-
-    info!("[{}] Running RSeQC single-pass (BED mode)...", bam_stem);
-    let pass_start = Instant::now();
-
-    // Build config and annotations
-    let rseqc_config = RseqcConfig {
-        mapq_cut: params.mapq_cut,
-        min_intron: params.min_intron,
-        infer_experiment_sample_size: params.infer_experiment_sample_size,
-        junction_saturation_min_coverage: params.junction_saturation_min_coverage as u32,
-        junction_saturation_sample_start: params.junction_saturation_percentile_floor as u32,
-        junction_saturation_sample_end: params.junction_saturation_percentile_ceiling as u32,
-        junction_saturation_sample_step: params.junction_saturation_percentile_step as u32,
-        inner_distance_sample_size: params.inner_distance_sample_size,
-        inner_distance_lower_bound: params.inner_distance_lower_bound,
-        inner_distance_upper_bound: params.inner_distance_upper_bound,
-        inner_distance_step: params.inner_distance_step,
-        bam_stat_enabled: params.config.bam_stat.enabled
-            || params.config.flagstat.enabled
-            || params.config.idxstats.enabled
-            || params.config.samtools_stats.enabled,
-        infer_experiment_enabled: params.config.infer_experiment.enabled
-            && params.gene_model.is_some(),
-        read_duplication_enabled: params.config.read_duplication.enabled,
-        read_distribution_enabled: params.config.read_distribution.enabled
-            && params.rd_regions.is_some(),
-        junction_annotation_enabled: params.config.junction_annotation.enabled
-            && params.ref_junctions.is_some(),
-        junction_saturation_enabled: params.config.junction_saturation.enabled
-            && params.known_junctions.is_some(),
-        inner_distance_enabled: params.config.inner_distance.enabled
-            && params.exon_bitset.is_some()
-            && params.transcript_tree.is_some(),
-        tin_enabled: params.config.tin.enabled && params.tin_index.is_some(),
-        tin_sample_size: params.tin_sample_size,
-        tin_min_coverage: params.tin_min_coverage,
-        preseq_enabled: params.config.preseq.enabled,
-        preseq_max_segment_length: params.config.preseq.max_segment_length,
-    };
-
-    let annotations = RseqcAnnotations {
-        gene_model: params.gene_model,
-        ref_junctions: params.ref_junctions,
-        rd_regions: params.rd_regions,
-        exon_bitset: params.exon_bitset,
-        transcript_tree: params.transcript_tree,
-        tin_index: params.tin_index,
-    };
-
-    let mut accums = RseqcAccumulators::new(&rseqc_config, Some(&annotations));
-
-    // Open BAM reader
-    let mut bam = bam::Reader::from_path(bam_path)
-        .with_context(|| format!("Failed to open BAM file: {bam_path}"))?;
-    if let Some(ref_path) = params.reference {
-        bam.set_reference(ref_path)
-            .with_context(|| format!("Failed to set reference: {ref_path}"))?;
-    }
-    // Use all available threads for decompression in single-pass mode
-    let _ = bam.set_threads(threads);
-
-    let header = bam.header().clone();
-    let tid_to_name: Vec<String> = (0..header.target_count())
-        .map(|tid| String::from_utf8_lossy(header.tid2name(tid)).to_string())
-        .collect();
-
-    // Pre-compute resolved chromosome names (apply prefix/mapping like counting.rs)
-    let tid_to_rseqc_chrom: Vec<String> = tid_to_name
-        .iter()
-        .map(|name| {
-            if let Some(mapped) = params.chrom_mapping.get(name.as_str()) {
-                mapped.clone()
-            } else if let Some(prefix) = params.chrom_prefix {
-                format!("{prefix}{name}")
-            } else {
-                name.clone()
-            }
-        })
-        .collect();
-    let tid_to_rseqc_upper: Vec<String> = tid_to_rseqc_chrom
-        .iter()
-        .map(|s| s.to_uppercase())
-        .collect();
-
-    let mut record = bam::Record::new();
-    while let Some(read_result) = bam.read(&mut record) {
-        read_result.context("Error reading BAM record")?;
-        let tid = record.tid();
-        if tid < 0 {
-            // Process unmapped reads through accumulators (bam_stat wants them)
-            accums.process_read(&record, "", "", &annotations, &rseqc_config);
-            continue;
-        }
-        let idx = tid as usize;
-        let rseqc_chrom = &tid_to_rseqc_chrom[idx];
-        let rseqc_upper = &tid_to_rseqc_upper[idx];
-        accums.process_read(
-            &record,
-            rseqc_chrom,
-            rseqc_upper,
-            &annotations,
-            &rseqc_config,
-        );
-    }
-
-    info!(
-        "[{}] RSeQC single-pass completed in {:.2}s",
-        bam_stem,
-        pass_start.elapsed().as_secs_f64()
-    );
-
-    Ok(accums)
 }
 
 #[cfg(test)]

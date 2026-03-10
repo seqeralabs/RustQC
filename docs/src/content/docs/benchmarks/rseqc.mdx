@@ -420,8 +420,7 @@ body coverage profiling, bias metrics, and Qualimap-compatible output comparison
 
 - **BAM file (small)**: chr6 subset test BAM, ~52K reads
 - **BAM file (large)**: GM12878 ENCODE RNA-Seq, paired-end, ~186M reads
-- **Annotation**: Ensembl BED12 gene model (same file used by both RSeQC and RustQC);
-  Ensembl GTF used for TIN and Qualimap (require gene-level annotation)
+- **Annotation**: Ensembl GTF gene annotation (RustQC uses GTF directly; RSeQC uses BED12 derived from the same GTF)
 - **RSeQC version**: 5.0.4
-- **RustQC**: multi-threaded, `--gtf` mode for TIN/Qualimap, `--bed` mode for RSeQC tools
+- **RustQC**: multi-threaded, `--gtf` mode for all tools
 - **Infrastructure**: AWS cloud (nf-core AWS megatests, 2026-03-07)

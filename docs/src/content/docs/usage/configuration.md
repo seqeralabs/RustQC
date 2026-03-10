@@ -9,8 +9,6 @@ advanced settings that go beyond what CLI flags offer. Pass the config file with
 
 ```bash
 rustqc rna sample.bam --gtf genes.gtf -p -c config.yaml -o results/
-# or with BED (RSeQC tools only)
-rustqc rna sample.bam --bed genes.bed -p -c config.yaml -o results/
 ```
 
 All sections and fields are optional. Missing fields use their default values.
@@ -265,7 +263,7 @@ infer_experiment:
   sample_size: 200000 # Number of reads to sample (default: 200000)
 ```
 
-Requires annotation (`--gtf` or `--bed`). The `sample_size` can also be set via
+Requires annotation (`--gtf`). The `sample_size` can also be set via
 `--infer-experiment-sample-size`.
 
 ### read_duplication
@@ -286,7 +284,7 @@ read_distribution:
   enabled: true # Set to false to skip read_distribution
 ```
 
-No additional parameters. Requires annotation (`--gtf` or `--bed`).
+No additional parameters. Requires annotation (`--gtf`).
 
 ### junction_annotation
 
@@ -296,7 +294,7 @@ junction_annotation:
   min_intron: 50 # Minimum intron length in bases (default: 50)
 ```
 
-Requires annotation (`--gtf` or `--bed`). The `min_intron` can also be set via `--min-intron`.
+Requires annotation (`--gtf`). The `min_intron` can also be set via `--min-intron`.
 
 ### junction_saturation
 
@@ -309,7 +307,7 @@ junction_saturation:
   percentile_step: 5 # Sampling step size (default: 5)
 ```
 
-Requires annotation (`--gtf` or `--bed`). These parameters can also be set via CLI flags:
+Requires annotation (`--gtf`). These parameters can also be set via CLI flags:
 `--junction-saturation-min-coverage`,
 `--junction-saturation-percentile-floor`, `--junction-saturation-percentile-ceiling`,
 `--junction-saturation-percentile-step`.
@@ -325,7 +323,7 @@ inner_distance:
   step: 5 # Histogram bin width (default: 5)
 ```
 
-Requires annotation (`--gtf` or `--bed`). These parameters can also be set via CLI flags:
+Requires annotation (`--gtf`). These parameters can also be set via CLI flags:
 `--inner-distance-sample-size`, `--inner-distance-lower-bound`,
 `--inner-distance-upper-bound`, `--inner-distance-step`.
 
@@ -338,7 +336,7 @@ tin:
   min_coverage: 10 # Minimum read-start count to compute TIN (default: 10)
 ```
 
-Requires annotation (`--gtf` or `--bed`). The TIN (Transcript Integrity Number)
+Requires annotation (`--gtf`). The TIN (Transcript Integrity Number)
 measures transcript integrity via Shannon entropy of read coverage uniformity.
 
 > **CLI shortcut:** Use `--skip-tin` to disable without a config file.
@@ -370,7 +368,7 @@ preseq:
   defects: false # Use defects model for problematic histograms (default: false)
 ```
 
-Runs in both GTF and BED modes (only needs BAM fragment info). The `max_extrap`,
+Only needs BAM fragment info (no annotation required). The `max_extrap`,
 `step_size`, and `n_bootstraps` can also be set via CLI flags (`--preseq-max-extrap`,
 `--preseq-step-size`, `--preseq-n-bootstraps`). Use `--skip-preseq` to disable entirely.
 

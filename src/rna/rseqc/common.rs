@@ -1,13 +1,12 @@
 //! Shared utilities for RSeQC tool reimplementations.
 //!
 //! Common functions used by multiple RSeQC tools, including CIGAR-based intron
-//! extraction and BED12 exon block parsing.
+//! extraction and GTF-based junction building.
 
 use std::collections::{HashMap, HashSet};
 
-use anyhow::{Context, Result};
 use indexmap::IndexMap;
-use log::{debug, info};
+use log::info;
 
 use crate::gtf::Gene;
 
@@ -77,169 +76,6 @@ pub struct ReferenceJunctions {
 pub struct KnownJunctionSet {
     /// Junction keys in `"CHROM:start-end"` format (uppercased chromosome).
     pub junctions: HashSet<String>,
-}
-
-// ===================================================================
-// BED12 parsing into junction data structures
-// ===================================================================
-
-/// Parse a BED12 file and extract reference intron start/end positions.
-///
-/// Single-exon transcripts are skipped. Chromosome names are uppercased.
-///
-/// # Arguments
-/// * `bed_path` - Path to BED12 gene model file.
-///
-/// # Returns
-/// A `ReferenceJunctions` with intron start and end position sets per chromosome.
-pub fn parse_reference_junctions_from_bed(bed_path: &str) -> Result<ReferenceJunctions> {
-    let content = crate::io::read_to_string(bed_path)
-        .with_context(|| format!("Failed to read BED file: {}", bed_path))?;
-
-    let mut result = ReferenceJunctions::default();
-    let mut transcript_count = 0u64;
-    let mut skipped = 0u64;
-
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty()
-            || line.starts_with('#')
-            || line.starts_with("track")
-            || line.starts_with("browser")
-        {
-            continue;
-        }
-
-        let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() < 12 {
-            debug!("Skipping BED line with {} fields (need 12)", fields.len());
-            skipped += 1;
-            continue;
-        }
-
-        let block_count: usize = fields[9].parse().unwrap_or(0);
-        // Skip single-exon transcripts (matching RSeQC behavior)
-        if block_count <= 1 {
-            continue;
-        }
-
-        let chrom = fields[0].to_uppercase();
-        let tx_start: u64 = fields[1].parse().unwrap_or(0);
-
-        let block_sizes: Vec<u64> = fields[10]
-            .trim_end_matches(',')
-            .split(',')
-            .filter_map(|s| s.parse().ok())
-            .collect();
-        let block_starts: Vec<u64> = fields[11]
-            .trim_end_matches(',')
-            .split(',')
-            .filter_map(|s| s.parse().ok())
-            .collect();
-
-        if block_sizes.len() != block_count || block_starts.len() != block_count {
-            debug!("Skipping BED line: block count mismatch");
-            skipped += 1;
-            continue;
-        }
-
-        // Compute exon coordinates
-        let exon_starts: Vec<u64> = block_starts.iter().map(|&bs| tx_start + bs).collect();
-        let exon_ends: Vec<u64> = exon_starts
-            .iter()
-            .zip(block_sizes.iter())
-            .map(|(&s, &sz)| s + sz)
-            .collect();
-
-        // Introns are the gaps between consecutive exons
-        let starts_set = result.intron_starts.entry(chrom.clone()).or_default();
-        let ends_set = result.intron_ends.entry(chrom).or_default();
-
-        for i in 0..block_count - 1 {
-            let intron_start = exon_ends[i]; // first intronic base (0-based)
-            let intron_end = exon_starts[i + 1]; // first base after intron (0-based, exclusive)
-            starts_set.insert(intron_start);
-            ends_set.insert(intron_end);
-        }
-
-        transcript_count += 1;
-    }
-
-    info!(
-        "Parsed {} multi-exon transcripts from BED12 ({} lines skipped)",
-        transcript_count, skipped
-    );
-
-    Ok(result)
-}
-
-/// Parse a BED12 file and extract known junction keys.
-///
-/// Returns a `KnownJunctionSet` with keys in `"CHROM:start-end"` format,
-/// where CHROM is uppercased and coordinates are 0-based.
-///
-/// # Arguments
-/// * `bed_path` - Path to BED12 gene model file.
-pub fn parse_known_junctions_from_bed(bed_path: &str) -> Result<KnownJunctionSet> {
-    let content =
-        crate::io::read_to_string(bed_path).with_context(|| format!("reading BED: {bed_path}"))?;
-
-    let mut result = KnownJunctionSet::default();
-
-    for line in content.lines() {
-        if line.starts_with('#') || line.starts_with("track") || line.starts_with("browser") {
-            continue;
-        }
-        let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() < 12 {
-            continue;
-        }
-
-        let chrom = fields[0].to_uppercase();
-        let tx_start: u64 = fields[1].parse().context("parsing txStart")?;
-        let block_count: usize = fields[9].parse().context("parsing blockCount")?;
-
-        // Skip single-exon transcripts
-        if block_count <= 1 {
-            continue;
-        }
-
-        let block_sizes: Vec<u64> = fields[10]
-            .trim_end_matches(',')
-            .split(',')
-            .map(|s| s.parse::<u64>().unwrap_or(0))
-            .collect();
-        let block_starts: Vec<u64> = fields[11]
-            .trim_end_matches(',')
-            .split(',')
-            .map(|s| s.parse::<u64>().unwrap_or(0))
-            .collect();
-
-        if block_sizes.len() < block_count || block_starts.len() < block_count {
-            continue;
-        }
-
-        // Compute exon boundaries and extract introns
-        let exon_starts: Vec<u64> = block_starts.iter().map(|&bs| tx_start + bs).collect();
-        let exon_ends: Vec<u64> = exon_starts
-            .iter()
-            .zip(block_sizes.iter())
-            .map(|(&es, &bs)| es + bs)
-            .collect();
-
-        for i in 0..block_count - 1 {
-            let intron_start = exon_ends[i];
-            let intron_end = exon_starts[i + 1];
-            let key = format!("{chrom}:{intron_start}-{intron_end}");
-            result.junctions.insert(key);
-        }
-    }
-
-    info!(
-        "Loaded {} known splice junctions from BED",
-        result.junctions.len()
-    );
-    Ok(result)
 }
 
 // ===================================================================
