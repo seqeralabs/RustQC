@@ -759,7 +759,8 @@ fn write_results_file(
 
         // Qualimap shows top 11 motifs (count <= 10 in their loop)
         for (motif, pct) in motif_pcts.iter().take(11) {
-            writeln!(f, "    {} : {:.2}%", motif, pct)?;
+            // Match Java DecimalFormat("###.##"): trailing-zero trimming.
+            writeln!(f, "    {} : {}%", motif, format_bias(*pct))?;
         }
     }
     writeln!(f)?;
