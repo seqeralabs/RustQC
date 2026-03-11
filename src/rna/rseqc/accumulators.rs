@@ -2563,9 +2563,44 @@ impl ReadDistAccum {
 
 impl JuncAnnotAccum {
     /// Convert accumulated junction data into `JunctionResults`.
-    pub fn into_result(self) -> JunctionResults {
+    ///
+    /// Junctions are reordered to match the upstream RSeQC output: grouped
+    /// by BAM header chromosome order, with within-chromosome insertion
+    /// order preserved.  Because each worker thread processes entire
+    /// chromosomes sequentially, the per-chromosome insertion order already
+    /// matches what the upstream single-threaded Python produces.  We just
+    /// need to interleave chromosome groups in BAM header order.
+    pub fn into_result(self, bam_header_refs: &[(String, u64)]) -> JunctionResults {
+        // Build chrom → index map (uppercased to match Junction.chrom).
+        let chrom_order: std::collections::HashMap<String, usize> = bam_header_refs
+            .iter()
+            .enumerate()
+            .map(|(i, (name, _))| (name.to_uppercase(), i))
+            .collect();
+        let sentinel = bam_header_refs.len();
+
+        // Group junctions by chromosome, preserving within-group insertion order.
+        let mut per_chrom: std::collections::BTreeMap<usize, Vec<_>> =
+            std::collections::BTreeMap::new();
+        for (junction, (count, class)) in self.junction_counts {
+            let idx = chrom_order
+                .get(&junction.chrom)
+                .copied()
+                .unwrap_or(sentinel);
+            per_chrom
+                .entry(idx)
+                .or_default()
+                .push((junction, (count, class)));
+        }
+
+        // Flatten groups in BAM header chromosome order.
+        let junctions: IndexMap<_, _> = per_chrom
+            .into_values()
+            .flat_map(|v| v.into_iter())
+            .collect();
+
         JunctionResults {
-            junctions: self.junction_counts,
+            junctions,
             total_events: self.total_events,
             known_events: self.known_events,
             partial_novel_events: self.partial_novel_events,

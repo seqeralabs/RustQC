@@ -1571,7 +1571,7 @@ fn write_rseqc_outputs(
             .join(bam_stem)
             .to_string_lossy()
             .to_string();
-        let results = accum.into_result();
+        let results = accum.into_result(bam_header_refs);
 
         let xls_path = rseqc_junc_annot_dir.join(format!("{}.junction.xls", bam_stem));
         rna::rseqc::junction_annotation::write_junction_xls(&results, &xls_path)?;
