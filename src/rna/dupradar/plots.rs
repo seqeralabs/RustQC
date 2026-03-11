@@ -1158,8 +1158,8 @@ pub fn write_intercept_slope(
     let mut f = std::fs::File::create(path)?;
     write!(
         f,
-        "{sample_name} - dupRadar Int (duprate at low read counts): {} \n\
-         {sample_name} - dupRadar Sl (progression of the duplication rate): {} \n",
+        "{sample_name} - dupRadar Int (duprate at low read counts): {}\n\
+         {sample_name} - dupRadar Sl (progression of the duplication rate): {}\n",
         fit.intercept, fit.slope
     )?;
     Ok(())
