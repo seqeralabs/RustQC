@@ -591,6 +591,16 @@ struct ChromResult {
 
     /// Qualimap RNA-Seq QC accumulator (if enabled).
     qualimap: Option<QualimapAccum>,
+
+    // --- Debug counters for fragment accounting ---
+    dbg_pe_buffer_insert: u64,         // reads inserted into mate buffer
+    dbg_pe_buffer_insert_mt_neg1: u64, // inserts where mate_tid == -1
+    dbg_pe_buffer_matched: u64,        // reads that found their mate in buffer
+    dbg_se_fragments: u64,             // fragments counted via SE path
+    dbg_merge_paired: u64,             // pairs found during worker merge
+    dbg_reconcile_cross_chrom: u64,    // pairs found during reconciliation
+    dbg_reconcile_singletons: u64,     // remaining singletons at reconciliation
+    dbg_reconcile_singletons_mt_neg1: u64, // singletons with mate_tid == -1
 }
 
 impl ChromResult {
@@ -620,6 +630,14 @@ impl ChromResult {
             biotype_reads: vec![0u64; num_biotypes],
             fc_biotype_assigned: 0,
             qualimap: None,
+            dbg_pe_buffer_insert: 0,
+            dbg_pe_buffer_insert_mt_neg1: 0,
+            dbg_pe_buffer_matched: 0,
+            dbg_se_fragments: 0,
+            dbg_merge_paired: 0,
+            dbg_reconcile_cross_chrom: 0,
+            dbg_reconcile_singletons: 0,
+            dbg_reconcile_singletons_mt_neg1: 0,
         }
     }
 
@@ -638,6 +656,7 @@ impl ChromResult {
         for (key, other_info) in other.unmatched_mates {
             if let Some(self_info) = self.unmatched_mates.remove(&key) {
                 // Both mates found — pair them now (same logic as reconciliation)
+                self.dbg_merge_paired += 1;
                 self.total_fragments += 1;
                 let frag_is_dup = self_info.is_dup;
                 let frag_is_multi = self_info.is_multi;
@@ -682,6 +701,12 @@ impl ChromResult {
         self.fc_multimapping += other.fc_multimapping;
         self.fc_unmapped += other.fc_unmapped;
         self.fc_singleton += other.fc_singleton;
+        // Merge debug counters
+        self.dbg_pe_buffer_insert += other.dbg_pe_buffer_insert;
+        self.dbg_pe_buffer_insert_mt_neg1 += other.dbg_pe_buffer_insert_mt_neg1;
+        self.dbg_pe_buffer_matched += other.dbg_pe_buffer_matched;
+        self.dbg_se_fragments += other.dbg_se_fragments;
+        // Note: dbg_merge_paired is only on self (accumulated during this merge call)
         // Merge biotype-level counts
         for (i, &count) in other.biotype_reads.iter().enumerate() {
             self.biotype_reads[i] += count;
@@ -866,6 +891,7 @@ fn process_counting_record(
             result.n_unique_nodup += 1;
         }
         result.total_fragments += 1;
+        result.dbg_se_fragments += 1;
 
         if gene_hits.is_empty() {
             result.stat_no_features += 1;
@@ -893,6 +919,7 @@ fn process_counting_record(
     };
 
     if let Some(mate_info) = mate_buffer.remove(&buffer_key) {
+        result.dbg_pe_buffer_matched += 1;
         result.total_fragments += 1;
 
         let frag_is_dup = if is_read1 { is_dup } else { mate_info.is_dup };
@@ -929,6 +956,10 @@ fn process_counting_record(
         }
     } else {
         // Take ownership of gene_hits instead of cloning (it's cleared at loop start)
+        result.dbg_pe_buffer_insert += 1;
+        if mate_tid == -1 {
+            result.dbg_pe_buffer_insert_mt_neg1 += 1;
+        }
         mate_buffer.insert(
             buffer_key,
             MateInfo {
@@ -1080,6 +1111,16 @@ fn process_chromosome_batch(
             );
         }
     }
+
+    // Per-batch fragment accounting
+    let unmatched_total = mate_buffer.len();
+    let unmatched_mt_neg1 = mate_buffer.keys().filter(|k| k.3 == -1).count();
+    eprintln!(
+        "[batch] tids={:?} | reads={} mapped={} | SE_frags={} PE_matched={} PE_buffered={} (mt-1={}) | unmatched={} (mt-1={})",
+        tids, result.total_reads, result.total_mapped,
+        result.dbg_se_fragments, result.dbg_pe_buffer_matched, result.dbg_pe_buffer_insert, result.dbg_pe_buffer_insert_mt_neg1,
+        unmatched_total, unmatched_mt_neg1
+    );
 
     // Move unmatched mates into the result for cross-chromosome reconciliation
     result.unmatched_mates = mate_buffer;
@@ -1427,6 +1468,14 @@ pub fn count_reads(
             );
         }
 
+        let unmatched_total = mate_buffer.len();
+        let unmatched_mt_neg1 = mate_buffer.keys().filter(|k| k.3 == -1).count();
+        eprintln!(
+            "[single-thread] reads={} mapped={} | SE_frags={} PE_matched={} PE_buffered={} (mt-1={}) | unmatched={} (mt-1={})",
+            result.total_reads, result.total_mapped,
+            result.dbg_se_fragments, result.dbg_pe_buffer_matched, result.dbg_pe_buffer_insert, result.dbg_pe_buffer_insert_mt_neg1,
+            unmatched_total, unmatched_mt_neg1
+        );
         result.unmatched_mates = mate_buffer;
         result.qualimap = qualimap_accum;
         (result, rseqc_accums)
@@ -1514,6 +1563,7 @@ pub fn count_reads(
         for (key, info) in unmatched {
             if let Some(mate_info) = still_unmatched.remove(&key) {
                 // Found a cross-chromosome mate pair!
+                merged.dbg_reconcile_cross_chrom += 1;
                 merged.total_fragments += 1;
 
                 // Determine which is read1 — we don't track is_read1 in MateInfo,
@@ -1563,7 +1613,11 @@ pub fn count_reads(
         // These reads were already classified individually through
         // classify_read_fc() when first encountered, so we do NOT
         // increment fc_singleton here (that would double-count).
-        for (_key, mate_info) in still_unmatched.drain() {
+        for (key, mate_info) in still_unmatched.drain() {
+            merged.dbg_reconcile_singletons += 1;
+            if key.3 == -1 {
+                merged.dbg_reconcile_singletons_mt_neg1 += 1;
+            }
             merged.total_fragments += 1;
             // Include singletons in library size counts for RPKM calculation.
             // R dupRadar's analyzeDuprates() uses N = sum(stat[,2]) - Unmapped
@@ -1608,6 +1662,95 @@ pub fn count_reads(
         merged.stat_no_features,
         merged.total_fragments
     );
+
+    // --- Fragment accounting debug summary ---
+    // This traces every path where total_fragments is incremented, to diagnose
+    // the dupRadar RPKM denominator discrepancy (240,545 missing singletons).
+    eprintln!("┌─── Fragment Accounting Debug ───────────────────────────────────┐");
+    eprintln!("│ total_reads:           {:>15}", merged.total_reads);
+    eprintln!("│ total_mapped:          {:>15}", merged.total_mapped);
+    eprintln!("│ total_fragments:       {:>15}", merged.total_fragments);
+    eprintln!("│ total_dup:             {:>15}", merged.total_dup);
+    eprintln!("│ total_multi:           {:>15}", merged.total_multi);
+    eprintln!("├─── Fragment sources ────────────────────────────────────────────┤");
+    eprintln!(
+        "│ SE path (total_fragments++):          {:>10}",
+        merged.dbg_se_fragments
+    );
+    eprintln!(
+        "│ PE buffer matched (total_fragments++): {:>10}",
+        merged.dbg_pe_buffer_matched
+    );
+    eprintln!(
+        "│ PE buffer inserts (no match):          {:>10}",
+        merged.dbg_pe_buffer_insert
+    );
+    eprintln!(
+        "│   of which mate_tid == -1:             {:>10}",
+        merged.dbg_pe_buffer_insert_mt_neg1
+    );
+    eprintln!(
+        "│ Merge: cross-worker pairs found:       {:>10}",
+        merged.dbg_merge_paired
+    );
+    eprintln!(
+        "│ Reconcile: cross-chrom pairs found:    {:>10}",
+        merged.dbg_reconcile_cross_chrom
+    );
+    eprintln!(
+        "│ Reconcile: remaining singletons:       {:>10}",
+        merged.dbg_reconcile_singletons
+    );
+    eprintln!(
+        "│   of which mate_tid == -1:             {:>10}",
+        merged.dbg_reconcile_singletons_mt_neg1
+    );
+    eprintln!("├─── Verification ────────────────────────────────────────────────┤");
+    let expected_fragments = merged.dbg_se_fragments
+        + merged.dbg_pe_buffer_matched
+        + merged.dbg_merge_paired
+        + merged.dbg_reconcile_cross_chrom
+        + merged.dbg_reconcile_singletons;
+    eprintln!(
+        "│ Sum of sources:        {:>15}  (SE + PE_matched + merge + reconcile)",
+        expected_fragments
+    );
+    eprintln!("│ total_fragments:       {:>15}", merged.total_fragments);
+    if expected_fragments != merged.total_fragments {
+        eprintln!(
+            "│ *** MISMATCH: diff = {} ***",
+            merged.total_fragments as i64 - expected_fragments as i64
+        );
+    } else {
+        eprintln!("│ ✓ Counts match");
+    }
+    eprintln!("├─── featureCounts stats ─────────────────────────────────────────┤");
+    eprintln!("│ fc_assigned:           {:>15}", merged.fc_assigned);
+    eprintln!("│ fc_ambiguous:          {:>15}", merged.fc_ambiguous);
+    eprintln!("│ fc_no_features:        {:>15}", merged.fc_no_features);
+    eprintln!("│ fc_multimapping:       {:>15}", merged.fc_multimapping);
+    eprintln!("│ fc_unmapped:           {:>15}", merged.fc_unmapped);
+    eprintln!("│ fc_singleton:          {:>15}", merged.fc_singleton);
+    let fc_total = merged.fc_assigned
+        + merged.fc_ambiguous
+        + merged.fc_no_features
+        + merged.fc_multimapping
+        + merged.fc_unmapped
+        + merged.fc_singleton;
+    eprintln!("│ fc_total (sum):        {:>15}", fc_total);
+    eprintln!(
+        "│ fc_total - fc_unmapped:{:>15}  (= R dupRadar N candidate)",
+        fc_total - merged.fc_unmapped
+    );
+    eprintln!(
+        "│ stat_total_fragments:  {:>15}  (= actual RPKM denominator)",
+        merged.total_fragments
+    );
+    eprintln!(
+        "│ diff (fc_N - frags):   {:>15}",
+        (fc_total - merged.fc_unmapped) as i64 - merged.total_fragments as i64
+    );
+    eprintln!("└─────────────────────────────────────────────────────────────────┘");
 
     // Verify that at least some reads were flagged as duplicates.
     // Even if the @PG header check passed (or was skipped), it's possible that
