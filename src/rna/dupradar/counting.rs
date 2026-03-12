@@ -522,6 +522,11 @@ struct MateInfo {
     /// Whether this read is read1 (FLAG 0x40) — used to prevent false pairing
     /// of secondary alignments at the same position as the primary.
     is_read1: bool,
+    /// Whether this is a secondary alignment (FLAG 0x100) — for debug tracking
+    is_secondary: bool,
+    /// The mate's TID from the BAM record — for reliable singleton detection
+    /// (avoids the ambiguity of key.3 which means different things for R1 vs R2)
+    mate_tid: i32,
 }
 
 /// Key for the mate buffer, matching featureCounts' `SAM_pairer_get_read_full_name()`.
@@ -604,6 +609,18 @@ struct ChromResult {
     dbg_reconcile_cross_chrom: u64,    // pairs found during reconciliation
     dbg_reconcile_singletons: u64,     // remaining singletons at reconciliation
     dbg_reconcile_singletons_mt_neg1: u64, // singletons with mate_tid == -1
+
+    // --- Extended debug counters (singleton tracking) ---
+    dbg_reads_primary: u64,               // primary alignment reads processed
+    dbg_reads_secondary: u64,             // secondary alignment reads processed
+    dbg_reads_primary_singleton: u64,     // primary + mate_tid=-1
+    dbg_reads_secondary_singleton: u64,   // secondary + mate_tid=-1
+    dbg_pe_match_singleton_consumed: u64, // PE match where buffered entry had mate_tid=-1
+    dbg_pe_match_current_singleton: u64,  // PE match where current read has mate_tid=-1
+    dbg_pe_false_match_same_dir: u64,     // false match (same is_read1) in PE buffer
+    dbg_pe_false_match_overwrite: u64,    // false match → insert overwrites put-back
+    dbg_merge_false_match_dropped: u64,   // false match drops during merge
+    dbg_reconcile_false_match_dropped: u64, // false match drops during reconciliation
 }
 
 impl ChromResult {
@@ -641,6 +658,16 @@ impl ChromResult {
             dbg_reconcile_cross_chrom: 0,
             dbg_reconcile_singletons: 0,
             dbg_reconcile_singletons_mt_neg1: 0,
+            dbg_reads_primary: 0,
+            dbg_reads_secondary: 0,
+            dbg_reads_primary_singleton: 0,
+            dbg_reads_secondary_singleton: 0,
+            dbg_pe_match_singleton_consumed: 0,
+            dbg_pe_match_current_singleton: 0,
+            dbg_pe_false_match_same_dir: 0,
+            dbg_pe_false_match_overwrite: 0,
+            dbg_merge_false_match_dropped: 0,
+            dbg_reconcile_false_match_dropped: 0,
         }
     }
 
@@ -693,6 +720,7 @@ impl ChromResult {
                     // since the first entry remains in the map.
                     // We lose this entry, but R featureCounts also handles secondary
                     // duplicates this way (only one alignment per QNAME at same pos).
+                    self.dbg_merge_false_match_dropped += 1;
                 }
             } else {
                 self.unmatched_mates.insert(key, other_info);
@@ -722,6 +750,14 @@ impl ChromResult {
         self.dbg_pe_buffer_matched += other.dbg_pe_buffer_matched;
         self.dbg_se_fragments += other.dbg_se_fragments;
         // Note: dbg_merge_paired is only on self (accumulated during this merge call)
+        self.dbg_reads_primary += other.dbg_reads_primary;
+        self.dbg_reads_secondary += other.dbg_reads_secondary;
+        self.dbg_reads_primary_singleton += other.dbg_reads_primary_singleton;
+        self.dbg_reads_secondary_singleton += other.dbg_reads_secondary_singleton;
+        self.dbg_pe_match_singleton_consumed += other.dbg_pe_match_singleton_consumed;
+        self.dbg_pe_match_current_singleton += other.dbg_pe_match_current_singleton;
+        self.dbg_pe_false_match_same_dir += other.dbg_pe_false_match_same_dir;
+        self.dbg_pe_false_match_overwrite += other.dbg_pe_false_match_overwrite;
         // Merge biotype-level counts
         for (i, &count) in other.biotype_reads.iter().enumerate() {
             self.biotype_reads[i] += count;
@@ -869,6 +905,21 @@ fn process_counting_record(
 
     let is_reverse = flags & BAM_FREVERSE != 0;
     let is_read1 = flags & BAM_FREAD1 != 0;
+    let is_secondary = flags & BAM_FSECONDARY != 0;
+
+    // Debug: track primary/secondary and singleton reads
+    let read_mate_tid = record.mtid();
+    if is_secondary {
+        result.dbg_reads_secondary += 1;
+        if read_mate_tid == -1 {
+            result.dbg_reads_secondary_singleton += 1;
+        }
+    } else {
+        result.dbg_reads_primary += 1;
+        if read_mate_tid == -1 {
+            result.dbg_reads_primary_singleton += 1;
+        }
+    }
 
     // Find gene overlaps using CIGAR-aware aligned blocks
     gene_hits.clear();
@@ -945,6 +996,7 @@ fn process_counting_record(
             // False match: same read direction (e.g. secondary alignment of a
             // singleton).  Put the original entry back and treat this read as
             // a new buffer insert.
+            result.dbg_pe_false_match_same_dir += 1;
             mate_buffer.insert(buffer_key, mate_info);
             None
         }
@@ -953,6 +1005,14 @@ fn process_counting_record(
     if let Some(mate_info) = matched {
         result.dbg_pe_buffer_matched += 1;
         result.total_fragments += 1;
+
+        // Debug: track when singletons are consumed by PE matching
+        if mate_info.mate_tid == -1 {
+            result.dbg_pe_match_singleton_consumed += 1;
+        }
+        if mate_tid == -1 {
+            result.dbg_pe_match_current_singleton += 1;
+        }
 
         let frag_is_dup = if is_read1 { is_dup } else { mate_info.is_dup };
         let frag_is_multi = if is_read1 {
@@ -992,15 +1052,21 @@ fn process_counting_record(
         if mate_tid == -1 {
             result.dbg_pe_buffer_insert_mt_neg1 += 1;
         }
-        mate_buffer.insert(
+        let old = mate_buffer.insert(
             buffer_key,
             MateInfo {
                 gene_hits: std::mem::take(gene_hits),
                 is_dup,
                 is_multi,
                 is_read1,
+                is_secondary,
+                mate_tid,
             },
         );
+        // Debug: detect when insert overwrites a put-back entry from false match
+        if old.is_some() {
+            result.dbg_pe_false_match_overwrite += 1;
+        }
     }
 }
 
@@ -1582,6 +1648,43 @@ pub fn count_reads(
         }
     }
 
+    // --- Debug: dump unmatched mates before reconciliation ---
+    // Write all unmatched mates to a TSV file for offline analysis.
+    // This helps diagnose the 240,545 singleton discrepancy.
+    {
+        let debug_path = std::path::Path::new(bam_path)
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .join("_debug_unmatched_mates.tsv");
+        if let Ok(mut f) = std::fs::File::create(&debug_path) {
+            use std::io::Write;
+            let _ = writeln!(f, "qname_hash\tkey_tid1\tkey_pos1\tkey_tid2\tkey_pos2\tkey_hi\tis_read1\tis_secondary\tmate_tid\tis_dup\tis_multi\tn_gene_hits");
+            for (key, info) in merged.unmatched_mates.iter() {
+                let _ = writeln!(
+                    f,
+                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                    key.0,
+                    key.1,
+                    key.2,
+                    key.3,
+                    key.4,
+                    key.5,
+                    info.is_read1,
+                    info.is_secondary,
+                    info.mate_tid,
+                    info.is_dup,
+                    info.is_multi,
+                    info.gene_hits.len()
+                );
+            }
+            eprintln!(
+                "Wrote {} unmatched mates to {}",
+                merged.unmatched_mates.len(),
+                debug_path.display()
+            );
+        }
+    }
+
     // --- Cross-chromosome mate reconciliation ---
     //
     // In parallel mode, mates on different chromosomes end up in different
@@ -1600,6 +1703,7 @@ pub fn count_reads(
                     // singleton).  Put the first entry back, drop the second
                     // (HashMap only holds one entry per key).
                     still_unmatched.insert(key, mate_info);
+                    merged.dbg_reconcile_false_match_dropped += 1;
                     continue;
                 }
                 // Found a cross-chromosome mate pair!
@@ -1658,9 +1762,9 @@ pub fn count_reads(
         // These reads were already classified individually through
         // classify_read_fc() when first encountered, so we do NOT
         // increment fc_singleton here (that would double-count).
-        for (key, mate_info) in still_unmatched.drain() {
+        for (_key, mate_info) in still_unmatched.drain() {
             merged.dbg_reconcile_singletons += 1;
-            if key.3 == -1 {
+            if mate_info.mate_tid == -1 {
                 merged.dbg_reconcile_singletons_mt_neg1 += 1;
             }
             merged.total_fragments += 1;
@@ -1794,6 +1898,48 @@ pub fn count_reads(
     eprintln!(
         "│ diff (fc_N - frags):   {:>15}",
         (fc_total - merged.fc_unmapped) as i64 - merged.total_fragments as i64
+    );
+    eprintln!("├─── Read classification ─────────────────────────────────────────┤");
+    eprintln!(
+        "│ Reads primary:                        {:>10}",
+        merged.dbg_reads_primary
+    );
+    eprintln!(
+        "│ Reads secondary:                      {:>10}",
+        merged.dbg_reads_secondary
+    );
+    eprintln!(
+        "│ Reads primary + mate_tid=-1:          {:>10}",
+        merged.dbg_reads_primary_singleton
+    );
+    eprintln!(
+        "│ Reads secondary + mate_tid=-1:        {:>10}",
+        merged.dbg_reads_secondary_singleton
+    );
+    eprintln!("├─── Singleton consumption tracking ──────────────────────────────┤");
+    eprintln!(
+        "│ PE match: buffered entry was singleton:{:>10}",
+        merged.dbg_pe_match_singleton_consumed
+    );
+    eprintln!(
+        "│ PE match: current read was singleton:  {:>10}",
+        merged.dbg_pe_match_current_singleton
+    );
+    eprintln!(
+        "│ PE false match (same is_read1):        {:>10}",
+        merged.dbg_pe_false_match_same_dir
+    );
+    eprintln!(
+        "│ PE false match → overwrite:            {:>10}",
+        merged.dbg_pe_false_match_overwrite
+    );
+    eprintln!(
+        "│ Merge false match dropped:             {:>10}",
+        merged.dbg_merge_false_match_dropped
+    );
+    eprintln!(
+        "│ Reconcile false match dropped:         {:>10}",
+        merged.dbg_reconcile_false_match_dropped
     );
     eprintln!("└─────────────────────────────────────────────────────────────────┘");
 
