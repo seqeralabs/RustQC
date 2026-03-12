@@ -632,8 +632,38 @@ impl ChromResult {
             self.gene_counts[i].nodup_unique += counts.nodup_unique;
             self.gene_counts[i].fc_reads += counts.fc_reads;
         }
-        // Merge unmatched mates — these will be reconciled in a separate step
-        self.unmatched_mates.extend(other.unmatched_mates);
+        // Merge unmatched mates — pair any cross-chromosome mates immediately
+        // when both workers have buffered reads from the same pair (same key).
+        // Using HashMap::extend would silently overwrite one mate, losing it.
+        for (key, other_info) in other.unmatched_mates {
+            if let Some(self_info) = self.unmatched_mates.remove(&key) {
+                // Both mates found — pair them now (same logic as reconciliation)
+                self.total_fragments += 1;
+                let frag_is_dup = self_info.is_dup;
+                let frag_is_multi = self_info.is_multi;
+                self.n_multi_dup += 1;
+                self.n_unique_dup += 1;
+                if !frag_is_dup {
+                    self.n_multi_nodup += 1;
+                    self.n_unique_nodup += 1;
+                }
+                let combined_genes = merge_gene_hits(&self_info.gene_hits, &other_info.gene_hits);
+                if combined_genes.is_empty() {
+                    self.stat_no_features += 1;
+                } else if combined_genes.len() > 1 {
+                    self.stat_ambiguous += 1;
+                } else if assign_fragment_to_gene(
+                    &combined_genes,
+                    &mut self.gene_counts,
+                    frag_is_dup,
+                    frag_is_multi,
+                ) {
+                    self.stat_assigned += 1;
+                }
+            } else {
+                self.unmatched_mates.insert(key, other_info);
+            }
+        }
         self.total_reads += other.total_reads;
         self.total_mapped += other.total_mapped;
         self.total_dup += other.total_dup;
