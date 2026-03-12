@@ -519,6 +519,9 @@ struct MateInfo {
     is_dup: bool,
     /// Whether this read is a multimapper (NH > 1)
     is_multi: bool,
+    /// Whether this read is read1 (FLAG 0x40) — used to prevent false pairing
+    /// of secondary alignments at the same position as the primary.
+    is_read1: bool,
 }
 
 /// Key for the mate buffer, matching featureCounts' `SAM_pairer_get_read_full_name()`.
@@ -655,29 +658,41 @@ impl ChromResult {
         // Using HashMap::extend would silently overwrite one mate, losing it.
         for (key, other_info) in other.unmatched_mates {
             if let Some(self_info) = self.unmatched_mates.remove(&key) {
-                // Both mates found — pair them now (same logic as reconciliation)
-                self.dbg_merge_paired += 1;
-                self.total_fragments += 1;
-                let frag_is_dup = self_info.is_dup;
-                let frag_is_multi = self_info.is_multi;
-                self.n_multi_dup += 1;
-                self.n_unique_dup += 1;
-                if !frag_is_dup {
-                    self.n_multi_nodup += 1;
-                    self.n_unique_nodup += 1;
-                }
-                let combined_genes = merge_gene_hits(&self_info.gene_hits, &other_info.gene_hits);
-                if combined_genes.is_empty() {
-                    self.stat_no_features += 1;
-                } else if combined_genes.len() > 1 {
-                    self.stat_ambiguous += 1;
-                } else if assign_fragment_to_gene(
-                    &combined_genes,
-                    &mut self.gene_counts,
-                    frag_is_dup,
-                    frag_is_multi,
-                ) {
-                    self.stat_assigned += 1;
+                if self_info.is_read1 != other_info.is_read1 {
+                    // Genuine cross-worker pair: read1 ↔ read2
+                    self.dbg_merge_paired += 1;
+                    self.total_fragments += 1;
+                    let frag_is_dup = self_info.is_dup;
+                    let frag_is_multi = self_info.is_multi;
+                    self.n_multi_dup += 1;
+                    self.n_unique_dup += 1;
+                    if !frag_is_dup {
+                        self.n_multi_nodup += 1;
+                        self.n_unique_nodup += 1;
+                    }
+                    let combined_genes =
+                        merge_gene_hits(&self_info.gene_hits, &other_info.gene_hits);
+                    if combined_genes.is_empty() {
+                        self.stat_no_features += 1;
+                    } else if combined_genes.len() > 1 {
+                        self.stat_ambiguous += 1;
+                    } else if assign_fragment_to_gene(
+                        &combined_genes,
+                        &mut self.gene_counts,
+                        frag_is_dup,
+                        frag_is_multi,
+                    ) {
+                        self.stat_assigned += 1;
+                    }
+                } else {
+                    // False match: same read direction (e.g. secondary alignment
+                    // of a singleton in different workers).  Put self_info back.
+                    self.unmatched_mates.insert(key, self_info);
+                    // other_info has same key — can't insert into HashMap without
+                    // overwriting.  It will be counted as a singleton at reconciliation
+                    // since the first entry remains in the map.
+                    // We lose this entry, but R featureCounts also handles secondary
+                    // duplicates this way (only one alignment per QNAME at same pos).
                 }
             } else {
                 self.unmatched_mates.insert(key, other_info);
@@ -918,7 +933,24 @@ fn process_counting_record(
         (qname_hash, mate_tid, mate_pos_val, own_tid, own_pos, hi_tag)
     };
 
-    if let Some(mate_info) = mate_buffer.remove(&buffer_key) {
+    // Check if the mate is already in the buffer.  We must verify the match
+    // is a genuine read1↔read2 pair, not a secondary alignment of the *same*
+    // read (which produces an identical key when the mate is unmapped, because
+    // both primary and secondary share qname_hash, position, and mate=-1/-1).
+    let matched = mate_buffer.remove(&buffer_key).and_then(|mate_info| {
+        if mate_info.is_read1 != is_read1 {
+            // Genuine pair: read1 matched read2 (or vice versa)
+            Some(mate_info)
+        } else {
+            // False match: same read direction (e.g. secondary alignment of a
+            // singleton).  Put the original entry back and treat this read as
+            // a new buffer insert.
+            mate_buffer.insert(buffer_key, mate_info);
+            None
+        }
+    });
+
+    if let Some(mate_info) = matched {
         result.dbg_pe_buffer_matched += 1;
         result.total_fragments += 1;
 
@@ -966,6 +998,7 @@ fn process_counting_record(
                 gene_hits: std::mem::take(gene_hits),
                 is_dup,
                 is_multi,
+                is_read1,
             },
         );
     }
@@ -1562,16 +1595,28 @@ pub fn count_reads(
 
         for (key, info) in unmatched {
             if let Some(mate_info) = still_unmatched.remove(&key) {
+                if info.is_read1 == mate_info.is_read1 {
+                    // False match: same read direction (secondary alignment of a
+                    // singleton).  Put the first entry back, drop the second
+                    // (HashMap only holds one entry per key).
+                    still_unmatched.insert(key, mate_info);
+                    continue;
+                }
                 // Found a cross-chromosome mate pair!
                 merged.dbg_reconcile_cross_chrom += 1;
                 merged.total_fragments += 1;
 
-                // Determine which is read1 — we don't track is_read1 in MateInfo,
-                // but both mates compute the same key. Use read1's dup/multi status.
-                // Since we can't distinguish which is read1 from MateInfo alone,
-                // use the first mate seen (info) as the "read1" for dup/multi.
-                let frag_is_dup = info.is_dup;
-                let frag_is_multi = info.is_multi;
+                // Use read1's dup/multi status for the fragment.
+                let frag_is_dup = if info.is_read1 {
+                    info.is_dup
+                } else {
+                    mate_info.is_dup
+                };
+                let frag_is_multi = if info.is_read1 {
+                    info.is_multi
+                } else {
+                    mate_info.is_multi
+                };
 
                 merged.n_multi_dup += 1;
                 merged.n_unique_dup += 1;
