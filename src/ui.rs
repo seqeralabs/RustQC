@@ -336,7 +336,7 @@ impl Ui {
             self.style_green.apply_to("\u{2713}"),
             self.style_header.apply_to(label),
             self.style_dim
-                .apply_to(format!("in {}", format_duration(duration))),
+                .apply_to(format!("finished in {}", format_duration(duration))),
         );
         eprintln!();
     }
