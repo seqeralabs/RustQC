@@ -59,10 +59,20 @@ impl DupMatrix {
         //   N <- sum(x$stat[, 2]) - x$stat[x$stat$Status == "Unassigned_Unmapped", 2]
         // R dupRadar calls featureCounts with isPairedEnd=TRUE for paired-end data,
         // so the stat summary counts *fragments* (read pairs), not individual reads.
-        // stat_total_fragments already tracks the correct fragment count (one per
-        // read pair for PE, one per read for SE), and excludes unmapped reads since
-        // RustQC only processes mapped BAM records.
-        let n_fragments = counts.stat_total_fragments as f64;
+        // RustQC's fragment counting tracks mapped fragments only. Upstream RSubread
+        // featureCounts, however, also emits singleton unmapped mates as orphan
+        // fragments in paired-end mode because their HI tag (often 0) does not match
+        // the mapped mate's HI tag (>=1). Those orphan fragments are not classified as
+        // `Unassigned_Unmapped`, so they contribute to dupRadar's denominator
+        // `N = sum(stat) - Unassigned_Unmapped`.
+        //
+        // Treat `stat_singleton_unmapped_mates` as an upstream-compatibility correction
+        // factor for dupRadar's denominator. RustQC's native fragment count excludes
+        // these unmapped singleton mates, but upstream RSubread effectively counts
+        // them as extra orphan fragments, so we add the correction factor here to
+        // reproduce upstream dupRadar `N` exactly.
+        let n_fragments =
+            (counts.stat_total_fragments + counts.stat_singleton_unmapped_mates) as f64;
         let n_multi_all = n_fragments;
         let n_unique_all = n_fragments;
 
