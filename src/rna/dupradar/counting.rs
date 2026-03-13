@@ -326,6 +326,16 @@ pub struct CountResult {
     pub stat_total_mapped: u64,
     /// Total duplicate-flagged reads
     pub stat_total_dup: u64,
+    /// Unmapped reads whose mate is mapped.
+    ///
+    /// RSubread's paired-end SAM pairer includes these singleton unmapped mates as
+    /// extra orphan fragments because their HI tag (typically 0) does not match the
+    /// mapped mate's HI tag (>=1). Those extra orphan fragments contribute to
+    /// dupRadar's `N = sum(stat) - Unassigned_Unmapped` denominator.
+    ///
+    /// To match upstream dupRadar exactly, RustQC adds this count to the mapped
+    /// fragment total when constructing the dupMatrix RPKM denominator.
+    pub stat_singleton_unmapped_mates: u64,
 
     // --- featureCounts per-read statistics ---
     // featureCounts with `-p` (no `--countReadPairs`) counts each read
@@ -562,6 +572,8 @@ struct ChromResult {
     total_mapped: u64,
     /// Total duplicate reads
     total_dup: u64,
+    /// Unmapped reads whose mate is mapped (singleton unmapped mates).
+    singleton_unmapped_mates: u64,
     /// Total multimapping reads
     total_multi: u64,
     /// Total fragments (single-end reads or paired-end pairs)
@@ -632,6 +644,7 @@ impl ChromResult {
             total_reads: 0,
             total_mapped: 0,
             total_dup: 0,
+            singleton_unmapped_mates: 0,
             total_multi: 0,
             total_fragments: 0,
             stat_assigned: 0,
@@ -729,6 +742,7 @@ impl ChromResult {
         self.total_reads += other.total_reads;
         self.total_mapped += other.total_mapped;
         self.total_dup += other.total_dup;
+        self.singleton_unmapped_mates += other.singleton_unmapped_mates;
         self.total_multi += other.total_multi;
         self.total_fragments += other.total_fragments;
         self.stat_assigned += other.stat_assigned;
@@ -871,6 +885,9 @@ fn process_counting_record(
     // Skip unmapped reads (count for featureCounts summary)
     if flags & BAM_FUNMAP != 0 {
         result.fc_unmapped += 1;
+        if paired && flags & BAM_FMUNMAP == 0 {
+            result.singleton_unmapped_mates += 1;
+        }
         return;
     }
 
@@ -1637,6 +1654,9 @@ pub fn count_reads(
             let flags = record.flags();
             if flags & BAM_FUNMAP != 0 {
                 merged.fc_unmapped += 1;
+                if paired && flags & BAM_FMUNMAP == 0 {
+                    merged.singleton_unmapped_mates += 1;
+                }
             }
         }
 
@@ -1820,6 +1840,10 @@ pub fn count_reads(
     eprintln!("│ total_mapped:          {:>15}", merged.total_mapped);
     eprintln!("│ total_fragments:       {:>15}", merged.total_fragments);
     eprintln!("│ total_dup:             {:>15}", merged.total_dup);
+    eprintln!(
+        "│ singleton_unmapped_mates:{:>13}",
+        merged.singleton_unmapped_mates
+    );
     eprintln!("│ total_multi:           {:>15}", merged.total_multi);
     eprintln!("├─── Fragment sources ────────────────────────────────────────────┤");
     eprintln!(
@@ -1896,8 +1920,17 @@ pub fn count_reads(
         merged.total_fragments
     );
     eprintln!(
+        "│ compat_total_fragments:{:>15}  (= RSubread-compatible denominator)",
+        merged.total_fragments + merged.singleton_unmapped_mates
+    );
+    eprintln!(
         "│ diff (fc_N - frags):   {:>15}",
         (fc_total - merged.fc_unmapped) as i64 - merged.total_fragments as i64
+    );
+    eprintln!(
+        "│ diff (R_N - compat):   {:>15}",
+        (fc_total - merged.fc_unmapped) as i64
+            - (merged.total_fragments + merged.singleton_unmapped_mates) as i64
     );
     eprintln!("├─── Read classification ─────────────────────────────────────────┤");
     eprintln!(
@@ -2015,6 +2048,7 @@ pub fn count_reads(
         stat_total_fragments: merged.total_fragments,
         stat_total_mapped: merged.total_mapped,
         stat_total_dup: merged.total_dup,
+        stat_singleton_unmapped_mates: merged.singleton_unmapped_mates,
         fc_assigned: merged.fc_assigned,
         fc_ambiguous: merged.fc_ambiguous,
         fc_no_features: merged.fc_no_features,
