@@ -21,8 +21,8 @@ traditional tools and `rustqc rna --gtf` for RustQC.
 
 A real-world large paired-end RNA-seq BAM aligned to GRCh38 (63,677 genes).
 
-| Step                         |  Traditional workflow |      RustQC |
-| ---------------------------- | --------------------: | ----------: |
+| Step                         | Traditional workflow |      RustQC |
+| ---------------------------- | -------------------: | ----------: |
 | samtools index               |               2m 51s |          -- |
 | samtools idxstats            |                  16s |          -- |
 | samtools flagstat            |                3m 5s |          -- |
@@ -37,12 +37,12 @@ A real-world large paired-end RNA-seq BAM aligned to GRCh38 (63,677 genes).
 | junction_saturation (RSeQC)  |              14m 34s |          -- |
 | read_distribution (RSeQC)    |              13m 12s |          -- |
 | read_duplication (RSeQC)     |               33m 1s |          -- |
-| TIN (RSeQC tin.py)           |          **9h 45m**  |          -- |
+| TIN (RSeQC tin.py)           |           **9h 45m** |          -- |
 | Qualimap rnaseq              |              49m 58s |          -- |
 | dupRadar                     |           2h 14m 24s |          -- |
-| preseq lc_extrap             |              39m 9s  |          -- |
-| **All outputs, single pass** |                   -- | **41m 24s** |
-| **Sequential total**         |         **~15h 34m** | **41m 24s** |
+| preseq lc_extrap             |               39m 9s |          -- |
+| **All outputs, single pass** |                   -- | **14m 54s** |
+| **Sequential total**         |         **~15h 34m** | **14m 54s** |
 
 RustQC ran with 174.2% average CPU utilisation (multi-threaded), processing the
 entire BAM in under 42 minutes while the sum of all individual tool runtimes

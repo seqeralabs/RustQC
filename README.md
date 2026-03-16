@@ -27,11 +27,11 @@
 <p align="center">
 <picture>
    <source media="(prefers-color-scheme: dark)" srcset="docs/public/benchmarks/benchmark_dark.png">
-   <img src="docs/public/benchmarks/benchmark_light.png" alt="Benchmark: RustQC ~41m vs traditional tools ~15h 34m sequential (dupRadar + featureCounts + 8 RSeQC tools incl. TIN + preseq + samtools + Qualimap)" width="600">
+   <img src="docs/public/benchmarks/benchmark_light.png" alt="Benchmark: RustQC ~14m 54s vs traditional tools ~15h 34m sequential (dupRadar + featureCounts + 8 RSeQC tools incl. TIN + preseq + samtools + Qualimap)" width="600">
 </picture>
 </p>
 
-<p align="center"><em>Run time for a large paired-end RNA-seq BAM (~186M reads) on AWS. RSeQC TIN alone takes 9h 45m; RustQC completes everything in 41 minutes.</em></p>
+<p align="center"><em>Run time for a large paired-end RNA-seq BAM (~186M reads) on AWS. RSeQC TIN alone takes 9h 45m; RustQC completes everything in 14m 54s.</em></p>
 
 It currently includes:
 

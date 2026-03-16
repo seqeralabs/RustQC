@@ -38,21 +38,21 @@ all tools in a single pass.
 
 ### Large dataset (~186M reads, GM12878)
 
-| Tool                        |      Runtime |         RSS |
-| --------------------------- | -----------: | ----------: |
-| bam_stat                    |      12m 11s |     48.7 MB |
-| infer_experiment            |      11m 49s |     72.4 MB |
-| read_distribution           |      13m 12s |      1.1 GB |
-| inner_distance              |       1m 45s |    880.0 MB |
-| junction_annotation         |      10m 51s |    132.6 MB |
-| junction_saturation         |      14m 34s |    951.0 MB |
-| read_duplication            |       33m 1s |     10.2 GB |
-| tin.py                      |  **9h 45m**  |     71.6 MB |
-| **RUSTQC_RNA (all-in-one)** | **41m 24s**  | **11.4 GB** |
+| Tool                        |     Runtime |         RSS |
+| --------------------------- | ----------: | ----------: |
+| bam_stat                    |     12m 11s |     48.7 MB |
+| infer_experiment            |     11m 49s |     72.4 MB |
+| read_distribution           |     13m 12s |      1.1 GB |
+| inner_distance              |      1m 45s |    880.0 MB |
+| junction_annotation         |     10m 51s |    132.6 MB |
+| junction_saturation         |     14m 34s |    951.0 MB |
+| read_duplication            |      33m 1s |     10.2 GB |
+| tin.py                      |  **9h 45m** |     71.6 MB |
+| **RUSTQC_RNA (all-in-one)** | **14m 54s** | **11.4 GB** |
 
 The sum of upstream RSeQC tools on the large dataset (including TIN) is approximately
 **10 hours 37 minutes**. RustQC covers all of these plus samtools, Qualimap, dupRadar, featureCounts, and
-preseq in a single **41m 24s** pass. The upstream `tin.py` alone takes **9h 45m**;
+preseq in a single **14m 54s** pass. The upstream `tin.py` alone takes **9h 45m**;
 RustQC completes TIN as part of its single pass in under 42 minutes total.
 
 ## bam_stat
