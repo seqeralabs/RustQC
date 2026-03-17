@@ -31,7 +31,7 @@
 </picture>
 </p>
 
-<p align="center"><em>Run time for a large paired-end RNA-seq BAM (~186M reads) on AWS. RSeQC TIN alone takes 9h 45m; RustQC completes everything in 14m 54s.</em></p>
+<p align="center"><em>Run time for a large paired-end RNA-seq BAM (~186M reads) on AWS.</em></p>
 
 It currently includes:
 
