@@ -196,40 +196,6 @@ Preseq runs by default and can be skipped entirely with `--skip-preseq`.
 | `--preseq-step-size <N>`    | `1e6`   | Step size between extrapolation points                  |
 | `--preseq-n-bootstraps <N>` | `100`   | Number of bootstrap replicates for confidence intervals |
 
-### Examples
-
-```bash
-# Basic paired-end analysis
-rustqc rna sample.bam --gtf genes.gtf -p -o results/
-
-# Reverse-stranded library with 8 threads
-rustqc rna sample.bam --gtf genes.gtf -p -s 2 -t 8 -o results/
-
-# CRAM input with reference
-rustqc rna sample.cram --gtf genes.gtf -p -r genome.fa -o results/
-
-# GENCODE GTF with explicit biotype attribute
-rustqc rna sample.bam --gtf gencode.v46.gtf -p \
-  --biotype-attribute gene_type -o results/
-
-# Custom junction saturation sampling range
-rustqc rna sample.bam --gtf genes.gtf -p \
-  --junction-saturation-percentile-floor 10 \
-  --junction-saturation-percentile-ceiling 100 \
-  --junction-saturation-percentile-step 10 -o results/
-
-# Custom inner distance histogram bounds
-rustqc rna sample.bam --gtf genes.gtf -p \
-  --inner-distance-lower-bound -500 --inner-distance-upper-bound 500 \
-  --inner-distance-step 10 -o results/
-
-# Multiple BAM files with parallel processing
-rustqc rna *.bam --gtf genes.gtf -p -t 8 -o results/
-
-# Gzip-compressed annotation file (auto-detected)
-rustqc rna sample.bam --gtf genes.gtf.gz -p -o results/
-```
-
 ---
 
 ## Exit codes

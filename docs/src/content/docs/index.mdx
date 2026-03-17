@@ -161,7 +161,7 @@ export const base = import.meta.env.BASE_URL;
   <Card title="Identical Results" icon="approve-check">
     Produces bit-for-bit identical output to R's dupRadar and featureCounts,
     plus faithful reimplementations of 8 RSeQC tools (including TIN), preseq,
-    and samtools. Over 800,000 values compared with zero mismatches.
+    and samtools.
   </Card>
   <Card title="Dramatically Faster" icon="rocket">
     Processes ~186M reads in 14m 54s on AWS vs ~15h 34m of sequential tool
@@ -169,13 +169,13 @@ export const base = import.meta.env.BASE_URL;
     workflow.
   </Card>
   <Card title="All-in-One" icon="puzzle">
-    Combines dupRadar, featureCounts, biotype counting, 8 RSeQC metrics
-    (including TIN), preseq library complexity, gene body coverage, and samtools
-    stats in a single pass — replacing 14+ separate tool invocations.
+    Replacing 14+ separate QC tool invocations with a single CLI.
+    One task to stage data for. One read-through the BAM file.
+    Minimal staging and I/O requirements for super efficient analysis.
   </Card>
   <Card title="SAM / BAM / CRAM" icon="document">
-    Accepts SAM, BAM, and CRAM alignment files. Process multiple files in
-    parallel with automatic thread distribution.
+    Accepts SAM, BAM, and CRAM alignment files. Parallelises across chromosomes
+    and across multiple BAM files to make the most of the available resources.
   </Card>
 </CardGrid>
 

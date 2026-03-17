@@ -148,26 +148,6 @@ RUSTFLAGS="-Cprofile-use=/tmp/pgo-data/merged.profdata -C target-cpu=native" \
 Both `target-cpu=native` and PGO produce binaries that are specific to the machine they were built / profiled on. They should not be copied to machines with a different CPU architecture.
 :::
 
-## Input requirements
-
-### `rustqc rna`
-
-The `rustqc rna` command runs all analyses in a single pass. Input requirements:
-
-- **BAM file(s)** — must have PCR duplicates **marked** (SAM flag `0x400`) but **not removed**. RustQC needs both duplicate and non-duplicate reads to calculate duplication rates.
-- **GTF annotation file** (`--gtf`, required) — provides all annotation needed for every tool. Gene models are derived internally so all analyses run: dupRadar, featureCounts, Qualimap gene body coverage, all 8 RSeQC tools including TIN, preseq, and samtools outputs.
-
-Compatible duplicate-marking tools:
-
-- [Picard MarkDuplicates](https://broadinstitute.github.io/picard/command-line-overview.html#MarkDuplicates)
-- [samblaster](https://github.com/GregoryFaust/samblaster)
-- [sambamba markdup](https://lomereiter.github.io/sambamba/)
-- [biobambam bammarkduplicates](https://gitlab.com/german.tischler/biobambam2)
-
-RustQC automatically checks the BAM header for duplicate-marking tool signatures and exits with an error if none are found. Use `--skip-dup-check` to bypass this validation if your duplicate-marking tool is not recognized.
-
-Note that the RSeQC tools themselves do not require duplicate marking — the duplicate-marking requirement applies to the dupRadar analysis.
-
 ## Verify installation
 
 ```bash

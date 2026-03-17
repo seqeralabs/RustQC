@@ -35,7 +35,7 @@
 
 It currently includes:
 
-- **`rustqc rna`** -- A single-command RNA-Seq QC pipeline that runs all analyses in one pass:
+- **`rustqc rna`** -- A single-command RNA-Seq QC tool, designed to slot into the [nf-core/rnaseq pipeline](https://nf-co.re/rnaseq/) _(but that can be used anywhere)_ that runs all QC analyses in one pass:
 
 | Tool                | Reimplements                                                                            | Description                                                           |
 | ------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
@@ -66,7 +66,9 @@ sudo mv ./rustqc /usr/local/bin/
 
 # Run RNA-Seq QC
 rustqc rna sample.markdup.bam --gtf genes.gtf --paired --outdir results/
+```
 
+```bash
 # Or use Docker
 docker run --rm -v "$PWD":/data ghcr.io/seqeralabs/rustqc:latest \
   rustqc rna /data/sample.markdup.bam --gtf /data/genes.gtf --outdir /data/results

@@ -25,7 +25,7 @@ Key advantages:
 - **Speed**: Processes ~186M reads in 14m 54s vs. ~15h 34m of sequential tool runtimes on AWS — including TIN, which takes 9h 45m alone in the traditional workflow
 - **Single binary**: No runtime dependencies -- no R, Python, or Bioconductor installation required
 - **Single-pass architecture**: The `rna` subcommand performs read counting and duplicate analysis simultaneously, eliminating the need for a separate featureCounts run
-- **Identical output**: Produces bit-for-bit identical results to the original tools (verified across 820,000+ values with zero mismatches for dupRadar)
+- **Identical output**: Produces bit-for-bit identical results to the original tools
 - **Multiple input support**: Process several BAM files in a single command with automatic parallelisation
 - **Modern format support**: Accepts SAM, BAM, and CRAM input files; GTF annotation files can be plain or gzip-compressed
 
@@ -35,16 +35,16 @@ Key advantages:
 
 Given a duplicate-marked BAM file and a GTF annotation, `rustqc rna` runs all of the following in a single pass:
 
-1. **Counts reads** per gene (equivalent to Subread featureCounts)
-2. **Computes duplication rates** per gene at multiple counting levels (dupRadar)
-3. **Fits a logistic regression model** relating expression to duplication rate
-4. **Generates diagnostic plots**: density scatter, boxplot, and expression histogram
-5. **Produces MultiQC-compatible reports** for integration into analysis pipelines
-6. **Outputs featureCounts-format files** including biotype-level summaries
-7. **Estimates library complexity** via extrapolation (preseq lc_extrap equivalent)
-8. **Computes Transcript Integrity Number (TIN)** for RNA degradation assessment
-9. **Runs Qualimap rnaseq analysis**: gene body coverage profiling, 5'/3' bias metrics, read origin classification, strand-specificity estimation, and junction analysis -- all with Qualimap-compatible MultiQC-parseable output
-10. **Produces samtools-compatible outputs** (flagstat, idxstats, stats)
+
+| Tool            | Equivalent                                                         | Description                                                                                                                                                                                                       |
+| --------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Qualimap rnaseq | [Qualimap](http://qualimap.conesalab.org/) rnaseq                  | Gene body coverage profiling, 5'/3' bias metrics, read origin classification (exonic/intronic/intergenic), strand-specificity estimation, and junction analysis. Qualimap-compatible output parseable by MultiQC. |
+| preseq          | [preseq](http://smithlabresearch.org/software/preseq/) `lc_extrap` | Library complexity extrapolation with bootstrap confidence intervals                                                                                                                                              |
+| flagstat        | `samtools flagstat`                                                | Alignment flag statistics                                                                                                                                                                                         |
+| idxstats        | `samtools idxstats`                                                | Per-chromosome read counts                                                                                                                                                                                        |
+| stats           | `samtools stats`                                                   | Full samtools stats output including all histogram sections                                                                                                                                                       |
+
+A GTF file is required (`--gtf`) and all tools run automatically — transcript-level structure is extracted from the GTF. GTF files can be provided plain or gzip-compressed (`.gz`) — compression is detected automatically. Individual tools can be disabled via the YAML configuration file.
 
 ### RSeQC tools -- RNA-seq quality control
 
@@ -61,17 +61,6 @@ Eight reimplementations of [RSeQC](https://rseqc.sourceforge.net/) tools (includ
 | inner_distance      | Compute inner distance between paired-end read mates, with histogram plot                  |
 | tin                 | Transcript Integrity Number (TIN) for RNA degradation assessment                           |
 
-### Additional tools
-
-| Tool            | Equivalent                                                         | Description                                                                                                                                                                                                       |
-| --------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Qualimap rnaseq | [Qualimap](http://qualimap.conesalab.org/) rnaseq                  | Gene body coverage profiling, 5'/3' bias metrics, read origin classification (exonic/intronic/intergenic), strand-specificity estimation, and junction analysis. Qualimap-compatible output parseable by MultiQC. |
-| preseq          | [preseq](http://smithlabresearch.org/software/preseq/) `lc_extrap` | Library complexity extrapolation with bootstrap confidence intervals                                                                                                                                              |
-| flagstat        | `samtools flagstat`                                                | Alignment flag statistics                                                                                                                                                                                         |
-| idxstats        | `samtools idxstats`                                                | Per-chromosome read counts                                                                                                                                                                                        |
-| stats           | `samtools stats`                                                   | Full samtools stats output including all histogram sections                                                                                                                                                       |
-
-A GTF file is required (`--gtf`) and all tools run automatically — transcript-level structure is extracted from the GTF. GTF files can be provided plain or gzip-compressed (`.gz`) — compression is detected automatically. Individual tools can be disabled via the YAML configuration file.
 
 ## Credits
 
