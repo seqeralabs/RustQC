@@ -79,7 +79,7 @@ the single-tool run and the no-tools baseline.
 
 > **Why don't the marginal costs add up to 637s?**
 > Two reasons. First, the shared BAM decode baseline (34s) is paid once
-> regardless of how many tools are active. Second -- and more importantly --
+> regardless of how many tools are active. Second, and more significant,
 > **TIN** has per-transcript data structures (`coverage` arrays and
 > `unique_starts` hash sets for ~230K transcripts) that consume over 1 GB
 > of RAM. When combined with the data structures of all other tools, the
@@ -125,19 +125,16 @@ peak memory (RSS) are shown.
 
 **TIN's impact is driven by memory pressure, not computation.** When TIN
 is the only tool enabled, it adds just 5 seconds of marginal compute time.
-But in a full run, removing TIN saves 240 seconds. This paradox is explained
-by **cache thrashing**: TIN allocates ~1 GB of data structures (per-transcript
-hash sets and coverage arrays for ~230K transcripts in GENCODE v46). When
-combined with the working sets of all other tools, the aggregate memory
-exceeds CPU L3 cache, causing every tool's per-read processing to slow down
-from cache misses. Removing TIN shrinks the working set enough for the
-remaining tools to run efficiently.
+But in a full run, removing TIN saves 240 seconds. As explained
+[above](#results), TIN's ~1 GB of per-transcript data structures push
+the combined working set past CPU L3 cache capacity, causing cache misses
+that slow every other tool's per-read processing. Removing TIN shrinks the
+working set enough for the remaining tools to run efficiently.
 
 **read_duplication is the most expensive counting-phase tool.** Removing it
 saves 256s (step 2), cutting the runtime from 397s to 142s. This tool
 maintains per-read sequence hashing (SipHash over every base) for
-duplication detection, which is both computationally intensive and
-memory-hungry.
+duplication detection, which is expensive in both CPU and memory.
 
 **The "samtools" group (bam_stat, flagstat, idxstats, samtools_stats) is cheap.**
 These tools add minimal overhead individually because they compute simple
@@ -176,16 +173,16 @@ dupradar:
 ```
 
 When a tool is disabled, its accumulators are never constructed, its per-read
-processing is completely skipped, and no output files are written. This is a
-true zero-cost disable, not just output suppression.
+processing is skipped entirely, and no output files are written. There is
+zero overhead for disabled tools - not just output suppression.
 
 See the [Configuration File](/usage/configuration/) documentation for the
 complete list of toggles.
 
 ## Effect of CPU count
 
-RustQC speed is typically bound by CPU and disk I/O. It is designed to heavily
-parallelise work to achieve the best performance possible with multiple CPUs.
+RustQC speed is typically bound by CPU and disk I/O. It parallelises
+heavily across multiple CPUs to reduce wall-clock time.
 
 RustQC parallelises by assigning chromosomes to worker threads -- each worker
 opens its own BAM reader and processes its assigned chromosomes independently.
@@ -208,8 +205,8 @@ falls back to a single counting thread.
 
 :::tip
 In our benchmarks, running on AWS with the `c5ad.2xlarge` or `c8gd.2xlarge`
-works well. RustQC compiles to x86 CPU archiecture or ARM, so the cheaper and
-more energy-efficient Graviton instances perform well.
+works well. RustQC compiles to both x86 and ARM, so the cheaper
+Graviton instances are a good option.
 :::
 
 ### CPU scaling benchmarks

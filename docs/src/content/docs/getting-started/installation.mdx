@@ -58,7 +58,7 @@ docker run -v $(pwd):/data ghcr.io/seqeralabs/rustqc:latest \
 
 Building from source requires the Rust toolchain, a C++ compiler, and a few system libraries needed by [rust-htslib](https://github.com/rust-bio/rust-htslib) for SAM/BAM/CRAM I/O. The C++ compiler is used both by rust-htslib and by RustQC's preseq FFI shim (a small C++ wrapper that links against the host's `std::mt19937` and `std::binomial_distribution` for exact bootstrap compatibility with upstream preseq).
 
-Select your operating system for the complete build instructions:
+Select your operating system for build instructions:
 
 <Tabs>
   <TabItem label="macOS" icon="apple">
@@ -115,7 +115,7 @@ Select your operating system for the complete build instructions:
   </TabItem>
 </Tabs>
 
-The compiled binary is at `target/release/rustqc`. You can copy it to a directory on your `PATH` for convenient access. Release builds use link-time optimization (LTO) and symbol stripping for maximum performance and a small binary size.
+The compiled binary is at `target/release/rustqc`. You can copy it to a directory on your `PATH` for convenient access. Release builds use link-time optimization (LTO) and symbol stripping for better performance and a smaller binary.
 
 In summary, the system dependencies you need are: **cmake**, **zlib**, **bz2**, **lzma**, **curl**, **ssl**, and a **C++ compiler** (clang or g++).
 

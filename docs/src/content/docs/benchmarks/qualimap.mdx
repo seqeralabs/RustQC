@@ -9,10 +9,10 @@ export const base = import.meta.env.BASE_URL;
 
 RustQC's Qualimap analysis runs in the same single-pass BAM scan as all other
 tools, adding negligible overhead to the total runtime. The original Qualimap
-Java implementation requires a separate dedicated run on a **name-sorted** BAM
-file, meaning a `samtools sort -n` step is typically needed before Qualimap can
-run. RustQC works directly on coordinate-sorted BAMs (the standard output of
-most aligners), eliminating that preprocessing step entirely.
+Java implementation requires a separate run on a name-sorted BAM file, meaning
+a `samtools sort -n` step is typically needed before Qualimap can run. RustQC
+works directly on coordinate-sorted BAMs (the standard output of most aligners),
+so that preprocessing step is not needed.
 
 ### Large dataset (~186M reads, GM12878)
 
@@ -23,10 +23,10 @@ most aligners), eliminating that preprocessing step entirely.
 | **Total upstream pipeline** | **~1h 2m 14s** |          | Name-sort + Qualimap combined                                  |
 | RustQC (all tools)          | 14m 54s        | 11.4 GB  | Single pass, all analyses combined, coordinate-sorted input    |
 
-RustQC completes **all QC analyses** in under 42 minutes, compared to over
-1 hour for the upstream Qualimap pipeline alone (name-sort + Qualimap).
-Note that RustQC's 14m 54s covers every QC tool (dupRadar, featureCounts,
-RSeQC including TIN, preseq, samtools, and Qualimap), not just the Qualimap equivalent.
+RustQC completes all QC analyses in 14m 54s, compared to over 1 hour for
+the Qualimap pipeline alone (name-sort + Qualimap). RustQC's time covers
+every QC tool (dupRadar, featureCounts, RSeQC including TIN, preseq,
+samtools, and Qualimap), not just the Qualimap equivalent.
 
 ### Small dataset (~52K reads, chr6)
 
@@ -35,13 +35,13 @@ RSeQC including TIN, preseq, samtools, and Qualimap), not just the Qualimap equi
 | Qualimap rnaseq (Java) | 5.0s    | 704.6 MB | Separate BAM pass, requires name-sorted input |
 | RustQC (all tools)     | 25.9s   | 182.1 MB | Single pass, all analyses combined            |
 
-On the small dataset, RustQC uses only **182 MB** of memory vs Qualimap's
-705 MB while running all QC tools in a single pass.
+On the small dataset, RustQC uses 182 MB of memory vs Qualimap's 705 MB,
+while running all QC tools in a single pass.
 
 ## Output comparison
 
-RustQC produces output effectively identical to Qualimap Java across all key
-metrics. Both tools were run on the same BAM file with matching parameters
+RustQC produces output effectively identical to Qualimap Java.
+Both tools were run on the same BAM file with matching parameters
 (`--stranded 2` / `strand-specific-reverse`, same GENCODE GTF). Results below
 are from the AWS benchmark run (2026-03-09).
 
@@ -135,7 +135,7 @@ RustQC produces a 100-bin coverage profile along normalized gene body positions
 (5' to 3'), matching the format produced by Qualimap. Three tiers are generated:
 total (all genes), high (top 500 by expression), and low (bottom 500).
 
-The high-expression tier coverage profile is an **exact numerical match** with
+The high-expression tier coverage profile is an exact numerical match with
 Qualimap Java. The total (all-genes) tier shows negligible floating-point
 differences (&lt;0.03% relative) due to coverage aggregation order.
 

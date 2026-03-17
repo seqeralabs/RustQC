@@ -31,15 +31,15 @@ itself is fast (under 1 second) -- it is purely a function of the histogram data
 | preseq lc_extrap (standalone)   |      39m 9s |  2.0 GB | 102.2% |
 | RustQC (all tools, single pass) | **14m 54s** | 11.4 GB | 174.2% |
 
-RustQC produces preseq output at zero additional I/O cost — the fragment
+RustQC produces preseq output at zero additional I/O cost - the fragment
 histogram is collected during the same BAM pass that produces all other outputs.
-The 14m 54s RustQC runtime covers **all** QC tools, not just preseq.
+The 14m 54s RustQC runtime covers all QC tools, not just preseq.
 
 ## Output comparison
 
 ### Small dataset (test, ~52K reads, chr6)
 
-The small dataset produces **byte-identical output** between preseq v3.2.0 and
+The small dataset produces byte-identical output between preseq v3.2.0 and
 RustQC. All values in all columns match exactly across all sampled read depths.
 
 Sample output (first few rows):
@@ -55,7 +55,7 @@ Sample output (first few rows):
 
 <img
   src={`${base}benchmarks/small/multiqc/preseq_complexity_plot_molecules.png`}
-  alt="Preseq complexity plot — small dataset"
+  alt="Preseq complexity plot - small dataset"
   style="max-width: 100%"
 />
 
@@ -68,13 +68,13 @@ preseq lc_extrap -bam -pe -seed 1 -seg_len 100000000 \
   GM12878_REP1.markdup.sorted.bam
 ```
 
-On Linux, RustQC produces **byte-identical output** to preseq v3.2.0 — every
+On Linux, RustQC produces byte-identical output to preseq v3.2.0 - every
 value in every column matches exactly. This is achieved by using the same C++
 standard library's `std::mt19937` and `std::binomial_distribution` via FFI,
-which guarantees identical random number sequences given the same seed.
+which gives identical random number sequences for the same seed.
 
 Observed differences between the two tools on AWS Linux are at most ±0.5 in
-the floating-point representation — sub-ULP rounding noise with no practical
+the floating-point representation - sub-ULP rounding noise with no practical
 significance.
 
 |   Total reads | preseq v3.2.0 |       RustQC | Difference |
@@ -88,7 +88,7 @@ significance.
 
 <img
   src={`${base}benchmarks/large/multiqc/preseq_complexity_plot_molecules.png`}
-  alt="Preseq complexity plot — large dataset"
+  alt="Preseq complexity plot - large dataset"
   style="max-width: 100%"
 />
 
@@ -109,7 +109,7 @@ most sensitive histogram bin).
 
 Bootstrap confidence intervals overlap between preseq and RustQC at every
 extrapolation point. Differences in CI bounds are at most ±2 in the
-floating-point representation — indistinguishable from rounding noise.
+floating-point representation, indistinguishable from rounding noise.
 
 ## Algorithm details
 

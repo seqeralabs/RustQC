@@ -22,7 +22,7 @@ RNA-seq quality control typically involves running multiple tools written in R a
 
 Key advantages:
 
-- **Speed**: Processes ~186M reads in 14m 54s vs. ~15h 34m of sequential tool runtimes on AWS — including TIN, which takes 9h 45m alone in the traditional workflow
+- **Speed**: Processes ~186M reads in 14m 54s vs. ~15h 34m of sequential tool runtimes on AWS, including TIN which takes 9h 45m alone in the traditional workflow
 - **Single binary**: No runtime dependencies -- no R, Python, or Bioconductor installation required
 - **Single-pass architecture**: The `rna` subcommand performs read counting and duplicate analysis simultaneously, eliminating the need for a separate featureCounts run
 - **Identical output**: Produces bit-for-bit identical results to the original tools
@@ -44,7 +44,7 @@ Given a duplicate-marked BAM file and a GTF annotation, `rustqc rna` runs all of
 | idxstats        | `samtools idxstats`                                                | Per-chromosome read counts                                                                                                                                                                                        |
 | stats           | `samtools stats`                                                   | Full samtools stats output including all histogram sections                                                                                                                                                       |
 
-A GTF file is required (`--gtf`) and all tools run automatically — transcript-level structure is extracted from the GTF. GTF files can be provided plain or gzip-compressed (`.gz`) — compression is detected automatically. Individual tools can be disabled via the YAML configuration file.
+A GTF file is required (`--gtf`) and all tools run automatically. Transcript-level structure is extracted from the GTF. GTF files can be plain or gzip-compressed (`.gz`); compression is detected automatically. Individual tools can be disabled via the YAML configuration file.
 
 ### RSeQC tools -- RNA-seq quality control
 

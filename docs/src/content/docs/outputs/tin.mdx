@@ -7,7 +7,7 @@ import { FileTree } from "@astrojs/starlight/components";
 
 ## What is TIN?
 
-TIN (Transcript Integrity Number) measures the **uniformity of read coverage**
+TIN (Transcript Integrity Number) measures the uniformity of read coverage
 across a transcript. A TIN score of 100 means perfectly uniform coverage; lower
 scores indicate degradation or bias. TIN is computed using Shannon entropy of
 read-start coverage at sampled positions along each transcript's exonic regions.
@@ -117,7 +117,7 @@ analysis in the same ~19 minutes it takes to run all other tools combined.
 ## Compatibility
 
 RustQC's TIN output uses the same file format and column names as RSeQC's
-`tin.py`. The key difference is that RustQC reports one row per **gene** (using
+`tin.py`. The main difference is that RustQC reports one row per **gene** (using
 the longest transcript as representative), while RSeQC reports one row per
 **transcript**. TIN scores are computed using the same Shannon entropy formula.
 

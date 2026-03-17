@@ -7,14 +7,12 @@ import { FileTree } from '@astrojs/starlight/components';
 
 ## How it works
 
-RustQC performs gene-level read counting in the **same pass** as the dupRadar duplication rate analysis and all RSeQC-equivalent metrics. During BAM processing, RustQC simultaneously:
+RustQC performs gene-level read counting in the same pass as the dupRadar duplication rate analysis and all RSeQC-equivalent metrics. During BAM processing, RustQC simultaneously:
 
 1. Counts reads assigned to each gene (using the same algorithm as featureCounts)
 2. Tracks duplication rates for the dupRadar analysis
 3. Computes RSeQC-equivalent quality metrics (strandedness, read distribution, junctions, etc.)
 4. Aggregates counts by gene biotype
-
-This single-pass approach eliminates the need for separate featureCounts and RSeQC runs, which are required in the traditional workflow. The featureCounts output is produced at zero additional runtime cost.
 
 RustQC follows the same algorithm as [Subread featureCounts](http://subread.sourceforge.net/) with these defaults:
 
@@ -23,8 +21,6 @@ RustQC follows the same algorithm as [Subread featureCounts](http://subread.sour
 - Overlap detection: at least 1 base overlap
 - Multi-mapping reads: counted (for multi columns), excluded (for unique columns)
 - Strand-aware counting based on the `-s` / `--stranded` flag
-
-The key difference is that RustQC performs counting and duplicate analysis in a single pass, while the traditional workflow requires running featureCounts separately before dupRadar.
 
 ## Output files
 
@@ -131,6 +127,4 @@ featurecounts:
 
 RustQC's read counting follows the same algorithm as featureCounts with the same default settings (exon features, gene_id attribute, 1bp overlap, strand-aware counting). The outputs are format-compatible and can be used interchangeably in downstream pipelines.
 
-The primary difference is architectural: RustQC performs counting, dupRadar analysis, and RSeQC-equivalent metrics in a single pass over the BAM file, while the traditional workflow requires running featureCounts, dupRadar, and RSeQC as separate steps. This means the featureCounts output comes at no additional runtime cost when running RustQC.
-
-RustQC also produces biotype count summaries and MultiQC-compatible files that would require additional scripting in the traditional workflow.
+The main difference is that RustQC performs counting, dupRadar analysis, and RSeQC-equivalent metrics in a single pass over the BAM file, rather than requiring separate tool invocations. RustQC also produces biotype count summaries and MultiQC-compatible files that would require additional scripting in the traditional workflow.

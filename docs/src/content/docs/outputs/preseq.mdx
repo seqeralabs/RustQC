@@ -9,28 +9,28 @@ import { FileTree } from "@astrojs/starlight/components";
 
 [Preseq](http://smithlabresearch.org/software/preseq/) estimates library complexity
 by extrapolating the expected number of distinct molecules at increasing sequencing
-depths. This helps answer a fundamental question: **if I sequence more, will I discover
-new molecules?**
+depths. This helps answer a practical question: if I sequence more, will I discover
+new molecules?
 
 RustQC reimplements the `preseq lc_extrap` command, matching the behavior of
 preseq v3.2.0 (the version used by [nf-core/rnaseq](https://nf-co.re/rnaseq)).
 On Linux, the output is **byte-identical** to upstream preseq. On macOS, minor
 differences may occur due to different `std::binomial_distribution` implementations
-between libstdc++ (Linux) and libc++ (macOS) — see [Compatibility](#compatibility)
+between libstdc++ (Linux) and libc++ (macOS) - see [Compatibility](#compatibility)
 below. The analysis runs automatically as part of `rustqc rna` at zero additional
 BAM reading cost -- fragment counting happens in the same single-pass BAM scan as
 all other analyses.
 
 ### Why it matters
 
-Library complexity estimation helps answer critical questions:
+Library complexity estimation helps answer questions like:
 
 - **Is my library saturated?** If the complexity curve plateaus, additional
   sequencing will mostly produce duplicate molecules.
 - **How many unique molecules can I expect?** The extrapolation predicts distinct
   molecule counts at depths beyond what was actually sequenced.
 - **Should I sequence more?** If the curve is still rising steeply at the current
-  depth, additional sequencing will yield diminishing but still significant returns.
+  depth, more sequencing will still yield new molecules.
 
 ### The Good-Toulmin method
 
@@ -153,7 +153,7 @@ library, and different implementations use different algorithms:
 
 - **libstdc++ (GCC / Linux)**: Devroye's 4-region rejection method with a
   normal distribution proposal and a waiting-time fallback for small parameters.
-- **libc++ (Clang / macOS)**: Kemp's modal method — a single uniform draw
+- **libc++ (Clang / macOS)**: Kemp's modal method - a single uniform draw
   followed by a walk outward from the distribution mode.
 
 These algorithms consume different numbers of RNG values per sample, so even
@@ -179,7 +179,7 @@ compiled with the same C++ standard library and use the same seed.
 | Linux (libstdc++) | **Byte-identical**             | Same Devroye algorithm, same glibc math functions                           |
 | macOS (libc++)    | Minor differences (~0.02-1.8%) | Kemp algorithm differs; Apple's `exp()` may differ from glibc by a few ULPs |
 
-Linux arm64 and x86_64 produce identical results — glibc math functions (`exp`,
+Linux arm64 and x86_64 produce identical results - glibc math functions (`exp`,
 `lgamma`, etc.) are consistent across architectures.
 
 ## References

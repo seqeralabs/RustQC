@@ -8,9 +8,9 @@ import { FileTree } from "@astrojs/starlight/components";
 RustQC produces output files compatible with three core
 [samtools](http://www.htslib.org/) commands: `flagstat`, `idxstats`, and
 `stats`. These are generated during the same single-pass BAM scan as all other
-analyses, at zero additional runtime cost.
+analyses, with no additional runtime cost.
 
-The output files are designed to be drop-in replacements that downstream tools
+The output files are drop-in replacements that downstream tools
 (particularly [MultiQC](https://multiqc.info/)) can parse as if they came
 directly from samtools.
 

@@ -35,8 +35,8 @@ samtools tool times are shown for reference.
 | samtools stats              |      9m 48s |      8.2 MB |
 | **RUSTQC_RNA (all-in-one)** | **14m 54s** | **11.4 GB** |
 
-`RUSTQC_RNA` runs **all** QC tools in a single BAM pass, so its time is not
-directly comparable to any individual samtools command — it replaces the combined
+`RUSTQC_RNA` runs all QC tools in a single BAM pass, so its time is not
+directly comparable to any individual samtools command. It replaces the combined
 runtime of samtools flagstat + idxstats + stats + RSeQC + Qualimap + dupRadar +
 featureCounts + preseq.
 

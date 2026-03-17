@@ -50,17 +50,17 @@ exceeds 15 hours and 34 minutes.
 
 > **Note:** In a real pipeline, some tools can run in parallel after the BAM is
 > ready, so wall-clock time for the traditional workflow will be less than the
-> sequential sum. However, TIN alone (9h 45m) sets an enormous lower bound on
+> sequential sum. However, TIN alone (9h 45m) sets a hard lower bound on
 > wall-clock time for any parallelised run, and dupRadar (2h 14m) dominates
-> everything else. RustQC eliminates all of this.
+> everything else.
 
-Key highlights from the large dataset run:
+Standout comparisons from the large dataset:
 
-- **TIN** takes **9h 45m** — more than 14× RustQC's total runtime for everything
-- **DupRadar** alone takes **2h 14m 24s** — more than 3× RustQC's total runtime
-- **Qualimap pipeline** (sort + rnaseq) takes **1h 2m 14s** — longer than RustQC
-- **read_duplication** (RSeQC) takes **33m 1s** — nearly as long as all of RustQC
-- **Peak memory:** RustQC uses 11.4 GB in a single process vs. up to 10.2 GB
+- TIN takes 9h 45m - more than 14× RustQC's total runtime for everything
+- dupRadar alone takes 2h 14m 24s - more than 3× RustQC's total runtime
+- Qualimap pipeline (sort + rnaseq) takes 1h 2m 14s - longer than RustQC
+- read_duplication (RSeQC) takes 33m 1s - nearly as long as all of RustQC
+- Peak memory: RustQC uses 11.4 GB in a single process vs. up to 10.2 GB
   for read_duplication alone, with many other tools also requiring several GB
   each (Qualimap: 4.9 GB, samtools sort: 5.2 GB, GTF2BED: 2.7 GB, preseq: 2.0 GB, etc.)
 
@@ -97,18 +97,18 @@ analyses in 25.9s.
 
 Every output file produced by RustQC matches the original tools:
 
-- **dupRadar duplication matrix** — all 14 columns match across 63,677 genes
-- **Gene-level read counts** identical across all 63,677 genes
-- **Model fit parameters** (intercept and slope) match to 10+ significant digits
-- **Assignment statistics** (Assigned, NoFeatures, Ambiguous) match exactly
-- **flagstat** all 16 metrics identical to samtools flagstat
-- **idxstats** all per-chromosome counts identical to samtools idxstats
-- **stats** full samtools stats format including all histogram sections (SN, FFQ, LFQ, GCF, GCL, IS, RL, etc.) matches samtools stats
-- **preseq** extrapolation curve within <0.1% of preseq v3.2.0 across entire range
-- **RSeQC tools** all data values and R plotting scripts match Python RSeQC.
+- **dupRadar duplication matrix:** all 14 columns match across 63,677 genes
+- **Gene-level read counts:** identical across all 63,677 genes
+- **Model fit parameters:** intercept and slope match to 10+ significant digits
+- **Assignment statistics:** Assigned, NoFeatures, Ambiguous match exactly
+- **flagstat:** all 16 metrics identical to samtools flagstat
+- **idxstats:** all per-chromosome counts identical to samtools idxstats
+- **stats:** full samtools stats format including all histogram sections (SN, FFQ, LFQ, GCF, GCL, IS, RL, etc.) matches samtools stats
+- **preseq:** extrapolation curve within <0.1% of preseq v3.2.0 across entire range
+- **RSeQC tools:** all data values and R plotting scripts match Python RSeQC.
   Junction saturation intermediate sampling points show expected stochastic
   variation from random subsampling (see [RSeQC benchmark](rseqc/))
-- **Qualimap** all read counts, genomic origin percentages, and coverage bias metrics
+- **Qualimap:** all read counts, genomic origin percentages, and coverage bias metrics
   match Qualimap Java 2.3 exactly (see [Qualimap benchmark](qualimap/))
 
 See the individual benchmark pages for detailed per-tool comparisons:

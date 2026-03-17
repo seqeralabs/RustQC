@@ -5,13 +5,13 @@ description: Detailed comparison of RustQC's RSeQC reimplementations against the
 
 export const base = import.meta.env.BASE_URL;
 
-RustQC reimplements 8 [RSeQC](https://rseqc.sourceforge.net/) tools — including TIN (Transcript
-Integrity Number) analysis — as built-in analyses that run in a single pass over the BAM file. This page
+RustQC reimplements 8 [RSeQC](https://rseqc.sourceforge.net/) tools, including TIN (Transcript
+Integrity Number) analysis, as built-in analyses that run in a single pass over the BAM file. This page
 compares the output of each tool against the originals, validated on two datasets from an AWS
 cloud run (nf-core AWS megatests, 2026-03-09).
 
-- **Small dataset**: `test.bam` — ~52K reads, chr6 subset
-- **Large dataset**: `GM12878_REP1.markdup.sorted.bam` — ~186M reads (GM12878 ENCODE RNA-Seq)
+- **Small dataset**: `test.bam` - ~52K reads, chr6 subset
+- **Large dataset**: `GM12878_REP1.markdup.sorted.bam` - ~186M reads (GM12878 ENCODE RNA-Seq)
 
 Both upstream RSeQC and RustQC ran on the **same BAM file** in all cases.
 
@@ -57,7 +57,7 @@ RustQC completes TIN as part of its single pass in under 42 minutes total.
 
 ## bam_stat
 
-Summarises key alignment statistics from the BAM file. **All values are identical** between
+Summarises alignment statistics from the BAM file. All values are identical between
 RSeQC and RustQC on both datasets.
 
 ### Small dataset
@@ -97,7 +97,7 @@ RSeQC and RustQC on both datasets.
 Infers the strandedness of an RNA-Seq experiment by sampling reads and comparing
 their strand to annotated gene models.
 
-### Small dataset — Identical
+### Small dataset - Identical
 
 | Metric                               |  RSeQC | RustQC |
 | ------------------------------------ | -----: | -----: |
@@ -105,7 +105,7 @@ their strand to annotated gene models.
 | Fraction sense (1++,1--,2+-,2-+)     | 0.0051 | 0.0051 |
 | Fraction antisense (1+-,1-+,2++,2--) | 0.9174 | 0.9174 |
 
-### Large dataset — Minor difference (sampling)
+### Large dataset - Minor difference (sampling)
 
 | Metric                               |  RSeQC | RustQC |
 | ------------------------------------ | -----: | -----: |
@@ -113,32 +113,32 @@ their strand to annotated gene models.
 | Fraction sense (1++,1--,2+-,2-+)     | 0.0117 | 0.0185 |
 | Fraction antisense (1+-,1-+,2++,2--) | 0.9213 | 0.8763 |
 
-The difference is caused by a **read-sampling mismatch**: the upstream
+The difference is caused by a read-sampling mismatch: the upstream
 `infer_experiment.py` defaults to sampling only 200,000 reads. On a 186M-read BAM,
 this early-file subsample draws predominantly from the first few chromosomes, which
-underrepresents loci where transcripts on both strands overlap — causing the
+underrepresents loci where transcripts on both strands overlap, causing the
 "failed-to-determine" fraction to appear lower than it truly is. RustQC processes
 all reads, giving a more representative estimate.
 
-Both tools correctly identify the library as **strongly reverse-stranded**
-(antisense ~88–92%), so the practical interpretation is identical. When
+Both tools correctly identify the library as strongly reverse-stranded
+(antisense ~88-92%), so the practical interpretation is identical. When
 `infer_experiment.py` is run with `-s 2000000000` (processing all reads), the
 results are identical.
 
 ## read_distribution
 
 Calculates how mapped reads are distributed over genomic features
-(CDS, UTR, introns, intergenic regions). **All values are identical** on both datasets.
+(CDS, UTR, introns, intergenic regions). All values are identical on both datasets.
 
 ### Small dataset
 
 | Feature          | Total tags | Tags/Kb |
 | ---------------- | ---------: | ------: |
-| CDS Exons        |     56,186 |       — |
-| 5' UTR Exons     |      1,226 |       — |
-| 3' UTR Exons     |      7,495 |       — |
-| Introns          |      2,905 |       — |
-| Other intergenic |        526 |       — |
+| CDS Exons        |     56,186 |       - |
+| 5' UTR Exons     |      1,226 |       - |
+| 3' UTR Exons     |      7,495 |       - |
+| Introns          |      2,905 |       - |
+| Other intergenic |        526 |       - |
 
 Total reads: 43,476 | Total tags: 68,660 | Total assigned: 68,134
 
@@ -156,9 +156,9 @@ Total reads: 41,094,945 | Total tags: 55,001,331 | Total assigned: 54,113,746
 ## inner_distance
 
 Calculates the inner distance between paired-end reads for fragment size estimation.
-**All frequency values are identical** on both datasets.
+All frequency values are identical on both datasets.
 
-**Large dataset summary:** mean = 29.378, median = 27.5, std dev = 32.799
+Large dataset summary: mean = 29.378, median = 27.5, std dev = 32.799
 
 The R plotting script (`inner_distance_plot.r`) matches upstream format exactly.
 
@@ -190,7 +190,7 @@ The R plotting script (`inner_distance_plot.r`) matches upstream format exactly.
 ## junction_annotation
 
 Classifies observed splice junctions as known, partially novel, or completely novel
-by comparing against annotated transcript models. **All values are identical** on both datasets.
+by comparing against annotated transcript models. All values are identical on both datasets.
 
 ### Small dataset
 
@@ -278,7 +278,7 @@ produced by RustQC are identical to upstream RSeQC output.
 ## junction_saturation
 
 Evaluates whether sequencing depth is sufficient to detect all splice junctions
-by subsampling reads at increasing fractions. Results are **identical** between
+by subsampling reads at increasing fractions. Results are identical between
 RSeQC and RustQC at full sampling depth on both datasets.
 
 At 100% sampling depth:
@@ -299,9 +299,8 @@ At 100% sampling depth:
 | Known junctions | 160,896 | 160,896 |
 | Novel junctions |  78,896 |  78,896 |
 
-At 100% sampling depth, all junction counts match exactly between RSeQC and RustQC.
 Intermediate sampling percentages show minor stochastic variation from random
-subsampling, which is expected behavior matching the upstream tool.
+subsampling, as expected.
 
 ### Junction saturation plots (large dataset)
 
@@ -331,7 +330,7 @@ subsampling, which is expected behavior matching the upstream tool.
 ## read_duplication
 
 Calculates read duplication rates at both the sequence and mapping position level.
-**All values are identical** on both datasets.
+All values are identical on both datasets.
 
 ### Small dataset (first few duplication levels)
 
@@ -380,7 +379,7 @@ Calculates read duplication rates at both the sequence and mapping position leve
 RustQC reimplements RSeQC's `tin.py`, producing per-gene TIN scores that measure
 transcript integrity via Shannon entropy of read coverage uniformity.
 
-### Small dataset — Identical
+### Small dataset - Identical
 
 | Metric      |   RSeQC |  RustQC |
 | ----------- | ------: | ------: |
@@ -388,7 +387,7 @@ transcript integrity via Shannon entropy of read coverage uniformity.
 | TIN median  | 55.5830 | 55.5830 |
 | TIN std dev | 22.5333 | 22.5333 |
 
-### Large dataset — Both tools completed
+### Large dataset - Both tools completed
 
 The upstream `tin.py` took **9h 45m** to complete on the large dataset.
 RustQC completes TIN analysis as part of its single-pass BAM processing
@@ -400,16 +399,13 @@ in under 42 minutes total (inclusive of all other analyses).
 | TIN median  | 75.921 | 75.921 |
 | TIN std dev | 23.959 | 23.959 |
 
-TIN values are **identical** between RSeQC and RustQC. The key advantage is speed:
-RustQC computes TIN in under 42 minutes (alongside all other analyses) vs nearly
-10 hours for `tin.py` alone.
+TIN values are identical between RSeQC and RustQC.
 
 ### Output format
 
 RustQC produces gene-level TIN scores (one row per gene, using the longest
 transcript as representative), while RSeQC's `tin.py` produces transcript-level
-scores. Both formats are compatible with MultiQC. The gene-level approach
-provides a cleaner summary with one score per gene.
+scores. Both formats are compatible with MultiQC.
 
 ## Gene body coverage (Qualimap)
 

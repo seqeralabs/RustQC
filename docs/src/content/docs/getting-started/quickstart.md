@@ -21,9 +21,9 @@ This command:
 
 ### Input requirements
 
-- **BAM file(s)** — must have PCR duplicates **marked** (SAM flag `0x400`) but **not removed**. RustQC needs both duplicate and non-duplicate reads to calculate duplication rates.
-- **BAM index** (`.bai` / `.csi`) - not technically required, but highly recommended as it's needed for multi-threaded performance; without one, only a single counting thread is used. Should sit alongisde the BAM file with the same filename, plus the `.bai` suffix.
-- **GTF annotation file** (`--gtf`) — provides all annotation needed for every tool. Gene models are derived internally so all analyses run. Can be plain or gzip-compressed (`.gz`) — compression is detected automatically.
+- **BAM file(s)** - must have PCR duplicates marked (SAM flag `0x400`) but not removed. RustQC needs both duplicate and non-duplicate reads to calculate duplication rates.
+- **BAM index** (`.bai` / `.csi`) - not strictly required, but needed for multi-threaded performance; without one, only a single counting thread is used. Should sit alongside the BAM file with the same filename plus the `.bai` suffix.
+- **GTF annotation file** (`--gtf`) - provides the annotation needed for every tool. Gene models are derived internally. Can be plain or gzip-compressed (`.gz`); compression is detected automatically.
 
 Compatible duplicate-marking tools:
 
@@ -34,7 +34,7 @@ Compatible duplicate-marking tools:
 
 RustQC automatically checks the BAM header for duplicate-marking tool signatures and exits with an error if none are found. Use `--skip-dup-check` to bypass this validation if your duplicate-marking tool is not recognized.
 
-Note that the RSeQC tools themselves do not require duplicate marking — the duplicate-marking requirement applies to the dupRadar analysis.
+Note that the RSeQC tools themselves do not require duplicate marking - the duplicate-marking requirement applies to the dupRadar analysis.
 
 
 ### Output

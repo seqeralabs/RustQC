@@ -1,6 +1,6 @@
 ---
 title: dupRadar Outputs
-description: Comprehensive guide to RustQC's dupRadar output files, including the duplication matrix, fitted model parameters, diagnostic plots, and how to interpret them.
+description: RustQC's dupRadar output files, including the duplication matrix, fitted model parameters, diagnostic plots, and how to interpret them.
 ---
 
 import { Card, CardGrid, FileTree } from "@astrojs/starlight/components";
@@ -15,17 +15,17 @@ Highly expressed genes produce many RNA fragments. When sequencing depth is suff
 
 **dupRadar** addresses this by analyzing duplication rates in the context of expression level. Rather than applying a blanket duplicate removal, it models the expected relationship between how highly a gene is expressed and what fraction of its reads are marked as duplicates.
 
-The key insight: at low expression levels, duplicates are almost certainly PCR artifacts. At high expression levels, a baseline level of duplication is expected and biologically meaningful.
+At low expression levels, duplicates are almost certainly PCR artifacts. At high expression levels, a baseline level of duplication is expected and biologically meaningful.
 
 ### Why it matters
 
-Duplicate rate analysis helps answer critical quality questions about an RNA-seq library:
+Duplicate rate analysis helps answer quality questions about an RNA-seq library:
 
 - **Was the library over-amplified?** If low-expression genes show high duplication rates, too many PCR cycles were used.
 - **Is the library complex enough?** Low-complexity libraries produce high duplication across all expression levels.
 - **Can I trust the expression estimates?** If duplication follows the expected expression-dependent pattern, the data is likely reliable.
 
-This information is essential for experiment QC, troubleshooting library preparation protocols, and deciding whether to include a sample in downstream analysis.
+This is useful for experiment QC, troubleshooting library preparation, and deciding whether to include a sample in downstream analysis.
 
 ### The logistic regression model
 
@@ -134,11 +134,11 @@ See the [Interpreting plots](#interpreting-plots) section below for how to read 
 - `<sample>_intercept_slope_mqc.tsv` -- Intercept and slope values in MultiQC general statistics format.
 - `<sample>_duprateExpDensCurve_mqc.txt` -- Fitted duplication rate curve data points for MultiQC line plot visualization.
 
-These files are designed for integration with [MultiQC](https://multiqc.info/), enabling dupRadar results to be included in multi-sample QC reports.
+These files integrate with [MultiQC](https://multiqc.info/) for inclusion in multi-sample QC reports.
 
 ## Interpreting plots
 
-RustQC generates the same three visualizations as the original [dupRadar R package](https://bioconductor.org/packages/dupRadar/) and follows the same conventions. All plots are produced in both PNG and SVG formats.
+RustQC generates the same three visualizations as the original [dupRadar R package](https://bioconductor.org/packages/dupRadar/) and follows the same conventions.
 
 ### Density scatter plot
 
@@ -153,8 +153,8 @@ This is the primary diagnostic plot, showing the relationship between gene expre
 
 **Expected patterns** in a well-prepared library:
 
-- Genes with low expression cluster at the **bottom-left** with duplication rates near zero. At low sequencing depth, it is unlikely for independent fragments to share identical start/end positions.
-- Genes with high expression have **moderately higher** duplication rates. This is expected -- highly expressed genes produce many fragments, and some will share positions by chance alone.
+- Genes with low expression cluster at the bottom-left with duplication rates near zero. At low sequencing depth, it is unlikely for independent fragments to share identical start/end positions.
+- Genes with high expression have moderately higher duplication rates. This is expected -- highly expressed genes produce many fragments, and some will share positions by chance alone.
 - The fitted curve rises gradually from left to right, staying below 0.5 for most of the expression range.
 
 ### Duplication rate boxplot

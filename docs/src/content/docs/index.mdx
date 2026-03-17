@@ -29,7 +29,7 @@ export const base = import.meta.env.BASE_URL;
         <a href="http://qualimap.conesalab.org/">Qualimap</a>,{" "}
         <a href="https://daehwankimlab.github.io/preseq/">preseq</a>, and{" "}
         <a href="https://www.htslib.org/">samtools</a> in Rust, delivering
-        identical results dramatically faster.
+        identical results much faster.
       </div>
     </div>
     <BenchmarkChart />
@@ -165,13 +165,13 @@ export const base = import.meta.env.BASE_URL;
   </Card>
   <Card title="Dramatically Faster" icon="rocket">
     Processes ~186M reads in 14m 54s on AWS vs ~15h 34m of sequential tool
-    runtimes — including TIN, which takes 9h 45m alone in the traditional
+    runtimes - including TIN, which takes 9h 45m alone in the traditional
     workflow.
   </Card>
   <Card title="All-in-One" icon="puzzle">
-    Replacing 14+ separate QC tool invocations with a single CLI.
-    One task to stage data for. One read-through the BAM file.
-    Minimal staging and I/O requirements for super efficient analysis.
+    Replaces 14+ separate QC tool invocations with a single CLI command.
+    One task to stage data for. One pass through the BAM file.
+    Minimal staging and I/O overhead.
   </Card>
   <Card title="SAM / BAM / CRAM" icon="document">
     Accepts SAM, BAM, and CRAM alignment files. Parallelises across chromosomes
@@ -190,4 +190,4 @@ by Liguo Wang and colleagues, library complexity estimation from
 and produces outputs compatible with [samtools](http://www.htslib.org/) and
 [Qualimap](http://qualimap.conesalab.org/).
 
-**If you use RustQC, please cite the original tools** — see the [Credits & Citation](about/credits/) page.
+**If you use RustQC, please cite the original tools** - see the [Credits & Citation](about/credits/) page.
