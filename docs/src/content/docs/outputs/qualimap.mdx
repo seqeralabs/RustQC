@@ -251,16 +251,7 @@ and the other close to 0.0. Common patterns:
 
 ## Configuration
 
-### YAML configuration
-
-```yaml
-qualimap:
-  enabled: true # Whether to run the Qualimap analysis
-```
-
-When Qualimap is enabled (the default), the analysis runs in the same BAM pass
-as dupRadar, featureCounts, and all other tools. The only additional requirement
-is a GTF annotation file (`--gtf`).
+Gene body coverage can be enabled or disabled in the config. See the [Configuration](/usage/configuration/#qualimap) page for details.
 
 ## Compatibility with Qualimap
 

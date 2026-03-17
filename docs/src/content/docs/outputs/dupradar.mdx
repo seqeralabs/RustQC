@@ -207,18 +207,7 @@ Duplication rates near zero across all expression levels, including highly expre
 
 ## Configuring outputs
 
-Use a [YAML configuration file](/usage/configuration/) to control which dupRadar outputs are generated. All outputs are enabled by default. Set any to `false` to skip generation:
-
-```yaml
-dupradar:
-  dup_matrix: true
-  intercept_slope: true
-  density_scatter_plot: true
-  boxplot: true
-  expression_histogram: true
-  multiqc_intercept: true
-  multiqc_curve: true
-```
+Each output file can be individually enabled or disabled. See the [Configuration](/usage/configuration/#dupradar-output-toggles) page for details.
 
 ## References
 

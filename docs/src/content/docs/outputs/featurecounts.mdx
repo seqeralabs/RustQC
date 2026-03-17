@@ -102,26 +102,11 @@ The biotype is extracted from the GTF attribute specified by `biotype_attribute`
 
 ## Biotype attribute detection
 
-RustQC automatically detects the biotype attribute in your GTF file:
-
-- **Ensembl GTFs** use `gene_biotype`
-- **GENCODE GTFs** use `gene_type`
-
-If neither attribute is found, biotype outputs are skipped with a warning. You can override the auto-detection with the `--biotype-attribute` CLI flag or the `featurecounts.biotype_attribute` config option.
+RustQC auto-detects whether your GTF uses `gene_biotype` (Ensembl) or `gene_type` (GENCODE). You can override this with `--biotype-attribute`. See the [CLI reference](/usage/cli-reference/) for details.
 
 ## Configuring outputs
 
-Use a [YAML configuration file](/usage/configuration/) to control which featureCounts outputs are generated. All outputs are enabled by default. Set any to `false` to skip generation:
-
-```yaml
-featurecounts:
-  counts_file: true           # .featureCounts.tsv
-  summary_file: true          # .featureCounts.tsv.summary
-  biotype_counts: true        # .biotype_counts.tsv
-  biotype_counts_mqc: true    # .biotype_counts_mqc.tsv
-  biotype_rrna_mqc: true      # .biotype_rrna_mqc.tsv
-  biotype_attribute: "gene_biotype"  # GTF attribute for biotype grouping
-```
+Each output file can be individually enabled or disabled. See the [Configuration](/usage/configuration/#featurecounts-output-toggles) page for details.
 
 ## Differences from Subread featureCounts
 

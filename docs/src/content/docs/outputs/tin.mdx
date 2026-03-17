@@ -97,12 +97,7 @@ than global degradation.
 
 ## Configuration
 
-```yaml
-tin:
-  enabled: true
-  sample_size: 100 # Equally-spaced positions to sample per transcript
-  min_coverage: 10 # Minimum read-start count to compute TIN
-```
+TIN parameters (`sample_size`, `min_coverage`) can be set in the YAML config file. See the [Configuration](/usage/configuration/#tin) page for details.
 
 TIN uses the shared `--mapq` / `-q` flag for mapping quality filtering.
 

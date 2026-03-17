@@ -16,7 +16,7 @@ RustQC produces output matching R dupRadar to floating-point precision. All 14 o
 | R dupRadar         | 7.2s    | 219.1 MB |
 | RustQC (all tools) | 25.9s   | 182.1 MB |
 
-Note: The RustQC runtime covers the full combined workload (dupRadar, featureCounts, all 8 RSeQC tools including TIN, preseq, samtools outputs, and gene body coverage) in a single pass, not just dupRadar.
+> **Note:** RustQC runtime shown is for all tools combined in a single pass. See [Combined benchmarks](/benchmarks/combined/) for a full breakdown.
 
 ### Results comparison (small)
 
@@ -47,8 +47,6 @@ The intercept and slope differences are at the 9th–10th significant figure, ar
 | ------------------ | ---------- | ------- |
 | R dupRadar         | 2h 14m 24s | 491 MB  |
 | RustQC (all tools) | 14m 54s    | 11.4 GB |
-
-Note: The RustQC runtime covers the full combined workload (dupRadar, featureCounts, all 8 RSeQC tools including TIN, preseq, samtools outputs, and gene body coverage) in a single pass at 174.2% CPU utilisation. The R dupRadar figure is for dupRadar alone.
 
 ### Results comparison (large)
 

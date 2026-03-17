@@ -5,17 +5,14 @@ description: Comparison of RustQC's preseq lc_extrap implementation against pres
 
 export const base = import.meta.env.BASE_URL;
 
-RustQC includes a built-in reimplementation of
-[preseq lc_extrap](http://smithlabresearch.org/software/preseq/) for library complexity
-estimation. This page compares the output against preseq v3.2.0, which is the version
-used by the [nf-core/rnaseq](https://nf-co.re/rnaseq) pipeline.
+This page compares RustQC's [preseq lc_extrap](/outputs/preseq/) output against
+preseq v3.2.0, the version used by [nf-core/rnaseq](https://nf-co.re/rnaseq).
 
 ## Performance
 
-Preseq runs as part of the single-pass `rustqc rna` analysis alongside all other
-tools. The fragment counting is performed during the same BAM read that powers
-dupRadar, featureCounts, and the 8 RSeQC tools (including TIN). The extrapolation computation
-itself is fast (under 1 second) -- it is purely a function of the histogram data.
+> **Note:** RustQC runtime shown is for all tools combined in a single pass. See [Combined benchmarks](/benchmarks/combined/) for a full breakdown.
+
+The extrapolation computation itself is fast (under 1 second) -- it is purely a function of the histogram data.
 
 ### Small dataset (~52K reads, chr6)
 
@@ -30,10 +27,6 @@ itself is fast (under 1 second) -- it is purely a function of the histogram data
 | ------------------------------- | ----------: | ------: | -----: |
 | preseq lc_extrap (standalone)   |      39m 9s |  2.0 GB | 102.2% |
 | RustQC (all tools, single pass) | **14m 54s** | 11.4 GB | 174.2% |
-
-RustQC produces preseq output at zero additional I/O cost - the fragment
-histogram is collected during the same BAM pass that produces all other outputs.
-The 14m 54s RustQC runtime covers all QC tools, not just preseq.
 
 ## Output comparison
 
@@ -111,41 +104,11 @@ Bootstrap confidence intervals overlap between preseq and RustQC at every
 extrapolation point. Differences in CI bounds are at most ±2 in the
 floating-point representation, indistinguishable from rounding noise.
 
-## Algorithm details
+## Algorithm and compatibility
 
-RustQC implements the same Good-Toulmin rational function extrapolation as
-preseq v3.2.0:
-
-1. **Fragment counting**: PE reads are merged into fragments using
-   `(tid, min_start, max_end)` keys derived from CIGAR-based alignment
-   coordinates, matching preseq's `merge_mates()` behavior
-2. **Power series**: Coefficients derived from the frequency-of-frequencies
-   histogram
-3. **Continued fraction**: Evaluated using Euler's forward recurrence with
-   preseq-style rescaling
-4. **Degree selection**: Starts at degree 7, steps by 2, selects the most
-   stable approximation
-5. **Bootstrap**: Multinomial resampling via sequential conditional binomial
-   draws, using the host C++ standard library's `std::mt19937` and
-   `std::binomial_distribution` through FFI for exact algorithm matching
-
-Key implementation choices matched to preseq v3.2.0:
-
-- Read filtering: `!(flag & 0x100)` only (secondary excluded, supplementary included)
-- Proper pair flag `0x2` determines PE vs SE fragment construction
-- Non-proper-pair reads treated as individual fragments
-
-### C++ FFI for RNG compatibility
-
-The bootstrap resampling uses a Mersenne Twister RNG and binomial distribution
-via a C++ FFI shim rather than pure-Rust implementations. This is necessary
-because different C++ standard libraries implement `std::binomial_distribution`
-with different algorithms (Devroye's rejection method in libstdc++, Kemp's
-modal method in libc++), and preseq uses whichever algorithm the host provides.
-By linking against the same C++ stdlib, RustQC's bootstrap produces identical
-random samples given the same seed. See the
-[preseq output docs](/outputs/preseq/#c-ffi-for-exact-bootstrap-matching) for
-full details.
+For details on the Good-Toulmin extrapolation algorithm and the C++ FFI approach
+used for exact bootstrap matching, see the
+[preseq output page](/outputs/preseq/#compatibility-with-preseq).
 
 ## Benchmark conditions
 

@@ -36,32 +36,32 @@ Key advantages:
 Given a duplicate-marked BAM file and a GTF annotation, `rustqc rna` runs all of the following in a single pass:
 
 
-| Tool            | Equivalent                                                         | Description                                                                                                                                                                                                       |
-| --------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Qualimap rnaseq | [Qualimap](http://qualimap.conesalab.org/) rnaseq                  | Gene body coverage profiling, 5'/3' bias metrics, read origin classification (exonic/intronic/intergenic), strand-specificity estimation, and junction analysis. Qualimap-compatible output parseable by MultiQC. |
-| preseq          | [preseq](http://smithlabresearch.org/software/preseq/) `lc_extrap` | Library complexity extrapolation with bootstrap confidence intervals                                                                                                                                              |
-| flagstat        | `samtools flagstat`                                                | Alignment flag statistics                                                                                                                                                                                         |
-| idxstats        | `samtools idxstats`                                                | Per-chromosome read counts                                                                                                                                                                                        |
-| stats           | `samtools stats`                                                   | Full samtools stats output including all histogram sections                                                                                                                                                       |
+| Tool            | Equivalent                                                         | Description                              |
+| --------------- | ------------------------------------------------------------------ | ---------------------------------------- |
+| Qualimap rnaseq | [Qualimap](http://qualimap.conesalab.org/) rnaseq                  | Gene body coverage and RNA-seq QC        |
+| preseq          | [preseq](http://smithlabresearch.org/software/preseq/) `lc_extrap` | Library complexity extrapolation         |
+| flagstat        | `samtools flagstat`                                                | Alignment flag statistics                |
+| idxstats        | `samtools idxstats`                                                | Per-chromosome read counts               |
+| stats           | `samtools stats`                                                   | Full stats with all histogram sections   |
 
 A GTF file is required (`--gtf`) and all tools run automatically. Transcript-level structure is extracted from the GTF. GTF files can be plain or gzip-compressed (`.gz`); compression is detected automatically. Individual tools can be disabled via the YAML configuration file.
 
 ### RSeQC tools -- RNA-seq quality control
 
-Eight reimplementations of [RSeQC](https://rseqc.sourceforge.net/) tools (including TIN), all integrated into the `rustqc rna` command and running automatically in the same single-pass analysis:
+Eight reimplementations of [RSeQC](https://rseqc.sourceforge.net/) tools (including TIN), all integrated into the `rustqc rna` command and running automatically in the same single-pass analysis. See [RSeQC outputs](/outputs/rseqc/) and [TIN outputs](/outputs/tin/) for full details.
 
-| Tool                | Description                                                                                |
-| ------------------- | ------------------------------------------------------------------------------------------ |
-| bam_stat            | Basic BAM alignment statistics (total reads, duplicates, mapping quality, etc.)            |
-| infer_experiment    | Infer library strandedness from read/gene-model strand concordance                         |
-| read_duplication    | Position-based and sequence-based read duplication histograms with plots                   |
-| read_distribution   | Classify reads across genomic features (CDS, UTR, intron, intergenic)                      |
-| junction_annotation | Classify splice junctions as known, partial novel, or complete novel, with pie chart plots |
-| junction_saturation | Assess saturation of splice junction detection at increasing read depths, with plot        |
-| inner_distance      | Compute inner distance between paired-end read mates, with histogram plot                  |
-| tin                 | Transcript Integrity Number (TIN) for RNA degradation assessment                           |
+| Tool                | Description                              |
+| ------------------- | ---------------------------------------- |
+| bam_stat            | Alignment statistics (total reads, duplicates, mapping quality) |
+| infer_experiment    | Strandedness inference from splice reads |
+| read_duplication    | Sequence- and mapping-based duplication rates |
+| read_distribution   | Read distribution across genomic features (CDS, UTR, intron, intergenic) |
+| junction_annotation | Classify splice junctions as known, partial novel, or complete novel |
+| junction_saturation | Saturation analysis of detected splice junctions |
+| inner_distance      | Inner distance distribution between paired-end mates |
+| tin                 | Transcript Integrity Number per gene |
 
 
 ## Credits
 
-RustQC stands on the shoulders of the original tools. If you use RustQC, please cite [dupRadar](https://bioconductor.org/packages/dupRadar/), [Subread/featureCounts](http://subread.sourceforge.net/), [RSeQC](https://rseqc.sourceforge.net/), and [preseq](http://smithlabresearch.org/software/preseq/). See [Credits & Citation](/about/credits/) for full details.
+RustQC builds on several established bioinformatics tools. If you use RustQC, please cite the original tools. See the [Credits](/about/credits/) page for the full list and citations.

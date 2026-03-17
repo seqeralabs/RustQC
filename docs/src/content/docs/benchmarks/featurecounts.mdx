@@ -24,10 +24,7 @@ GRCh38 (~186M reads).
 | Rsubread featureCounts          |     3m 3s |    3m 3s |   210 MB |
 | RustQC (all tools, single pass) |   14m 54s |  14m 54s |  11.4 GB |
 
-RustQC's single pass includes featureCounts-compatible counting alongside
-dupRadar duplication analysis, all 8 RSeQC tools (including TIN), preseq, samtools
-outputs, and gene body coverage profiling. The traditional workflow requires
-running each tool separately.
+> **Note:** RustQC runtime shown is for all tools combined in a single pass. See [Combined benchmarks](/benchmarks/combined/) for a full breakdown.
 
 ### Small dataset
 
@@ -38,8 +35,7 @@ running each tool separately.
 | Rsubread featureCounts          |     3m 9s |       1s |   3.1 MB |
 | RustQC (all tools, single pass) |    3m 31s |    25.9s | 182.1 MB |
 
-The RustQC wall time includes loading the GTF annotation and running all QC
-analyses in a single pass; the 1s CPU time for featureCounts reflects that the
+The 1s CPU time for featureCounts reflects that the
 small dataset is trivially sized and most wall time is container startup.
 
 ## Output equivalence

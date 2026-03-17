@@ -21,20 +21,9 @@ This command:
 
 ### Input requirements
 
-- **BAM file(s)** - must have PCR duplicates marked (SAM flag `0x400`) but not removed. RustQC needs both duplicate and non-duplicate reads to calculate duplication rates.
-- **BAM index** (`.bai` / `.csi`) - not strictly required, but needed for multi-threaded performance; without one, only a single counting thread is used. Should sit alongside the BAM file with the same filename plus the `.bai` suffix.
-- **GTF annotation file** (`--gtf`) - provides the annotation needed for every tool. Gene models are derived internally. Can be plain or gzip-compressed (`.gz`); compression is detected automatically.
-
-Compatible duplicate-marking tools:
-
-- [Picard MarkDuplicates](https://broadinstitute.github.io/picard/command-line-overview.html#MarkDuplicates)
-- [samblaster](https://github.com/GregoryFaust/samblaster)
-- [sambamba markdup](https://lomereiter.github.io/sambamba/)
-- [biobambam bammarkduplicates](https://gitlab.com/german.tischler/biobambam2)
-
-RustQC automatically checks the BAM header for duplicate-marking tool signatures and exits with an error if none are found. Use `--skip-dup-check` to bypass this validation if your duplicate-marking tool is not recognized.
-
-Note that the RSeQC tools themselves do not require duplicate marking - the duplicate-marking requirement applies to the dupRadar analysis.
+- **BAM file(s)** - coordinate-sorted and duplicate-marked (not removed). See [CLI reference](/usage/cli-reference/) for supported duplicate-marking tools. The RSeQC tools do not require duplicate marking - this is only needed for the dupRadar analysis. Use `--skip-dup-check` to bypass the check.
+- **BAM index** - a `.bai` index is not strictly required, but without one RustQC falls back to a single counting thread. For multi-threaded performance, ensure an index file is present alongside each BAM.
+- **GTF annotation file** (`--gtf`) - a gene annotation file (plain or gzip-compressed). See [CLI reference](/usage/cli-reference/) for details.
 
 
 ### Output

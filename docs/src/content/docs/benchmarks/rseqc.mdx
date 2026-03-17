@@ -17,10 +17,10 @@ Both upstream RSeQC and RustQC ran on the **same BAM file** in all cases.
 
 ## Performance
 
-All RSeQC tools run together in the same single-pass BAM reading that also produces
-dupRadar, featureCounts, preseq, samtools, and gene body coverage output. The timings
-below show the original Python RSeQC tools run individually versus RustQC running
-all tools in a single pass.
+> **Note:** RustQC runtime shown is for all tools combined in a single pass. See [Combined benchmarks](/benchmarks/combined/) for a full breakdown.
+
+The timings below show the original Python RSeQC tools run individually versus
+RustQC running all tools in a single pass.
 
 ### Small dataset (~52K reads, chr6 subset)
 
@@ -51,8 +51,7 @@ all tools in a single pass.
 | **RUSTQC_RNA (all-in-one)** | **14m 54s** | **11.4 GB** |
 
 The sum of upstream RSeQC tools on the large dataset (including TIN) is approximately
-**10 hours 37 minutes**. RustQC covers all of these plus samtools, Qualimap, dupRadar, featureCounts, and
-preseq in a single **14m 54s** pass. The upstream `tin.py` alone takes **9h 45m**;
+**10 hours 37 minutes**. The upstream `tin.py` alone takes **9h 45m**;
 RustQC completes TIN as part of its single pass in under 42 minutes total.
 
 ## bam_stat

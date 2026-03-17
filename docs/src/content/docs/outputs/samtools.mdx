@@ -166,24 +166,8 @@ CHK	1a2b3c4d	5e6f7a8b	9c0d1e2f
 
 ## Configuration
 
-### YAML configuration
-
-Each samtools-compatible output can be individually enabled or disabled:
-
-```yaml
-flagstat:
-  enabled: true # Generate samtools flagstat output
-
-idxstats:
-  enabled: true # Generate samtools idxstats output
-
-samtools_stats:
-  enabled: true # Generate samtools stats output (SN + all histogram sections)
-```
-
-All three are enabled by default. The underlying BAM statistics accumulator runs
-whenever any of `bam_stat`, `flagstat`, `idxstats`, or `samtools_stats` is
-enabled.
+Each output (flagstat, idxstats, stats) can be individually enabled or disabled.
+See the [Configuration](/usage/configuration/#samtools) page for details.
 
 ## Compatibility
 

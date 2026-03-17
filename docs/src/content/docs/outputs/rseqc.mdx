@@ -240,28 +240,16 @@ approximately normal for a well-prepared library.
 ## tin (Transcript Integrity Number)
 
 Measures transcript integrity via Shannon entropy of read coverage uniformity.
-A reimplementation of RSeQC's `tin.py` tool. For full details, see the
-dedicated [TIN](/outputs/tin/) documentation page.
+TIN scores range from 0 (completely degraded) to 100 (perfectly uniform coverage).
+See the dedicated [TIN output page](/outputs/tin/) for full details, configuration
+options, and interpretation guidance.
 
 | File                 | Description                                                            |
 | -------------------- | ---------------------------------------------------------------------- |
 | `{stem}.tin.xls`     | Per-gene TIN scores (TSV: geneID, chrom, tx_start, tx_end, TIN)        |
 | `{stem}.summary.txt` | Summary statistics: mean, median, and standard deviation of TIN scores |
 
-TIN scores range from 0 (completely degraded) to 100 (perfectly uniform coverage).
-The tool uses the longest transcript per gene and samples equally-spaced positions
-within exonic regions.
-
-:::note[Minor differences from upstream `tin.py`]
-RustQC's TIN scores may differ very slightly from RSeQC's `tin.py` output.
-Both tools sample identical positions and apply identical flag filters, but they
-count per-position coverage differently: upstream uses pysam's pileup engine
-(`bam_plp_auto`) while RustQC uses CIGAR-derived aligned blocks via the BAM
-index. The htslib pileup engine uses a different internal read traversal that can
-miss a small number of reads at certain positions, leading to minor coverage
-differences. In practice, ~70% of TIN values are identical and the mean absolute
-difference is less than 0.1 TIN units.
-:::
+For details on minor differences from upstream `tin.py`, see the [TIN output page](/outputs/tin/#compatibility).
 
 ## Compatibility with RSeQC
 

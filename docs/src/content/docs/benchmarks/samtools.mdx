@@ -12,10 +12,9 @@ validated on two datasets from an AWS cloud run (nf-core AWS megatests, 2026-03-
 
 ## Performance
 
-All samtools-compatible outputs are produced together in the same single-pass BAM
-reading that also covers dupRadar, featureCounts, RSeQC (including TIN), preseq, and gene body
-coverage. The `RUSTQC_RNA` times below reflect the full all-in-one run; individual
-samtools tool times are shown for reference.
+> **Note:** RustQC runtime shown is for all tools combined in a single pass. See [Combined benchmarks](/benchmarks/combined/) for a full breakdown.
+
+Individual samtools tool times are shown for reference.
 
 ### Small dataset (~52K reads, chr6 subset)
 
@@ -34,11 +33,6 @@ samtools tool times are shown for reference.
 | samtools idxstats           |         16s |      4.8 MB |
 | samtools stats              |      9m 48s |      8.2 MB |
 | **RUSTQC_RNA (all-in-one)** | **14m 54s** | **11.4 GB** |
-
-`RUSTQC_RNA` runs all QC tools in a single BAM pass, so its time is not
-directly comparable to any individual samtools command. It replaces the combined
-runtime of samtools flagstat + idxstats + stats + RSeQC + Qualimap + dupRadar +
-featureCounts + preseq.
 
 ## flagstat
 

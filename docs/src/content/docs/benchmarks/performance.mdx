@@ -147,37 +147,12 @@ read_duplication (~1 GB for sequence hash tables).
 
 ## Disabling tools
 
-Every analysis tool in RustQC can be individually disabled via the
-[YAML configuration file](/usage/configuration/).
-
-Example: disable TIN and read_duplication for a faster run:
-
-```yaml
-tin:
-  enabled: false
-read_duplication:
-  enabled: false
-```
-
-Or disable all outputs for dupRadar (per-output granularity):
-
-```yaml
-dupradar:
-  dup_matrix: false
-  intercept_slope: false
-  density_scatter_plot: false
-  boxplot: false
-  expression_histogram: false
-  multiqc_intercept: false
-  multiqc_curve: false
-```
+Individual tools can be disabled in the YAML config file.
+See the [Configuration](/usage/configuration/) page for the full list of toggles.
 
 When a tool is disabled, its accumulators are never constructed, its per-read
 processing is skipped entirely, and no output files are written. There is
 zero overhead for disabled tools - not just output suppression.
-
-See the [Configuration File](/usage/configuration/) documentation for the
-complete list of toggles.
 
 ## Effect of CPU count
 
