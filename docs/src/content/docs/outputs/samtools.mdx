@@ -5,6 +5,11 @@ description: Output files produced by RustQC's samtools-compatible flagstat, idx
 
 import { FileTree } from "@astrojs/starlight/components";
 
+:::info[About samtools]
+samtools is a suite of programs for interacting with high-throughput sequencing data, providing utilities for alignment statistics (`flagstat`), per-chromosome read counts (`idxstats`), and comprehensive alignment metrics (`stats`).
+[Documentation](http://www.htslib.org/doc/samtools.html) | [Source code](https://github.com/samtools/samtools)
+:::
+
 RustQC produces output files compatible with three core
 [samtools](http://www.htslib.org/) commands: `flagstat`, `idxstats`, and
 `stats`. These are generated during the same single-pass BAM scan as all other

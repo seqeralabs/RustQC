@@ -5,6 +5,11 @@ description: How RustQC produces featureCounts-compatible read count files, assi
 
 import { FileTree } from '@astrojs/starlight/components';
 
+:::info[About featureCounts]
+featureCounts is a highly efficient read counting program from the Subread package that assigns aligned reads to genomic features such as genes, exons, and promoters.
+[Documentation](https://subread.sourceforge.net/featureCounts.html) | [Source code](https://github.com/ShiLab-Bioinformatics/subread)
+:::
+
 ## How it works
 
 RustQC performs gene-level read counting in the same pass as the dupRadar duplication rate analysis and all RSeQC-equivalent metrics. During BAM processing, RustQC simultaneously:
