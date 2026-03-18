@@ -42,6 +42,7 @@ export default defineConfig({
               label: "Configuration File",
               slug: "usage/configuration",
             },
+            { label: "Performance & Tuning", slug: "usage/performance" },
           ],
         },
         {
@@ -54,7 +55,6 @@ export default defineConfig({
             { label: "Qualimap", slug: "rna/qualimap" },
             { label: "Preseq", slug: "rna/preseq" },
             { label: "Samtools", slug: "rna/samtools" },
-            { label: "Performance & Tuning", slug: "rna/performance" },
           ],
         },
         {
