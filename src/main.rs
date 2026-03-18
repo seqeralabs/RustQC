@@ -1554,7 +1554,8 @@ fn write_rseqc_outputs(
             bam_stem,
         )?;
         let plot_path = rseqc_read_dup_dir.join(format!("{}.DupRate_plot.png", bam_stem));
-        rna::rseqc::plots::read_duplication_plot(&result, &plot_path)?;
+        let sample_name = clean_sample_name(bam_stem);
+        rna::rseqc::plots::read_duplication_plot(&result, &sample_name, &plot_path)?;
         let p = rseqc_read_dup_dir.display().to_string();
         ui.output_item("read_duplication", &format!("{p}/{bam_stem}.*"));
         written.push(("read_duplication".into(), p));

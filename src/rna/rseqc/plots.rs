@@ -660,20 +660,30 @@ where
 
 /// Generate the read duplication plot (PNG + SVG).
 ///
-/// Matches the plot produced by RSeQC's read_duplication.py:
-/// - Two curves: position-based (blue) and sequence-based (red)
-/// - X-axis: occurrence count (1 to 500)
-/// - Y-axis: number of uniquely-mapped reads
-/// - Connected points (type='o' in R)
+/// Matches the plot produced by RSeQC's read_duplication.py R script:
+/// - Position-based data plotted in blue (× markers), sequence-based in red (● markers)
+/// - X-axis: "Occurrence of read" (integer labels at 0, 100, 200, 300, 400, 500)
+/// - Y-axis: "Number of Reads (log10)" with log10 exponent labels (0, 1, 2, …)
+/// - Legend inside the plot area (matching upstream's `legend(300, ym, ...)`)
+/// - No gridlines, black border around plot area
+///
+/// Note: the upstream RSeQC has a label swap in its legend — it labels the
+/// blue (position-based) series as "Sequence-based" and the red (sequence-based)
+/// series as "Mapping-based". We replicate this for visual compatibility.
 ///
 /// # Arguments
 /// * `result` — read duplication analysis results
+/// * `sample_name` — sample identifier shown in the plot title
 /// * `output_path` — path for the PNG output; SVG is written alongside
-pub fn read_duplication_plot(result: &ReadDuplicationResult, output_path: &Path) -> Result<()> {
+pub fn read_duplication_plot(
+    result: &ReadDuplicationResult,
+    sample_name: &str,
+    output_path: &Path,
+) -> Result<()> {
     // PNG (high-res)
     {
         let root = BitMapBackend::new(output_path, (s(WIDTH), s(HEIGHT))).into_drawing_area();
-        render_read_duplication(&root, result, SCALE as f64)?;
+        render_read_duplication(&root, result, sample_name, SCALE as f64)?;
         root.present()
             .context("Failed to write read duplication PNG")?;
     }
@@ -682,7 +692,7 @@ pub fn read_duplication_plot(result: &ReadDuplicationResult, output_path: &Path)
     let svg_path = output_path.with_extension("svg");
     {
         let root = SVGBackend::new(&svg_path, (WIDTH, HEIGHT)).into_drawing_area();
-        render_read_duplication(&root, result, 1.0)?;
+        render_read_duplication(&root, result, sample_name, 1.0)?;
         root.present()
             .context("Failed to write read duplication SVG")?;
     }
@@ -692,9 +702,26 @@ pub fn read_duplication_plot(result: &ReadDuplicationResult, output_path: &Path)
 }
 
 /// Render the read duplication line plot.
+///
+/// Replicates the upstream RSeQC R script exactly:
+/// ```r
+/// plot(pos_occ, log10(pos_uniqRead), ylab='Number of Reads (log10)',
+///      xlab='Occurrence of read', pch=4, cex=0.8, col='blue',
+///      xlim=c(1,500), yaxt='n')
+/// points(seq_occ, log10(seq_uniqRead), pch=20, cex=0.8, col='red')
+/// ym = floor(max(log10(pos_uniqRead)))
+/// legend(300, ym, legend=c('Sequence-based','Mapping-based'),
+///        col=c('blue','red'), pch=c(4,20))
+/// axis(side=2, at=0:ym, labels=0:ym)
+/// ```
+///
+/// Note: the upstream legend labels are swapped relative to the plotted data
+/// (blue is position-based data labelled "Sequence-based", red is sequence-based
+/// data labelled "Mapping-based"). We replicate this for visual compatibility.
 fn render_read_duplication<DB: DrawingBackend>(
     root: &DrawingArea<DB, plotters::coord::Shift>,
     result: &ReadDuplicationResult,
+    sample_name: &str,
     pxs: f64,
 ) -> Result<()>
 where
@@ -704,62 +731,89 @@ where
 
     root.fill(&WHITE)?;
 
-    // Cap at 500 occurrences (matching RSeQC)
+    // Cap at 500 occurrences (matching RSeQC's default up_bound)
     let max_occ: u64 = 500;
 
     // Build data points for position-based and sequence-based.
     // DupHistogram is a BTreeMap, so iteration yields keys in sorted order.
+    // Upstream R script applies log10() to the y values for plotting.
     let pos_data: Vec<(f64, f64)> = result
         .pos_histogram
         .iter()
         .filter(|(&occ, _)| occ >= 1 && occ <= max_occ)
-        .map(|(&occ, &count)| (occ as f64, count as f64))
+        .map(|(&occ, &count)| (occ as f64, (count as f64).log10()))
         .collect();
 
     let seq_data: Vec<(f64, f64)> = result
         .seq_histogram
         .iter()
         .filter(|(&occ, _)| occ >= 1 && occ <= max_occ)
-        .map(|(&occ, &count)| (occ as f64, count as f64))
+        .map(|(&occ, &count)| (occ as f64, (count as f64).log10()))
         .collect();
 
     if pos_data.is_empty() && seq_data.is_empty() {
         return Ok(());
     }
 
-    // Compute axis ranges
+    // Compute axis ranges.
+    // x-axis: 0 to 500 (matching upstream's xlim=c(1,500) but R shows 0 as first tick)
     let x_max = max_occ as f64;
-    let y_max = pos_data
+
+    // y-axis: 0 to ym where ym = floor(max(log10(pos_uniqRead)))
+    let y_max_raw = pos_data
         .iter()
         .chain(seq_data.iter())
         .map(|&(_, y)| y)
-        .fold(0.0_f64, f64::max)
-        * 1.05;
-
-    let y_max = if y_max <= 1.0 { 10.0 } else { y_max };
+        .fold(f64::NEG_INFINITY, f64::max);
+    let ym = if y_max_raw.is_infinite() || y_max_raw < 1.0 {
+        1.0
+    } else {
+        y_max_raw.floor()
+    };
+    // Add a small margin above ym so the top data points are visible
+    let y_plot_max = ym + 0.5;
 
     // --- Build chart ---
     let mut chart = ChartBuilder::on(root)
         .margin(ps(10.0))
         .x_label_area_size(ps(35.0))
-        .y_label_area_size(ps(55.0))
-        .build_cartesian_2d(1.0_f64..x_max, (1.0_f64..y_max).log_scale())?;
+        .y_label_area_size(ps(50.0))
+        .caption(sample_name, ("sans-serif", ps(14.0)))
+        .build_cartesian_2d(0.0_f64..x_max, 0.0_f64..y_plot_max)?;
 
+    // Configure mesh: no gridlines, integer x-axis labels at 0/100/200/300/400/500,
+    // y-axis labels as log10 exponents (0, 1, 2, ..., ym).
     chart
         .configure_mesh()
-        .x_desc("Occurrence")
-        .y_desc("Number of uniquely mapped reads")
+        .x_desc("Occurrence of read")
+        .y_desc("Number of Reads (log10)")
         .label_style(("sans-serif", ps(11.0)))
         .axis_desc_style(("sans-serif", ps(12.0)))
+        .x_labels(6) // 0, 100, 200, 300, 400, 500
+        .x_label_formatter(&|v| format!("{}", *v as i64))
+        .y_label_formatter(&|v| format!("{}", *v as i64))
+        .disable_mesh() // no gridlines (matching upstream R default)
         .draw()?;
+
+    // Draw a black border around the plot area (matching R's default box())
+    chart.draw_series(std::iter::once(Rectangle::new(
+        [(0.0_f64, 0.0_f64), (x_max, y_plot_max)],
+        ShapeStyle {
+            color: BLACK.mix(1.0),
+            filled: false,
+            stroke_width: ps(1.0),
+        },
+    )))?;
 
     let point_size = ps(2.0);
 
-    // Blue: sequence-based duplication (matches RSeQC coloring)
-    if !seq_data.is_empty() {
+    // Blue: position-based data plotted first (matching upstream R script which
+    // calls plot(pos_occ, ..., col='blue') first).
+    // Upstream legend labels this as "Sequence-based" (label swap in upstream).
+    if !pos_data.is_empty() {
         chart
             .draw_series(LineSeries::new(
-                seq_data.iter().copied(),
+                pos_data.iter().copied(),
                 ShapeStyle {
                     color: BLUE.mix(1.0),
                     filled: false,
@@ -779,17 +833,19 @@ where
             });
 
         chart.draw_series(
-            seq_data
+            pos_data
                 .iter()
-                .map(|&(x, y)| Circle::new((x, y), point_size, BLUE.filled())),
+                .map(|&(x, y)| Cross::new((x, y), point_size, BLUE.mix(1.0))),
         )?;
     }
 
-    // Red: mapping/position-based duplication (matches RSeQC coloring)
-    if !pos_data.is_empty() {
+    // Red: sequence-based data plotted second (matching upstream R script which
+    // calls points(seq_occ, ..., col='red') second).
+    // Upstream legend labels this as "Mapping-based" (label swap in upstream).
+    if !seq_data.is_empty() {
         chart
             .draw_series(LineSeries::new(
-                pos_data.iter().copied(),
+                seq_data.iter().copied(),
                 ShapeStyle {
                     color: RED.mix(1.0),
                     filled: false,
@@ -809,16 +865,17 @@ where
             });
 
         chart.draw_series(
-            pos_data
+            seq_data
                 .iter()
                 .map(|&(x, y)| Circle::new((x, y), point_size, RED.filled())),
         )?;
     }
 
-    // --- Draw legend ---
+    // --- Draw legend inside the plot area (matching upstream's legend(300, ym, ...)) ---
     chart
         .configure_series_labels()
         .position(SeriesLabelPosition::UpperRight)
+        .margin(ps(10.0) as i32)
         .background_style(WHITE.mix(0.8))
         .border_style(BLACK.mix(0.5))
         .label_font(("sans-serif", ps(10.0)))

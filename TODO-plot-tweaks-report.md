@@ -40,3 +40,39 @@ bar widths, and overall distribution now match the upstream R output.
 
 **Verification**: Built, clippy clean, all 217 tests pass. Generated full-size plot on
 GM12878_REP1 data (201.6M reads) and visually confirmed match against R output.
+
+## RSeQC
+
+### read_duplication — FIXED (7 items)
+
+**Problems & Fixes**:
+
+1. **Missing filename title**: Added `sample_name` parameter to `read_duplication_plot()`.
+   Title now shows clean sample name (e.g., "GM12878_REP1") matching upstream.
+
+2. **Remove gridlines**: Added `.disable_mesh()` to chart mesh configuration.
+
+3. **Black border around plot area**: Draw a `Rectangle` from (0,0) to (x_max, y_max)
+   with black unfilled stroke.
+
+4. **Y-axis log10 labels**: Changed from `.log_scale()` (showing 10, 100, 1000) to
+   pre-computing log10 values with a linear axis showing integer exponents (0, 1, 2, ...7).
+   Y-axis label changed to "Number of Reads (log10)" matching upstream.
+
+5. **X-axis clean integers**: Changed to 6 labels (0, 100, 200, 300, 400, 500) with
+   integer formatting. X range adjusted to 0..500 matching upstream.
+
+6. **Legend position**: Moved inside plot area with margin, matching upstream's overlay style.
+
+7. **Data/label verification**: The upstream RSeQC has a known bug where the legend labels are
+   swapped relative to the plotted data (position-based data labeled "Sequence-based" and
+   vice versa). Changed RustQC to match upstream's visual output for compatibility:
+   - Blue × (Cross) markers → "Sequence-based" (actually position-based data)
+   - Red ● (Circle) markers → "Mapping-based" (actually sequence-based data)
+
+**Note**: Upstream also has a right-side "Reads %" axis which RustQC doesn't implement yet.
+This wasn't listed in the TODO items.
+
+**Verification**: Built, clippy clean, all 217 tests pass. Generated full-size plot and
+confirmed visual match: title, axes, labels, legend placement, marker styles, and data
+curves all match upstream closely.
