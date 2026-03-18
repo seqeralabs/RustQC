@@ -141,3 +141,39 @@ x-axis at every 20, and readable font sizes.
 **Verification**: Built, clippy clean, all 217 tests pass. Visual comparison shows
 clean layout matching upstream: Mean/SD title, no gridlines, black border, correct
 x-axis range, blue histogram with red density curve.
+
+## Qualimap
+
+### Bold font for plot titles — ALREADY IMPLEMENTED
+
+The code already uses `FontStyle::Bold` on all Qualimap plot title fonts (coverage profiles,
+histograms, and pie charts). No code change needed.
+
+### Reads Genomic Origin — FIXED (Intronic/Intergenic swap)
+
+**Problem**: The data ordering in the pie chart was wrong — Intronic and Intergenic
+slices were swapped compared to upstream Qualimap.
+
+**Fix**: Changed slice order from `Exonic, Intronic, Intergenic` to
+`Exonic, Intergenic, Intronic` matching Qualimap Java's `createReadsOriginPieChart()`.
+This corrects the colour-to-label mapping: Red=Exonic, Blue=Intergenic, Green=Intronic.
+
+**Verification**: Visual comparison shows colours and labels now match upstream exactly.
+
+### Junction Analysis — FIXED (data algorithm reimplemented)
+
+**Problem**: RustQC was borrowing junction classification data from the RSeQC junction
+annotation module, which uses a fundamentally different algorithm than Qualimap.
+
+**Fix**: Implemented native Qualimap junction classification:
+- Built junction location index from GTF exon boundaries
+- Classify each junction event by checking if reference endpoints overlap (±1 tolerance)
+  with known exon boundary positions (matching Qualimap Java's `hasOverlap()`)
+- Categories: Known (both endpoints match), Partly known (one matches), Novel (neither)
+
+**Files changed**: `qualimap/index.rs` (junction location map), `qualimap/accumulator.rs`
+(junction classification in read processing), `qualimap/mod.rs` (result fields),
+`qualimap/output.rs` (removed RSeQC dependency), `main.rs` (cleaned up).
+
+**Verification**: Built, clippy clean, all 217 tests pass. Visual comparison shows
+pie chart categories and proportions now use the correct Qualimap algorithm.

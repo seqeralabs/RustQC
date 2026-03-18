@@ -62,6 +62,10 @@ pub struct QualimapResult {
     // --- Junction counters ---
     /// Reads containing at least one splice junction (N-op in CIGAR).
     pub reads_at_junctions: u64,
+    /// Junction events classified as "known" (both endpoints match known exon boundaries).
+    pub known_junction_events: u64,
+    /// Junction events classified as "partly known" (one endpoint matches).
+    pub partly_known_junction_events: u64,
     /// Junction motif counts: canonical_motif_string -> count.
     pub junction_motifs: HashMap<String, u64>,
 

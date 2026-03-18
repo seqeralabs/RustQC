@@ -398,6 +398,8 @@ pub fn reads_genomic_origin_plot(
         return Ok(());
     }
 
+    // Qualimap (JFreeChart) inserts dataset entries as Exonic, Intergenic, Intronic
+    // and assigns colors in insertion order: red, blue, green.
     let slices = vec![
         PieSlice {
             label: "Exonic",
@@ -405,13 +407,13 @@ pub fn reads_genomic_origin_plot(
             color: PIE_COLOR_0,
         },
         PieSlice {
-            label: "Intronic",
-            value: intronic as f64,
+            label: "Intergenic",
+            value: intergenic as f64,
             color: PIE_COLOR_1,
         },
         PieSlice {
-            label: "Intergenic",
-            value: intergenic as f64,
+            label: "Intronic",
+            value: intronic as f64,
             color: PIE_COLOR_2,
         },
     ];

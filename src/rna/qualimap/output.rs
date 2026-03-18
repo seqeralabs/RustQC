@@ -325,11 +325,6 @@ fn write_coverage_profile(profile: &[f64; NUM_BINS], path: &Path) -> Result<()> 
 /// - `rnaseq_qc_results.txt` in exact Qualimap format
 /// - `raw_data_qualimapReport/` with 3 coverage profile TSVs
 /// - `images_qualimapReport/` with 6 PNG + SVG chart images
-///
-/// # Arguments
-/// * `junction_counts` - Optional (known, partly_known, novel) event counts for the
-///   Junction Analysis pie chart. Pass `None` to skip that chart (e.g., when junction
-///   annotation is disabled).
 #[allow(clippy::too_many_arguments)]
 pub fn write_qualimap_results(
     result: &QualimapResult,
@@ -339,7 +334,6 @@ pub fn write_qualimap_results(
     stranded: Strandedness,
     output_dir: &Path,
     sample_name: &str,
-    junction_counts: Option<(u64, u64, u64)>,
 ) -> Result<()> {
     // Auto-detect paired mode from the data
     let paired = result.left_proper_in_pair > 0 || result.right_proper_in_pair > 0;
@@ -521,18 +515,23 @@ pub fn write_qualimap_results(
         &images_dir.join("Reads Genomic Origin.png"),
     )?;
 
-    // Junction Analysis pie chart (optional — requires non-zero junction counts)
-    if let Some((known, partly_known, novel)) = junction_counts {
-        if known + partly_known + novel > 0 {
-            plots::junction_analysis_plot(
-                known,
-                partly_known,
-                novel,
-                sample_name,
-                &images_dir.join("Junction Analysis.png"),
-            )?;
-        }
-    }
+    // Junction Analysis pie chart — uses Qualimap-native junction classification.
+    // Novel = total N-operations - known - partly_known (matching Qualimap Java).
+    let junction_counts = if result.reads_at_junctions > 0 {
+        let known = result.known_junction_events;
+        let partly_known = result.partly_known_junction_events;
+        let novel = result.reads_at_junctions - known - partly_known;
+        plots::junction_analysis_plot(
+            known,
+            partly_known,
+            novel,
+            sample_name,
+            &images_dir.join("Junction Analysis.png"),
+        )?;
+        Some((known, partly_known, novel))
+    } else {
+        None
+    };
 
     debug!("Wrote Qualimap plots to {}", images_dir.display());
 

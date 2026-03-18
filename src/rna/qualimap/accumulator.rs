@@ -118,6 +118,16 @@ pub struct QualimapCounters {
     pub both_proper_in_pair: u64,
     /// Reads at splice junctions (with N-operations in CIGAR).
     pub reads_at_junctions: u64,
+    /// Junction events classified as "known" (both endpoints match known exon boundaries).
+    ///
+    /// Matches Qualimap Java's `knownJunctions` counter: for each N-operation, if both
+    /// the 5' and 3' junction positions overlap with known exon boundary positions
+    /// (within ±1 tolerance), the event is "known".
+    pub known_junction_events: u64,
+    /// Junction events classified as "partly known" (exactly one endpoint matches).
+    ///
+    /// Matches Qualimap Java's `partlyKnownJunctions` counter.
+    pub partly_known_junction_events: u64,
     /// Total supplementary alignments seen (skipped).
     pub supplementary: u64,
     /// SSP forward-strand estimation counter.
@@ -144,6 +154,8 @@ impl QualimapCounters {
         self.right_proper_in_pair += other.right_proper_in_pair;
         self.both_proper_in_pair += other.both_proper_in_pair;
         self.reads_at_junctions += other.reads_at_junctions;
+        self.known_junction_events += other.known_junction_events;
+        self.partly_known_junction_events += other.partly_known_junction_events;
         self.supplementary += other.supplementary;
         self.ssp_fwd += other.ssp_fwd;
         self.ssp_rev += other.ssp_rev;
@@ -295,7 +307,8 @@ impl QualimapAccum {
         // Extract M-only CIGAR blocks (replicating Qualimap's CIGAR bug where
         // offset += length for ALL operations, including I/S/H/P) AND junction
         // motifs in a single CIGAR pass, avoiding a second record.cigar() call.
-        let (m_blocks, n_op_count, motifs) = extract_m_blocks_and_junctions(record);
+        let (m_blocks, n_op_count, motifs, junction_ref_positions) =
+            extract_m_blocks_and_junctions(record);
 
         if m_blocks.is_empty() {
             return;
@@ -303,6 +316,20 @@ impl QualimapAccum {
         // Qualimap increments numReadsWithJunction for every N-operation,
         // even when the motif extraction guard fails. Match that behavior.
         self.counters.reads_at_junctions += n_op_count as u64;
+
+        // Classify junction events as known/partly known/novel using the
+        // Qualimap junction location map (exon boundary positions ±1 tolerance).
+        for &(pos_ref1, pos_ref2) in &junction_ref_positions {
+            let j1 = index.has_junction_overlap(chrom, pos_ref1);
+            let j2 = index.has_junction_overlap(chrom, pos_ref2);
+            if j1 && j2 {
+                self.counters.known_junction_events += 1;
+            } else if j1 || j2 {
+                self.counters.partly_known_junction_events += 1;
+            }
+            // Novel junctions (neither matches) are computed as:
+            // reads_at_junctions - known - partly_known
+        }
 
         // --- Cache tree query results for all M-blocks ---
         // Query the merged exon tree ONCE per block set and reuse the results
@@ -675,6 +702,8 @@ impl QualimapAccum {
             right_proper_in_pair: self.counters.right_proper_in_pair,
             both_proper_in_pair: self.counters.both_proper_in_pair,
             reads_at_junctions: self.counters.reads_at_junctions,
+            known_junction_events: self.counters.known_junction_events,
+            partly_known_junction_events: self.counters.partly_known_junction_events,
             junction_motifs: junction_motifs_str,
             transcript_coverage_raw: self.coverage,
             ssp_fwd: self.counters.ssp_fwd,
@@ -709,24 +738,35 @@ fn get_nh_tag(record: &bam::Record) -> Option<u32> {
 /// length of the I/S, which can push them past exon boundaries and change
 /// the exonic/intronic classification.
 ///
-/// Also extracts junction motifs and n_op_count in the same CIGAR pass to
-/// avoid a second `record.cigar()` call in `extract_junction_motifs`.
-/// Returns `(m_blocks, n_op_count, motifs)`.
-#[allow(clippy::needless_range_loop, unused_assignments, unused_variables)]
+/// Also extracts junction motifs, n_op_count, and junction reference positions
+/// in the same CIGAR pass.
+///
+/// Returns `(m_blocks, n_op_count, motifs, junction_ref_positions)`.
+/// Each junction position pair `(pos_ref1, pos_ref2)` matches Qualimap Java's
+/// `posInRef1 = alignmentStart + posInRead` and `posInRef2 = posInRef1 + clippedLength`.
+#[allow(
+    clippy::needless_range_loop,
+    clippy::type_complexity,
+    unused_assignments,
+    unused_variables
+)]
 fn extract_m_blocks_and_junctions(
     record: &bam::Record,
-) -> (Vec<(i32, i32)>, usize, Vec<JunctionMotif>) {
+) -> (Vec<(i32, i32)>, usize, Vec<JunctionMotif>, Vec<(i32, i32)>) {
     let cigar = record.cigar();
     let seq = record.seq();
     let seq_len = seq.len();
 
     let mut blocks = Vec::new();
     let mut motifs = Vec::new();
+    let mut junction_ref_positions = Vec::new();
     let mut n_op_count: usize = 0;
     let mut ref_pos = record.pos() as i32; // 0-based
-                                           // seq_pos tracks query position for junction motif extraction.
-                                           // ref_pos for extract_m_blocks uses its own tracking with the Qualimap
-                                           // bug (I/S/H/P advance ref_pos too).
+    let alignment_start_1based = record.pos() as i32 + 1;
+    // seq_pos tracks query position for junction motif extraction and
+    // junction position calculation (Qualimap's posInRead).
+    // ref_pos for extract_m_blocks uses its own tracking with the Qualimap
+    // bug (I/S/H/P advance ref_pos too).
     let mut seq_pos: usize = 0;
     // Qualimap-bug ref_pos tracks the shifted position for M-block extraction.
     // Junction motif extraction uses a separate ref tracking (standard).
@@ -752,6 +792,13 @@ fn extract_m_blocks_and_junctions(
                 // Qualimap increments numReadsWithJunction for every N-op,
                 // regardless of whether the motif can be extracted.
                 n_op_count += 1;
+
+                // Record junction reference positions for known/novel classification.
+                // Matches Qualimap Java: posInRef1 = alignmentStart + posInRead,
+                // posInRef2 = posInRef1 + clippedLength.
+                let pos_ref1 = alignment_start_1based + seq_pos as i32;
+                let pos_ref2 = pos_ref1 + *len as i32;
+                junction_ref_positions.push((pos_ref1, pos_ref2));
 
                 // Extract donor motif: 2bp at end of preceding exon in read
                 // Extract acceptor motif: 2bp at start of next exon in read
@@ -785,7 +832,7 @@ fn extract_m_blocks_and_junctions(
         }
     }
 
-    (blocks, n_op_count, motifs)
+    (blocks, n_op_count, motifs, junction_ref_positions)
 }
 
 /// Decode a 4-bit encoded base to ASCII uppercase.

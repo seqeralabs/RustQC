@@ -8,7 +8,7 @@
 use coitrees::{COITree, Interval, IntervalTree};
 use indexmap::IndexMap;
 use log::debug;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::gtf::Gene;
 
@@ -220,6 +220,16 @@ pub struct QualimapIndex {
     /// Lookup: gene_idx -> range of transcript indices in `transcripts` vec.
     /// `gene_transcript_ranges[gene_idx] = (start, end)` half-open into `transcripts`.
     pub gene_transcript_ranges: Vec<(u32, u32)>,
+    /// Per-chromosome junction location map for known/novel junction classification.
+    ///
+    /// Matches Qualimap Java's `JunctionLocationMap`: stores exon boundary positions
+    /// (intron start/end coordinates) per chromosome. Used to classify splice
+    /// junctions as "known" (both endpoints match), "partly known" (one matches),
+    /// or "novel" (neither matches).
+    ///
+    /// Positions are stored in Qualimap's coordinate system (1-based, matching
+    /// `alignmentStart + posInRead` from Java's SAMRecord).
+    pub junction_locations: HashMap<String, HashSet<i32>>,
 }
 
 impl QualimapIndex {
@@ -234,6 +244,7 @@ impl QualimapIndex {
         // Collect exon intervals and intron intervals per chromosome
         let mut exon_intervals: HashMap<String, Vec<Interval<ExonMeta>>> = HashMap::new();
         let mut intron_intervals: HashMap<String, Vec<Interval<IntronMeta>>> = HashMap::new();
+        let mut junction_positions: HashMap<String, HashSet<i32>> = HashMap::new();
         let mut transcripts = Vec::new();
         let mut gene_transcript_ranges = Vec::with_capacity(genes.len());
 
@@ -281,7 +292,9 @@ impl QualimapIndex {
                 }
 
                 // Add intron intervals (gaps between consecutive exons)
+                // and collect junction boundary positions for the junction location map.
                 let chrom_introns = intron_intervals.entry(tx.chrom.clone()).or_default();
+                let chrom_junctions = junction_positions.entry(tx.chrom.clone()).or_default();
                 for window in exons_0based.windows(2) {
                     let intron_start = window[0].1;
                     let intron_end = window[1].0;
@@ -291,6 +304,11 @@ impl QualimapIndex {
                             intron_end,
                             IntronMeta { gene_idx },
                         ));
+                        // Qualimap Java's JunctionLocationMap stores exon boundary
+                        // positions in 1-based Picard coordinates. From 0-based
+                        // half-open: Picard_end = end_0h, Picard_start = start_0h + 1.
+                        chrom_junctions.insert(intron_start); // exon_prev end (Picard)
+                        chrom_junctions.insert(intron_end + 1); // exon_next start (Picard)
                     }
                 }
 
@@ -401,6 +419,7 @@ impl QualimapIndex {
             intron_trees,
             transcripts,
             gene_transcript_ranges,
+            junction_locations: junction_positions,
         }
     }
 
@@ -423,6 +442,22 @@ impl QualimapIndex {
     /// Get the intron tree for a chromosome.
     pub fn intron_tree(&self, chrom: &str) -> Option<&IntronTree> {
         self.intron_trees.get(chrom)
+    }
+
+    /// Check if a reference position matches a known junction boundary (±1 tolerance).
+    ///
+    /// Matches Qualimap Java's `JunctionLocationMap.hasOverlap()` which builds an
+    /// interval tree with `(pos-1, pos+1)` for each known position, then queries
+    /// at `(junctionPosition, junctionPosition+1)`. This is equivalent to checking
+    /// if `pos-1`, `pos`, or `pos+1` is in the known position set.
+    pub fn has_junction_overlap(&self, chrom: &str, position: i32) -> bool {
+        if let Some(positions) = self.junction_locations.get(chrom) {
+            positions.contains(&(position - 1))
+                || positions.contains(&position)
+                || positions.contains(&(position + 1))
+        } else {
+            false
+        }
     }
 
     /// Get transcript info entries for a gene by gene index.
