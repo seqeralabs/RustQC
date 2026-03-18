@@ -12,14 +12,16 @@ Progress report for each item in TODO-plot-tweaks.md.
    to nearest 0.05) which produced ~2x more bins than R's `pretty()` algorithm. This made the
    histogram appear jagged/bimodal with peak frequencies around 500 instead of R's ~1000.
 
-2. **Density scatter intercept/slope**: RustQC shows Int: 0.72, Sl: 1.56 vs R's Int: 0.82,
-   Sl: 1.54. This is a data-level difference from counting, not a plotting issue. The scatter
-   plot visual appearance (density coloring, gradient, overall shape) is very similar.
+2. **Density scatter intercept/slope**: Originally showed Int: 0.72, Sl: 1.56 vs R's Int: 0.82,
+   Sl: 1.54 — this turned out to be caused by running without the `-p` (paired-end) flag,
+   not a code regression. With correct flags (`-s 2 -p`), RustQC produces Int: 0.82, Sl: 1.54,
+   matching upstream R to 10+ significant digits.
 
 3. **Boxplot**: Minor differences in last-bin boundary handling (Rust includes max RPK in last
    bin, R excludes it) and NA handling. Visually very similar.
 
-**Status**: The histogram binning was the main visual issue — fixed below.
+**Status**: Histogram binning fixed. Data differences resolved (were caused by incorrect run
+flags, not a code regression — the counting code has not changed since 6a34e62).
 
 ### Expression histogram bar widths — FIXED
 
