@@ -40,21 +40,27 @@ const HEIGHT: u32 = 480;
 /// Matches the plot produced by RSeQC's inner_distance.py R script:
 /// - Blue-bordered histogram bars (probability density scale)
 /// - Red density curve overlay
-/// - Title shows mean and standard deviation
+/// - Mean ± SD as main title (matching upstream R's `main=paste(...)`)
+/// - No gridlines, black border around plot area
+/// - X-axis range matches the configured lower/upper bounds
 ///
 /// # Arguments
 /// * `result` — inner distance analysis results
 /// * `step` — bin width used for histogram construction
+/// * `lower_bound` — inner distance lower bound (x-axis minimum)
+/// * `upper_bound` — inner distance upper bound (x-axis maximum)
 /// * `output_path` — path for the PNG output; SVG is written alongside
 pub fn inner_distance_plot(
     result: &InnerDistanceResult,
     step: i64,
+    lower_bound: i64,
+    upper_bound: i64,
     output_path: &Path,
 ) -> Result<()> {
     // PNG (high-res)
     {
         let root = BitMapBackend::new(output_path, (s(WIDTH), s(HEIGHT))).into_drawing_area();
-        render_inner_distance(&root, result, step, SCALE as f64)?;
+        render_inner_distance(&root, result, step, lower_bound, upper_bound, SCALE as f64)?;
         root.present()
             .context("Failed to write inner distance PNG")?;
     }
@@ -63,7 +69,7 @@ pub fn inner_distance_plot(
     let svg_path = output_path.with_extension("svg");
     {
         let root = SVGBackend::new(&svg_path, (WIDTH, HEIGHT)).into_drawing_area();
-        render_inner_distance(&root, result, step, 1.0)?;
+        render_inner_distance(&root, result, step, lower_bound, upper_bound, 1.0)?;
         root.present()
             .context("Failed to write inner distance SVG")?;
     }
@@ -73,10 +79,25 @@ pub fn inner_distance_plot(
 }
 
 /// Render the inner distance histogram with density overlay.
+///
+/// Replicates the upstream RSeQC R script:
+/// ```r
+/// hist(fragsize, probability=T, breaks=<num_bins>,
+///      xlab="mRNA insert size (bp)",
+///      main=paste(c("Mean=", frag_mean, ";", "SD=", frag_sd), collapse=""),
+///      border="blue")
+/// lines(density(fragsize, bw=<2*step>), col='red')
+/// ```
+///
+/// R's default `hist()` draws no gridlines and `plot()` draws a black box
+/// around the plot area. The x-axis range spans the configured lower/upper
+/// bounds (which define the histogram bins).
 fn render_inner_distance<DB: DrawingBackend>(
     root: &DrawingArea<DB, plotters::coord::Shift>,
     result: &InnerDistanceResult,
     step: i64,
+    lower_bound: i64,
+    upper_bound: i64,
     pxs: f64,
 ) -> Result<()>
 where
@@ -104,8 +125,10 @@ where
         .map(|&(_, _, c)| c as f64 / (total_count as f64 * bin_width))
         .collect();
 
-    let x_min = bins.first().map(|&(s, _, _)| s).unwrap_or(0) as f64;
-    let x_max = bins.last().map(|&(_, e, _)| e).unwrap_or(0) as f64;
+    // X-axis range matches the configured lower/upper bounds (which define
+    // the histogram bins), matching upstream R's hist() behaviour.
+    let x_min = lower_bound as f64;
+    let x_max = upper_bound as f64;
     let y_max = densities.iter().copied().fold(0.0_f64, f64::max) * 1.1; // 10% headroom
 
     // --- Compute density curve (kernel density estimation) ---
@@ -120,19 +143,23 @@ where
         .fold(0.0_f64, f64::max);
     let y_max = y_max.max(density_y_max * 1.1);
 
-    // --- Compute mean and SD for title ---
+    // --- Compute mean and SD for subtitle ---
     let (mean, sd) = compute_weighted_mean_sd(bins, step);
 
-    let title = format!("Mean= {:.4} ; SD= {:.4}", mean, sd);
-
     // --- Build chart ---
+    // Caption is "Mean=...;SD=..." matching upstream R's
+    //   main=paste(c("Mean=", frag_mean, ";", "SD=", frag_sd), collapse="")
+    // No secondary x-axis at the top (upstream R only has a bottom x-axis).
+    let caption = format!("Mean={:.4};SD={:.4}", mean, sd);
+
     let mut chart = ChartBuilder::on(root)
         .margin(ps(10.0))
         .x_label_area_size(ps(35.0))
         .y_label_area_size(ps(50.0))
-        .caption(&title, ("sans-serif", ps(14.0)))
+        .caption(&caption, ("sans-serif", ps(14.0)))
         .build_cartesian_2d(x_min..x_max, 0.0..y_max)?;
 
+    // Configure mesh: no gridlines, integer axis labels (matching upstream R defaults)
     chart
         .configure_mesh()
         .x_desc("mRNA insert size (bp)")
@@ -140,7 +167,18 @@ where
         .label_style(("sans-serif", ps(11.0)))
         .axis_desc_style(("sans-serif", ps(12.0)))
         .x_label_formatter(&|v| format!("{}", *v as i64))
+        .disable_mesh() // no gridlines (matching upstream R default)
         .draw()?;
+
+    // Draw a black border around the plot area (matching R's default box())
+    chart.draw_series(std::iter::once(Rectangle::new(
+        [(x_min, 0.0), (x_max, y_max)],
+        ShapeStyle {
+            color: BLACK.mix(1.0),
+            filled: false,
+            stroke_width: ps(1.0),
+        },
+    )))?;
 
     // --- Draw histogram bars ---
     for (i, &(start, end, _count)) in bins.iter().enumerate() {

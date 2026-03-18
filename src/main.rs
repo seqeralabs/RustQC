@@ -1699,7 +1699,13 @@ fn write_rseqc_outputs(
         )?;
 
         let plot_path = rseqc_inner_dist_dir.join(format!("{}.inner_distance_plot.png", bam_stem));
-        rna::rseqc::plots::inner_distance_plot(&results, params.inner_distance_step, &plot_path)?;
+        rna::rseqc::plots::inner_distance_plot(
+            &results,
+            params.inner_distance_step,
+            params.inner_distance_lower_bound,
+            params.inner_distance_upper_bound,
+            &plot_path,
+        )?;
 
         let summary_path = format!("{prefix}.inner_distance_summary.txt");
         rna::rseqc::inner_distance::write_summary(&results, &summary_path)?;

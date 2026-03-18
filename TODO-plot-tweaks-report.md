@@ -121,3 +121,23 @@ Also matched upstream legend labels exactly: "All junctions", "known junctions",
 **Verification**: Built, clippy clean, all 217 tests pass. Visual comparison confirms
 all 7 items are fixed: no gridlines, black border, open markers, integer labels, title,
 x-axis at every 20, and readable font sizes.
+
+### inner_distance — FIXED (3 items + bonus fixes)
+
+**Problems & Fixes**:
+
+1. **Remove gridlines**: Added `.disable_mesh()`.
+2. **X-axis range**: Changed from data-derived range to using `lower_bound`/`upper_bound`
+   config parameters (default: -250 to 250), matching the configured analysis bounds.
+3. **Plot title**: Changed to "Mean=...;SD=..." format matching upstream R's
+   `main=paste(c("Mean=", frag_mean, ";", "SD=", frag_sd), collapse="")`.
+   No separate sample name — upstream doesn't show it either.
+
+**Bonus fixes**:
+- Added black box border around plot area (matching R defaults)
+- Removed spurious secondary x-axis at top (was causing text overlap)
+- Cleaned up subtitle layout — Mean/SD is now the main caption
+
+**Verification**: Built, clippy clean, all 217 tests pass. Visual comparison shows
+clean layout matching upstream: Mean/SD title, no gridlines, black border, correct
+x-axis range, blue histogram with red density curve.
