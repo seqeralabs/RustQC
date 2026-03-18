@@ -1,6 +1,6 @@
 ---
-title: dupRadar Outputs
-description: RustQC's dupRadar output files, including the duplication matrix, fitted model parameters, diagnostic plots, and how to interpret them.
+title: dupRadar
+description: RustQC's dupRadar output files, including the duplication matrix, fitted model parameters, diagnostic plots, and benchmark comparisons.
 ---
 
 import { Aside, Card, CardGrid, FileTree } from "@astrojs/starlight/components";
@@ -214,6 +214,177 @@ Duplication rates near zero across all expression levels, including highly expre
 | Low-expression genes | Near-zero dup rate            | Elevated dup rate                  |
 | Curve shape          | Gradual rise                  | Flat and high, or steep early rise |
 | Boxplot spread       | Tight boxes at low expression | Wide boxes everywhere              |
+
+## Benchmarks
+
+RustQC produces output matching R dupRadar to floating-point precision. All 14 output columns are identical, and the fitted model parameters agree to 9-10 significant figures. The benchmarks below quantify the performance difference on real RNA-seq data, measured on AWS (2026-03-09).
+
+### Performance
+
+#### Small dataset (~52K reads, chr6)
+
+| Tool               | Runtime | Max RSS  |
+| ------------------ | ------- | -------- |
+| R dupRadar         | 7.2s    | 219.1 MB |
+| RustQC (all tools) | 25.9s   | 182.1 MB |
+
+#### Large dataset (GM12878 REP1, ~186M reads)
+
+| Tool               | Runtime    | Max RSS |
+| ------------------ | ---------- | ------- |
+| R dupRadar         | 2h 14m 24s | 491 MB  |
+| RustQC (all tools) | 14m 54s    | 11.4 GB |
+
+> **Note:** RustQC runtime shown is for all tools combined in a single pass. See [Benchmark Details](/rna/benchmark-details/) for a full breakdown.
+
+### Results comparison
+
+#### Small dataset
+
+| Metric                        |   dupRadar (R) |         RustQC |    Match    |
+| ----------------------------- | -------------: | -------------: | :---------: |
+| **Intercept**                 | 0.033129470167 | 0.033129470252 | ~9e-11 diff |
+| **Slope**                     | 1.552238567839 | 1.552238565556 | ~2e-9 diff  |
+| **Genes total**               |          2,905 |          2,905 |    Exact    |
+| **Genes with reads (unique)** |            620 |            620 |    Exact    |
+| **Genes with reads (multi)**  |            640 |            640 |    Exact    |
+| **Genes with duplicates**     |            203 |            203 |    Exact    |
+| **allCounts (sum)**           |         21,262 |         21,262 |    Exact    |
+| **filteredCounts (sum)**      |         18,609 |         18,609 |    Exact    |
+| **allCountsMulti (sum)**      |         23,685 |         23,685 |    Exact    |
+| **filteredCountsMulti (sum)** |         20,820 |         20,820 |    Exact    |
+| **Total values compared**     |         37,765 |         37,765 |     --      |
+| **Value mismatches**          |             -- |          **0** |     --      |
+
+#### Large dataset
+
+| Metric                        |   dupRadar (R) |         RustQC |    Match    |
+| ----------------------------- | -------------: | -------------: | :---------: |
+| **Intercept**                 | 0.819159852242 | 0.819159852329 | ~9e-11 diff |
+| **Slope**                     | 1.536856867902 | 1.536856867835 | ~7e-11 diff |
+| **Genes total**               |         63,677 |         63,677 |    Exact    |
+| **Genes with reads (unique)** |         23,855 |         23,855 |    Exact    |
+| **Genes with reads (multi)**  |         24,952 |         24,952 |    Exact    |
+| **allCounts (sum)**           |     65,153,067 |     65,153,067 |    Exact    |
+| **filteredCounts (sum)**      |     15,207,231 |     15,207,231 |    Exact    |
+| **allCountsMulti (sum)**      |     75,766,529 |     75,766,529 |    Exact    |
+| **filteredCountsMulti (sum)** |     21,986,612 |     21,986,612 |    Exact    |
+| **Total values compared**     |        827,801 |        827,801 |     --      |
+| **Value mismatches**          |             -- |          **0** |     --      |
+
+The intercept and slope differences are at the 9th-10th significant figure, arising purely from floating-point arithmetic order-of-operations variance. All count columns are integer-identical. Model fit parameters match to 9-10 significant figures across all 63,677 genes, including integer count columns, duplication rates, and RPKM-normalised values.
+
+### Side-by-side plots
+
+The plots below compare the R dupRadar output (left) with RustQC output (right) for the large benchmark.
+
+#### Density scatter plot
+
+<div
+  style={{
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "1rem",
+    margin: "1rem 0",
+  }}
+>
+  <figure style={{ margin: 0, textAlign: "center" }}>
+    <div
+      style={{ background: "white", borderRadius: "8px", padding: "0.25rem" }}
+    >
+      <img
+        src={`${base}benchmarks/large/dupRadar/duprateExpDens.png`}
+        alt="dupRadar (R) density scatter plot"
+        style={{ width: "100%", borderRadius: "8px" }}
+      />
+    </div>
+    <figcaption>dupRadar (R)</figcaption>
+  </figure>
+  <figure style={{ margin: 0, textAlign: "center" }}>
+    <div
+      style={{ background: "white", borderRadius: "8px", padding: "0.25rem" }}
+    >
+      <img
+        src={`${base}benchmarks/large/RustQC/GM12878_REP1.markdup.sorted_duprateExpDens.png`}
+        alt="RustQC density scatter plot"
+        style={{ width: "100%", borderRadius: "8px" }}
+      />
+    </div>
+    <figcaption>RustQC</figcaption>
+  </figure>
+</div>
+
+#### Duplication rate boxplot
+
+<div
+  style={{
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "1rem",
+    margin: "1rem 0",
+  }}
+>
+  <figure style={{ margin: 0, textAlign: "center" }}>
+    <div
+      style={{ background: "white", borderRadius: "8px", padding: "0.25rem" }}
+    >
+      <img
+        src={`${base}benchmarks/large/dupRadar/duprateExpBoxplot.png`}
+        alt="dupRadar (R) duplication rate boxplot"
+        style={{ width: "100%", borderRadius: "8px" }}
+      />
+    </div>
+    <figcaption>dupRadar (R)</figcaption>
+  </figure>
+  <figure style={{ margin: 0, textAlign: "center" }}>
+    <div
+      style={{ background: "white", borderRadius: "8px", padding: "0.25rem" }}
+    >
+      <img
+        src={`${base}benchmarks/large/RustQC/GM12878_REP1.markdup.sorted_duprateExpBoxplot.png`}
+        alt="RustQC duplication rate boxplot"
+        style={{ width: "100%", borderRadius: "8px" }}
+      />
+    </div>
+    <figcaption>RustQC</figcaption>
+  </figure>
+</div>
+
+#### Expression histogram
+
+<div
+  style={{
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "1rem",
+    margin: "1rem 0",
+  }}
+>
+  <figure style={{ margin: 0, textAlign: "center" }}>
+    <div
+      style={{ background: "white", borderRadius: "8px", padding: "0.25rem" }}
+    >
+      <img
+        src={`${base}benchmarks/large/dupRadar/expressionHist.png`}
+        alt="dupRadar (R) expression histogram"
+        style={{ width: "100%", borderRadius: "8px" }}
+      />
+    </div>
+    <figcaption>dupRadar (R)</figcaption>
+  </figure>
+  <figure style={{ margin: 0, textAlign: "center" }}>
+    <div
+      style={{ background: "white", borderRadius: "8px", padding: "0.25rem" }}
+    >
+      <img
+        src={`${base}benchmarks/large/RustQC/GM12878_REP1.markdup.sorted_expressionHist.png`}
+        alt="RustQC expression histogram"
+        style={{ width: "100%", borderRadius: "8px" }}
+      />
+    </div>
+    <figcaption>RustQC</figcaption>
+  </figure>
+</div>
 
 ## Configuring outputs
 

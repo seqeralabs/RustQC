@@ -26,7 +26,7 @@ counts for your hardware.
 - **Disabling TIN + read_duplication** together brings the runtime under
   2.5 minutes.
 - **Thread count:** `-t 4` to `-t 8` is the productive range for a
-  single human BAM. Beyond ~8 threads, runtime plateaus at roughly 2×
+  single human BAM. Beyond ~8 threads, runtime plateaus at roughly 2x
   speedup with increasing memory usage (see [CPU scaling benchmarks](#cpu-scaling-benchmarks) below).
 - **Multiple BAMs:** the useful thread count scales with the number of
   input files (e.g. 4 human BAMs can productively use ~32 threads).
@@ -206,25 +206,25 @@ time (robust to cloud scheduling jitter).
 
 | Threads | Run time | Peak RSS | Speedup vs 1 thread |
 | ------: | -------: | -------: | ------------------: |
-|       1 |    39:56 |   8.9 GB |                1.0× |
-|       2 |    26:08 |  11.2 GB |                1.5× |
-|       3 |    20:42 |  11.2 GB |                1.9× |
-|       4 |    21:54 |  11.8 GB |                1.8× |
-|       5 |    20:16 |  11.9 GB |                2.0× |
-|       6 |    21:30 |  12.1 GB |                1.9× |
-|       7 |    19:29 |  12.5 GB |                2.1× |
-|       8 |    18:42 |  12.8 GB |                2.1× |
-|      10 |    18:42 |  13.2 GB |                2.1× |
-|      12 |    19:00 |  13.7 GB |                2.1× |
-|      14 |    18:18 |  14.2 GB |                2.2× |
-|      16 |    18:14 |  14.5 GB |                2.2× |
-|      20 |    18:26 |  15.9 GB |                2.2× |
-|      24 |    17:54 |  16.7 GB |                2.2× |
-|      28 |    18:32 |  16.9 GB |                2.2× |
-|      32 |    18:32 |  16.9 GB |                2.2× |
+|       1 |    39:56 |   8.9 GB |                1.0x |
+|       2 |    26:08 |  11.2 GB |                1.5x |
+|       3 |    20:42 |  11.2 GB |                1.9x |
+|       4 |    21:54 |  11.8 GB |                1.8x |
+|       5 |    20:16 |  11.9 GB |                2.0x |
+|       6 |    21:30 |  12.1 GB |                1.9x |
+|       7 |    19:29 |  12.5 GB |                2.1x |
+|       8 |    18:42 |  12.8 GB |                2.1x |
+|      10 |    18:42 |  13.2 GB |                2.1x |
+|      12 |    19:00 |  13.7 GB |                2.1x |
+|      14 |    18:18 |  14.2 GB |                2.2x |
+|      16 |    18:14 |  14.5 GB |                2.2x |
+|      20 |    18:26 |  15.9 GB |                2.2x |
+|      24 |    17:54 |  16.7 GB |                2.2x |
+|      28 |    18:32 |  16.9 GB |                2.2x |
+|      32 |    18:32 |  16.9 GB |                2.2x |
 
 Performance scales well up to ~8 threads, where runtime drops from
-~40 minutes (single-threaded) to ~19 minutes (2.1× speedup).
+~40 minutes (single-threaded) to ~19 minutes (2.1x speedup).
 
 Beyond 8 threads, gains plateau because each chromosome is processed by exactly one
 worker -- despite greedy bin-packing to balance load, the largest

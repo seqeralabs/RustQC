@@ -1,6 +1,6 @@
 ---
-title: featureCounts Outputs
-description: How RustQC produces featureCounts-compatible read count files, assignment summaries, and biotype count outputs in a single pass alongside dupRadar and RSeQC analyses.
+title: featureCounts
+description: How RustQC produces featureCounts-compatible read count files, assignment summaries, biotype counts, and benchmark comparisons.
 ---
 
 import { Aside, FileTree } from '@astrojs/starlight/components';
@@ -109,6 +109,73 @@ The biotype is extracted from the GTF attribute specified by `biotype_attribute`
 ## Biotype attribute detection
 
 RustQC auto-detects whether your GTF uses `gene_biotype` (Ensembl) or `gene_type` (GENCODE). You can override this with `--biotype-attribute`. See the [CLI reference](/usage/cli-reference/) for details.
+
+## Benchmarks
+
+RustQC includes built-in gene-level read counting that produces output
+compatible with the Subread featureCounts format. Benchmarks were run on AWS cloud infrastructure on 2026-03-09.
+
+### Performance
+
+#### Large dataset (GM12878 REP1, ~186M reads)
+
+| Tool                            | Wall time | CPU time | Peak RSS |
+| ------------------------------- | --------: | -------: | -------: |
+| Rsubread featureCounts          |     3m 3s |    3m 3s |   210 MB |
+| RustQC (all tools, single pass) |   14m 54s |  14m 54s |  11.4 GB |
+
+#### Small dataset (~52K reads, chr6)
+
+| Tool                            | Wall time | CPU time | Peak RSS |
+| ------------------------------- | --------: | -------: | -------: |
+| Rsubread featureCounts          |     3m 9s |       1s |   3.1 MB |
+| RustQC (all tools, single pass) |    3m 31s |    25.9s | 182.1 MB |
+
+> **Note:** RustQC runtime shown is for all tools combined in a single pass. See [Benchmark Details](/rna/benchmark-details/) for a full breakdown.
+
+The 1s CPU time for featureCounts reflects that the small dataset is trivially sized and most wall time is container startup.
+
+### Output equivalence
+
+RustQC's read counting uses the same algorithm as Subread featureCounts:
+
+- **Feature type:** exon-level features grouped by `gene_id`
+- **Overlap detection:** at least 1 base pair overlap
+- **Strand awareness:** configurable via the `-s` / `--strandedness` flag
+- **Multi-mapping:** tracked separately for unique and multi-mapper columns
+
+#### Assignment statistics - small dataset (test, ~52K reads)
+
+| Category                | Rsubread featureCounts | RustQC | Match |
+| ----------------------- | ---------------------: | -----: | :---: |
+| Assigned                |                 42,173 | 42,173 |   ✓   |
+| Unassigned_MultiMapping |                  5,496 |  5,496 |   ✓   |
+| Unassigned_NoFeatures   |                  2,645 |  2,645 |   ✓   |
+| Unassigned_Ambiguity    |                  2,525 |  2,525 |   ✓   |
+| All others              |                      0 |      0 |   ✓   |
+
+#### Assignment statistics - large dataset (GM12878 REP1, ~186M reads)
+
+| Category                | Rsubread featureCounts |      RustQC | Match |
+| ----------------------- | ---------------------: | ----------: | :---: |
+| Assigned                |            127,819,327 | 127,819,327 |   ✓   |
+| Unassigned_Unmapped     |             12,490,977 |  12,490,977 |   ✓   |
+| Unassigned_MultiMapping |             26,451,119 |  26,451,119 |   ✓   |
+| Unassigned_NoFeatures   |             29,885,481 |  29,885,481 |   ✓   |
+| Unassigned_Ambiguity    |              4,958,548 |   4,958,548 |   ✓   |
+| All others              |                      0 |           0 |   ✓   |
+
+All assignment statistics are identical across both datasets. Gene-level read counts match exactly for every gene. The output format is directly compatible with downstream tools such as DESeq2 and MultiQC.
+
+### Additional outputs
+
+Beyond the standard featureCounts counts file and summary, RustQC also produces:
+
+- **Biotype counts** (`.biotype_counts.tsv`) -- per-biotype read count summaries
+- **Biotype MultiQC bargraph** (`.biotype_counts_mqc.tsv`) -- ready for MultiQC visualization
+- **rRNA percentage** (`.biotype_counts_rrna_mqc.tsv`) -- rRNA fraction for MultiQC general statistics
+
+Generating these in the traditional workflow requires additional scripting after the featureCounts run.
 
 ## Configuring outputs
 

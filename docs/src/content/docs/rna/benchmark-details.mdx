@@ -1,5 +1,5 @@
 ---
-title: Combined Benchmark
+title: Benchmark Details
 description: Overall performance comparison between the traditional workflow and RustQC's single-pass approach.
 ---
 
@@ -56,8 +56,8 @@ exceeds 15 hours and 34 minutes.
 
 Standout comparisons from the large dataset:
 
-- TIN takes 9h 45m - more than 14× RustQC's total runtime for everything
-- dupRadar alone takes 2h 14m 24s - more than 3× RustQC's total runtime
+- TIN takes 9h 45m - more than 14x RustQC's total runtime for everything
+- dupRadar alone takes 2h 14m 24s - more than 3x RustQC's total runtime
 - Qualimap pipeline (sort + rnaseq) takes 1h 2m 14s - longer than RustQC
 - read_duplication (RSeQC) takes 33m 1s - nearly as long as all of RustQC
 - Peak memory: RustQC uses 11.4 GB in a single process vs. up to 10.2 GB
@@ -71,10 +71,10 @@ A small test BAM (chromosome 6 only) used to verify correctness.
 | Step                         | Traditional workflow |    RustQC |
 | ---------------------------- | -------------------: | --------: |
 | GTF decompression            |                479ms |        -- |
-| samtools flagstat            |                  <1s |        -- |
-| samtools idxstats            |                  <1s |        -- |
-| samtools stats               |                  <1s |        -- |
-| samtools sort (for Qualimap) |                  <1s |        -- |
+| samtools flagstat            |                  &lt;1s |        -- |
+| samtools idxstats            |                  &lt;1s |        -- |
+| samtools stats               |                  &lt;1s |        -- |
+| samtools sort (for Qualimap) |                  &lt;1s |        -- |
 | featureCounts                |                 1.0s |        -- |
 | bam_stat (RSeQC)             |                 0.6s |        -- |
 | infer_experiment (RSeQC)     |                 0.8s |        -- |
@@ -104,16 +104,16 @@ Every output file produced by RustQC matches the original tools:
 - **flagstat:** all 16 metrics identical to samtools flagstat
 - **idxstats:** all per-chromosome counts identical to samtools idxstats
 - **stats:** full samtools stats format including all histogram sections (SN, FFQ, LFQ, GCF, GCL, IS, RL, etc.) matches samtools stats
-- **preseq:** extrapolation curve within <0.1% of preseq v3.2.0 across entire range
+- **preseq:** extrapolation curve within &lt;0.1% of preseq v3.2.0 across entire range
 - **RSeQC tools:** all data values and R plotting scripts match Python RSeQC.
   Junction saturation intermediate sampling points show expected stochastic
-  variation from random subsampling (see [RSeQC benchmark](rseqc/))
+  variation from random subsampling (see [RSeQC](/rna/rseqc/))
 - **Qualimap:** all read counts, genomic origin percentages, and coverage bias metrics
-  match Qualimap Java 2.3 exactly (see [Qualimap benchmark](qualimap/))
+  match Qualimap Java 2.3 exactly (see [Qualimap](/rna/qualimap/))
 
-See the individual benchmark pages for detailed per-tool comparisons:
-[dupRadar](dupradar/), [featureCounts](featurecounts/), [RSeQC](rseqc/),
-[preseq](preseq/), [Samtools](samtools/), [Qualimap](qualimap/).
+See the individual tool pages for detailed per-tool comparisons:
+[dupRadar](/rna/dupradar/), [featureCounts](/rna/featurecounts/), [RSeQC](/rna/rseqc/),
+[preseq](/rna/preseq/), [Samtools](/rna/samtools/), [Qualimap](/rna/qualimap/).
 
 ## Where the speedup comes from
 
