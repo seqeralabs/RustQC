@@ -25,7 +25,7 @@ Key advantages:
 - **Speed**: Processes ~186M reads in 14m 54s vs. ~15h 34m of sequential tool runtimes on AWS, including TIN which takes 9h 45m alone in the traditional workflow
 - **Single binary**: No runtime dependencies -- no R, Python, or Bioconductor installation required
 - **Single-pass architecture**: The `rna` subcommand performs read counting and duplicate analysis simultaneously, eliminating the need for a separate featureCounts run
-- **Identical output**: Produces bit-for-bit identical results to the original tools
+- **Matching output**: Produces identical or near-identical results to the original tools (see [benchmark details](/rna/benchmark-details/))
 - **Multiple input support**: Process several BAM files in a single command with automatic parallelisation
 - **Modern format support**: Accepts SAM, BAM, and CRAM input files; GTF annotation files can be plain or gzip-compressed
 
@@ -38,6 +38,8 @@ Given a duplicate-marked BAM file and a GTF annotation, `rustqc rna` runs all of
 
 | Tool            | Equivalent                                                         | Description                              |
 | --------------- | ------------------------------------------------------------------ | ---------------------------------------- |
+| dupRadar        | [dupRadar](https://bioconductor.org/packages/dupRadar/)            | RNA-seq PCR duplicate rate analysis      |
+| featureCounts   | [featureCounts](http://subread.sourceforge.net/)                   | Gene-level read counting and biotypes    |
 | Qualimap rnaseq | [Qualimap](http://qualimap.conesalab.org/) rnaseq                  | Gene body coverage and RNA-seq QC        |
 | preseq          | [preseq](http://smithlabresearch.org/software/preseq/) `lc_extrap` | Library complexity extrapolation         |
 | flagstat        | `samtools flagstat`                                                | Alignment flag statistics                |

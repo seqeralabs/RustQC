@@ -165,9 +165,9 @@ value in every column matches exactly. This is achieved by using the same C++
 standard library's `std::mt19937` and `std::binomial_distribution` via FFI,
 which gives identical random number sequences for the same seed.
 
-Observed differences between the two tools on AWS Linux are at most plus or minus 0.5 in
-the floating-point representation - sub-ULP rounding noise with no practical
-significance.
+Observed differences between the two tools on AWS Linux are at most plus or minus 2
+in the floating-point representation (24 of 10,001 rows differ) — sub-ULP rounding
+noise with no practical significance.
 
 |   Total reads | Preseq v3.2.0 |       RustQC | Difference |
 | ------------: | ------------: | -----------: | ---------: |

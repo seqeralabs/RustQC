@@ -56,8 +56,8 @@ exceeds 15 hours and 34 minutes.
 
 Standout comparisons from the large dataset:
 
-- TIN takes 9h 45m - more than 14x RustQC's total runtime for everything
-- dupRadar alone takes 2h 14m 24s - more than 3x RustQC's total runtime
+- TIN takes 9h 45m - more than 39x RustQC's total runtime for everything
+- dupRadar alone takes 2h 14m 24s - more than 9x RustQC's total runtime
 - Qualimap pipeline (sort + rnaseq) takes 1h 2m 14s - longer than RustQC
 - read_duplication (RSeQC) takes 33m 1s - more than twice RustQC's total runtime
 - Peak memory: RustQC uses 11.4 GB in a single process vs. up to 10.2 GB
@@ -93,9 +93,9 @@ On this tiny dataset the per-tool runtimes are dominated by startup overhead;
 TIN is still the slowest individual tool at 1m 35s. RustQC completes all
 analyses in 25.9s.
 
-## RustQC outputs all produce identical results
+## RustQC outputs match the original tools
 
-Every output file produced by RustQC matches the original tools:
+Every output file produced by RustQC matches or closely matches the original tools:
 
 - **dupRadar duplication matrix:** all 14 columns match across 63,677 genes
 - **Gene-level read counts:** identical across all 63,677 genes
@@ -103,11 +103,12 @@ Every output file produced by RustQC matches the original tools:
 - **Assignment statistics:** Assigned, NoFeatures, Ambiguous match exactly
 - **flagstat:** all 16 metrics identical to samtools flagstat
 - **idxstats:** all per-chromosome counts identical to samtools idxstats
-- **stats:** full samtools stats format including all histogram sections (SN, FFQ, LFQ, GCF, GCL, IS, RL, etc.) matches samtools stats
+- **stats:** full samtools stats format including all histogram sections (SN, FFQ, LFQ, GCF, GCL, IS, RL, GCD, etc.) near-identical to samtools stats
 - **preseq:** extrapolation curve within &lt;0.1% of preseq v3.2.0 across entire range
 - **RSeQC tools:** all data values and R plotting scripts match Python RSeQC.
   Junction saturation intermediate sampling points show expected stochastic
-  variation from random subsampling (see [RSeQC](/rna/rseqc/))
+  variation from random subsampling. Per-transcript TIN scores differ due to
+  coverage counting approach (see [RSeQC](/rna/rseqc/))
 - **Qualimap:** all read counts, genomic origin percentages, and coverage bias metrics
   match Qualimap Java 2.3 exactly (see [Qualimap](/rna/qualimap/))
 

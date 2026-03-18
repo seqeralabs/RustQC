@@ -25,7 +25,6 @@ This command:
 - **BAM index** - a `.bai` index is not strictly required, but without one RustQC falls back to a single counting thread. For multi-threaded performance, ensure an index file is present alongside each BAM.
 - **GTF annotation file** (`--gtf`) - a gene annotation file (plain or gzip-compressed). See [CLI reference](/usage/cli-reference/) for details.
 
-
 ### Output
 
 Output files are organized into subdirectories by tool group.
@@ -38,7 +37,7 @@ Use `--flat-output` to write all files directly to the output directory without 
 
 ## Multiple BAM files
 
-Multiple input files are accepted and processed sequentially, with each
+Multiple input files are accepted and processed in parallel, with each
 producing its own set of output files:
 
 ```bash

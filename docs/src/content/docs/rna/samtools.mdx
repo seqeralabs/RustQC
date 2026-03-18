@@ -156,6 +156,7 @@ In addition to SN, RustQC produces all standard histogram sections:
 | ID      | Indel size distribution                                  |
 | IC      | Indel per cycle                                          |
 | COV     | Coverage depth distribution                              |
+| GCD     | GC depth distribution                                    |
 | CHK     | CRC32 checksums                                          |
 
 Example:
@@ -250,10 +251,12 @@ unmapped counts, plus the `*` row for unplaced reads.
 
 ### stats comparison
 
-**Result: Identical**
+**Result: Near-identical**
 
-All key SN (Summary Numbers) fields match exactly between `samtools stats` and
-RustQC on both datasets.
+All SN (Summary Numbers) fields and 19 of 20 histogram sections match exactly
+between `samtools stats` and RustQC on both datasets. The GCD (GC depth) section
+shows minor differences (max absolute difference of 0.018) due to sampling
+variation in the GC depth calculation.
 
 #### Large dataset (GM12878)
 
@@ -287,7 +290,7 @@ RustQC on both datasets.
 
 RustQC produces the full `samtools stats` output, including the SN section and all
 histogram sections (FFQ, LFQ, GCF, GCL, GCC, GCT, FBC, LBC, FTC, LTC, IS, RL,
-FRL, LRL, MAPQ, ID, IC, COV, CHK). The output format includes the `samtools stats`
+FRL, LRL, MAPQ, ID, IC, COV, GCD, CHK). The output format includes the `samtools stats`
 header comment required for MultiQC parsing.
 
 ## Configuration

@@ -21,8 +21,8 @@ counts for your hardware.
   running the equivalent traditional tools separately.
 - **Disabling TIN** provides the single largest speedup. TIN's large
   per-transcript data structures (~1 GB+) cause cache thrashing that slows
-  every other tool in the pipeline. Removing it alone roughly halves the
-  total runtime.
+  every other tool in the pipeline. Removing it alone saves ~4 minutes
+  (~38% of the total runtime).
 - **Disabling TIN + read_duplication** together brings the runtime under
   2.5 minutes.
 - **Thread count:** `-t 4` to `-t 8` is the productive range for a

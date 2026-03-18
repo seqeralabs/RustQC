@@ -29,7 +29,7 @@ export const base = import.meta.env.BASE_URL;
         <a href="http://qualimap.conesalab.org/">Qualimap</a>,{" "}
         <a href="https://daehwankimlab.github.io/preseq/">preseq</a>, and{" "}
         <a href="https://www.htslib.org/">samtools</a> in Rust, delivering
-        identical results much faster.
+        matching results much faster.
       </div>
     </div>
     <BenchmarkChart />
@@ -158,10 +158,10 @@ export const base = import.meta.env.BASE_URL;
 ## Why RustQC?
 
 <CardGrid stagger>
-  <Card title="Identical Results" icon="approve-check">
-    Produces bit-for-bit identical output to R's dupRadar and featureCounts,
+  <Card title="Matching Results" icon="approve-check">
+    Produces identical or near-identical output to R's dupRadar and featureCounts,
     plus faithful reimplementations of 8 RSeQC tools (including TIN), preseq,
-    and samtools.
+    and samtools. See [benchmark details](/rna/benchmark-details/).
   </Card>
   <Card title="Dramatically Faster" icon="rocket">
     Processes ~186M reads in 14m 54s on AWS vs ~15h 34m of sequential tool
