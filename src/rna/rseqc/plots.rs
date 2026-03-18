@@ -488,18 +488,26 @@ where
 /// Generate the junction saturation line plot (PNG + SVG).
 ///
 /// Matches the plot produced by RSeQC's junction_saturation.py R script:
-/// - Three lines with connected points (type='o' in R)
+/// - Three lines with connected open-circle points (type='o', pch=1 in R)
 /// - Blue: all junctions, Red: known junctions, Green: novel junctions
 /// - Y-axis values divided by 1000
+/// - No gridlines, black border around plot area
+/// - X-axis labels every 20% (matching R's default tick selection for 0–100)
+/// - Integer axis labels (no decimals)
 ///
 /// # Arguments
 /// * `result` — junction saturation analysis results
+/// * `sample_name` — sample identifier shown in the plot title
 /// * `output_path` — path for the PNG output; SVG is written alongside
-pub fn junction_saturation_plot(result: &SaturationResult, output_path: &Path) -> Result<()> {
+pub fn junction_saturation_plot(
+    result: &SaturationResult,
+    sample_name: &str,
+    output_path: &Path,
+) -> Result<()> {
     // PNG (high-res)
     {
         let root = BitMapBackend::new(output_path, (s(WIDTH), s(HEIGHT))).into_drawing_area();
-        render_junction_saturation(&root, result, SCALE as f64)?;
+        render_junction_saturation(&root, result, sample_name, SCALE as f64)?;
         root.present()
             .context("Failed to write junction saturation PNG")?;
     }
@@ -508,7 +516,7 @@ pub fn junction_saturation_plot(result: &SaturationResult, output_path: &Path) -
     let svg_path = output_path.with_extension("svg");
     {
         let root = SVGBackend::new(&svg_path, (WIDTH, HEIGHT)).into_drawing_area();
-        render_junction_saturation(&root, result, 1.0)?;
+        render_junction_saturation(&root, result, sample_name, 1.0)?;
         root.present()
             .context("Failed to write junction saturation SVG")?;
     }
@@ -518,9 +526,24 @@ pub fn junction_saturation_plot(result: &SaturationResult, output_path: &Path) -
 }
 
 /// Render the junction saturation line plot.
+///
+/// Replicates the upstream RSeQC R script:
+/// ```r
+/// plot(x, z/1000, xlab='percent of total reads',
+///      ylab='Number of splicing junctions (x1000)',
+///      type='o', col='blue', ylim=c(n,m))
+/// points(x, y/1000, type='o', col='red')
+/// points(x, w/1000, type='o', col='green')
+/// legend(5, m, legend=c("All junctions","known junctions","novel junctions"),
+///        col=c("blue","red","green"), lwd=1, pch=1)
+/// ```
+///
+/// R's `type='o'` draws open circles (pch=1) connected by lines.
+/// R's default `plot()` draws a black box around the plot area with no gridlines.
 fn render_junction_saturation<DB: DrawingBackend>(
     root: &DrawingArea<DB, plotters::coord::Shift>,
     result: &SaturationResult,
+    sample_name: &str,
     pxs: f64,
 ) -> Result<()>
 where
@@ -582,20 +605,39 @@ where
     // --- Build chart ---
     let mut chart = ChartBuilder::on(root)
         .margin(ps(10.0))
-        .x_label_area_size(ps(35.0))
-        .y_label_area_size(ps(50.0))
+        .x_label_area_size(ps(40.0))
+        .y_label_area_size(ps(55.0))
+        .caption(sample_name, ("sans-serif", ps(14.0)))
         .build_cartesian_2d(x_min..x_max, y_min..y_max)?;
 
+    // Configure mesh: no gridlines, integer axis labels, x-axis every 20%
+    // (matching R's default tick selection for 0–100 range).
     chart
         .configure_mesh()
-        .x_desc("Percent of total reads")
+        .x_desc("percent of total reads")
         .y_desc("Number of splicing junctions (x1000)")
-        .label_style(("sans-serif", ps(11.0)))
-        .axis_desc_style(("sans-serif", ps(12.0)))
+        .label_style(("sans-serif", ps(13.0)))
+        .axis_desc_style(("sans-serif", ps(14.0)))
+        .x_labels(6) // 0, 20, 40, 60, 80, 100
+        .x_label_formatter(&|v| format!("{}", *v as i64))
+        .y_label_formatter(&|v| format!("{}", *v as i64))
+        .disable_mesh() // no gridlines (matching upstream R default)
         .draw()?;
 
-    // --- Draw lines with points (matching R's type='o') ---
+    // Draw a black border around the plot area (matching R's default box())
+    chart.draw_series(std::iter::once(Rectangle::new(
+        [(x_min, y_min), (x_max, y_max)],
+        ShapeStyle {
+            color: BLACK.mix(1.0),
+            filled: false,
+            stroke_width: ps(1.0),
+        },
+    )))?;
+
+    // --- Draw lines with open-circle points (matching R's type='o', pch=1) ---
+    // R's pch=1 is an open (unfilled) circle.
     let point_size = ps(3.0);
+    let stroke = ps(1.0);
 
     // Blue: all junctions (drawn first as in R)
     chart
@@ -604,7 +646,7 @@ where
             ShapeStyle {
                 color: BLUE.mix(1.0),
                 filled: false,
-                stroke_width: ps(1.0),
+                stroke_width: stroke,
             },
         ))?
         .label("All junctions")
@@ -623,7 +665,7 @@ where
         x_vals
             .iter()
             .zip(all_y.iter())
-            .map(|(&x, &y)| Circle::new((x, y), point_size, BLUE.filled())),
+            .map(|(&x, &y)| Circle::new((x, y), point_size, BLUE.stroke_width(stroke))),
     )?;
 
     // Red: known junctions
@@ -633,10 +675,10 @@ where
             ShapeStyle {
                 color: RED.mix(1.0),
                 filled: false,
-                stroke_width: ps(1.0),
+                stroke_width: stroke,
             },
         ))?
-        .label("Known junctions")
+        .label("known junctions")
         .legend(move |(x, y)| {
             PathElement::new(
                 vec![(x, y), (x + 20, y)],
@@ -652,7 +694,7 @@ where
         x_vals
             .iter()
             .zip(known_y.iter())
-            .map(|(&x, &y)| Circle::new((x, y), point_size, RED.filled())),
+            .map(|(&x, &y)| Circle::new((x, y), point_size, RED.stroke_width(stroke))),
     )?;
 
     // Green: novel junctions
@@ -662,10 +704,10 @@ where
             ShapeStyle {
                 color: GREEN.mix(1.0),
                 filled: false,
-                stroke_width: ps(1.0),
+                stroke_width: stroke,
             },
         ))?
-        .label("Novel junctions")
+        .label("novel junctions")
         .legend(move |(x, y)| {
             PathElement::new(
                 vec![(x, y), (x + 20, y)],
@@ -681,7 +723,7 @@ where
         x_vals
             .iter()
             .zip(novel_y.iter())
-            .map(|(&x, &y)| Circle::new((x, y), point_size, GREEN.filled())),
+            .map(|(&x, &y)| Circle::new((x, y), point_size, GREEN.stroke_width(stroke))),
     )?;
 
     // --- Draw legend ---
@@ -690,7 +732,7 @@ where
         .position(SeriesLabelPosition::UpperLeft)
         .background_style(WHITE.mix(0.8))
         .border_style(BLACK.mix(0.5))
-        .label_font(("sans-serif", ps(10.0)))
+        .label_font(("sans-serif", ps(11.0)))
         .draw()?;
 
     Ok(())

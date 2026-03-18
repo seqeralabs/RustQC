@@ -1660,7 +1660,8 @@ fn write_rseqc_outputs(
 
         let plot_path =
             rseqc_junc_sat_dir.join(format!("{}.junctionSaturation_plot.png", bam_stem));
-        rna::rseqc::plots::junction_saturation_plot(&results, &plot_path)?;
+        let sample_name = clean_sample_name(bam_stem);
+        rna::rseqc::plots::junction_saturation_plot(&results, &sample_name, &plot_path)?;
 
         let summary_path = format!("{prefix}.junctionSaturation_summary.txt");
         rna::rseqc::junction_saturation::write_summary(&results, &summary_path)?;

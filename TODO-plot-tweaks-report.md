@@ -101,3 +101,23 @@ cosmetic difference not listed in the TODO. Title casing also differs slightly
 
 **Verification**: Built, clippy clean, all 217 tests pass. Visual comparison confirms
 colours, label placement, and rotation now match upstream.
+
+### junction_saturation — FIXED (7 items)
+
+**Problems & Fixes**:
+
+1. **Remove grid lines**: Added `.disable_mesh()`.
+2. **Black box around plot area**: Draw `Rectangle` border matching R's default `box()`.
+3. **Empty markers**: Changed from filled to outline-only circle markers (`stroke_width`
+   instead of `filled()`) matching R's `pch=1`.
+4. **No decimals on axis labels**: Added integer-format label formatters for both axes.
+5. **Title with BAM filename**: Added `sample_name` parameter, shows clean sample name.
+6. **X-axis every 20**: Changed to 6 labels (0, 20, 40, 60, 80, 100).
+7. **Larger font sizes**: Increased label, axis description, caption, and legend fonts.
+
+Also matched upstream legend labels exactly: "All junctions", "known junctions",
+"novel junctions" (lowercase for known/novel).
+
+**Verification**: Built, clippy clean, all 217 tests pass. Visual comparison confirms
+all 7 items are fixed: no gridlines, black border, open markers, integer labels, title,
+x-axis at every 20, and readable font sizes.
