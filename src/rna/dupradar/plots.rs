@@ -248,6 +248,55 @@ fn quantile(sorted: &[f64], p: f64) -> f64 {
     }
 }
 
+/// Compute histogram breakpoints matching R's `pretty()` algorithm.
+///
+/// When R's `hist()` receives `breaks=100`, it treats the value as a
+/// *suggestion* and calls `pretty(range(x), n=breaks, min.n=1)` to
+/// produce "nice" equally-spaced breakpoints. The step size is always a
+/// multiple of 1, 2, or 5 × 10^k, so the actual number of bins may
+/// differ from the requested count.
+///
+/// # Arguments
+/// * `lo` — minimum data value
+/// * `hi` — maximum data value
+/// * `n`  — target number of bins (R's `breaks` parameter)
+///
+/// # Returns
+/// A `Vec<f64>` of breakpoints (length = number of bins + 1).
+fn r_pretty_breaks(lo: f64, hi: f64, n: usize) -> Vec<f64> {
+    let dx = hi - lo;
+    if dx == 0.0 {
+        // Edge case: all values equal — mimic R's behaviour of creating
+        // a single bin centred on the value.
+        let cell = if lo.abs() < 1e-15 {
+            1.0
+        } else {
+            lo.abs() * 0.4
+        };
+        return vec![lo - cell, lo + cell];
+    }
+    let cell = dx / n as f64; // raw step size
+                              // Round `cell` to the nearest "nice" number: 1, 2, or 5 × 10^k.
+                              // This matches R's `pretty()` logic for choosing label-friendly intervals.
+    let base = 10f64.powf(cell.log10().floor());
+    let candidates = [base, 2.0 * base, 5.0 * base, 10.0 * base];
+    // Pick the smallest candidate that is >= cell (with tiny tolerance for
+    // floating-point rounding).
+    let nice_cell = candidates
+        .iter()
+        .copied()
+        .find(|&c| c >= cell * (1.0 - 1e-10))
+        .unwrap_or(10.0 * base);
+
+    let lo_break = (lo / nice_cell).floor() * nice_cell;
+    let hi_break = (hi / nice_cell).ceil() * nice_cell;
+    let n_steps = ((hi_break - lo_break) / nice_cell).round() as usize;
+
+    (0..=n_steps)
+        .map(|i| lo_break + i as f64 * nice_cell)
+        .collect()
+}
+
 // ---------------------------------------------------------------------------
 // Drawing helpers — smooth dashed lines via filled circles
 // ---------------------------------------------------------------------------
@@ -1036,18 +1085,17 @@ where
         anyhow::bail!("No valid data for expression histogram");
     }
 
-    // Match R's hist(breaks=100): R uses ~100 breaks over the data range.
-    // Compute bin width dynamically to produce approximately 100 bins.
+    // Match R's hist(breaks=100): R treats `breaks` as a *suggestion* and
+    // uses its `pretty()` algorithm to produce "nice" breakpoints aligned
+    // to multiples of 1, 2, or 5 × 10^k.
     let raw_min = log_rpk.iter().cloned().fold(f64::INFINITY, f64::min);
     let raw_max = log_rpk.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    let target_bins = 100;
-    let bw = ((raw_max - raw_min) / target_bins as f64 * 20.0).round() / 20.0; // round to nearest 0.05
-    let bw = bw.max(0.05); // minimum bin width
-    let x_min = (raw_min / bw).floor() * bw;
-    let bin_max = (raw_max / bw).ceil() * bw;
-    let n_bins = ((bin_max - x_min) / bw).round().max(1.0) as usize;
-    // Extend past last tick so its label isn't clipped
-    let x_max = bin_max + 0.3;
+    let breaks = r_pretty_breaks(raw_min, raw_max, 100);
+    let n_bins = breaks.len() - 1;
+    let x_min = breaks[0];
+    let bw = breaks[1] - breaks[0]; // uniform step size from pretty()
+                                    // Extend past last tick so its label isn't clipped
+    let x_max = *breaks.last().unwrap() + 0.3;
 
     let mut hist = vec![0u32; n_bins];
     for &v in &log_rpk {
