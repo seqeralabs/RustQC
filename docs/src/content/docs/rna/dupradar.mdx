@@ -68,17 +68,17 @@ where `x` is `log10(reads per kilobase)`.
 All dupRadar output files use the BAM file stem as a prefix (e.g., `sample.bam` produces `sample_dupMatrix.txt`) and are written to a `dupradar/` subdirectory under the output directory. Use `--flat-output` to write all files directly to the output directory instead. Each output can be individually enabled or disabled via the [configuration file](/usage/configuration/).
 
 <FileTree>
-  - dupradar/
-    - `sample_dupMatrix.txt` duplication matrix (core data table)
-    - `sample_intercept_slope.txt` fitted model intercept and slope
-    - `sample_duprateExpDens.png` density scatter plot
-    - `sample_duprateExpDens.svg`
-    - `sample_duprateExpBoxplot.png` duplication rate boxplot
-    - `sample_duprateExpBoxplot.svg`
-    - `sample_expressionHist.png` expression histogram
-    - `sample_expressionHist.svg`
-    - `sample_dup_intercept_mqc.txt` MultiQC general statistics
-    - `sample_duprateExpDensCurve_mqc.txt` MultiQC fitted curve data
+- dupradar/
+  - `sample_dupMatrix.txt` Duplication matrix (core data table)
+  - `sample_intercept_slope.txt` Fitted model intercept and slope
+  - `sample_duprateExpDens.png` Density scatter plot
+  - `sample_duprateExpDens.svg`
+  - `sample_duprateExpBoxplot.png` Duplication rate boxplot
+  - `sample_duprateExpBoxplot.svg`
+  - `sample_expressionHist.png` Expression histogram
+  - `sample_expressionHist.svg`
+  - `sample_dup_intercept_mqc.txt` MultiQC general statistics
+  - `sample_duprateExpDensCurve_mqc.txt` MultiQC fitted curve data
 </FileTree>
 
 ### Duplication matrix

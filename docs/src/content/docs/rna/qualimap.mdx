@@ -54,18 +54,20 @@ All Qualimap output files are written to a `qualimap/` subdirectory under the
 output directory, matching the directory structure that MultiQC expects.
 
 <FileTree>
-  - qualimap/ - qualimapReport.html Self-contained HTML report -
-  rnaseq_qc_results.txt Qualimap-compatible QC report - raw_data_qualimapReport/
-  - coverage_profile_along_genes_(total).txt Coverage profile -- all genes -
-  coverage_profile_along_genes_(high).txt Coverage profile -- highly expressed
-  genes - coverage_profile_along_genes_(low).txt Coverage profile -- lowly
-  expressed genes - images_qualimapReport/ - Coverage Profile Along Genes
-  (Total).png Gene body coverage chart - Coverage Profile Along Genes (High).png
-  Coverage chart -- highly expressed genes - Coverage Profile Along Genes
-  (Low).png Coverage chart -- lowly expressed genes - Transcript coverage
-  histogram.png Coverage depth histogram (0-50X) - Reads Genomic Origin.png
-  Exonic/intronic/intergenic pie chart - Junction Analysis.png Known/novel
-  junction pie chart
+- qualimap/
+  - qualimapReport.html Self-contained HTML report
+  - `rnaseq_qc_results.txt` Qualimap-compatible QC report
+  - `raw_data_qualimapReport/`
+    - `coverage_profile_along_genes_(total).txt` Coverage profile (all genes)
+    - `coverage_profile_along_genes_(high).txt` Coverage profile (highly expressed genes)
+    - `coverage_profile_along_genes_(low).txt` Coverage profile (lowly expressed genes)
+  - `images_qualimapReport/`
+    - `Coverage Profile Along Genes (Total).png` Gene body coverage chart
+    - `Coverage Profile Along Genes (High).png` Coverage chart (highly expressed genes)
+    - `Coverage Profile Along Genes (Low).png` Coverage chart (lowly expressed genes)
+    - `Transcript coverage histogram.png` Coverage depth histogram (0-50X)
+    - `Reads Genomic Origin.png` Exonic/intronic/intergenic pie chart
+    - `Junction Analysis.png` Known/novel junction pie chart
 </FileTree>
 
 ### QC results
