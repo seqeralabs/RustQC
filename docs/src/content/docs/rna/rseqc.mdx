@@ -167,11 +167,11 @@ the actual read sequence.
 
 ### Plot files
 
-The duplication rate plot shows two curves: **sequence-based** (blue) and
-**position-based** (red) duplication. The x-axis shows the occurrence count
-(capped at 500) and the y-axis shows the number of reads at each duplication
-level. Most reads should appear at low occurrence counts; a long tail indicates
-high duplication.
+The duplication rate plot shows two curves: **mapping-based** (blue, x markers)
+and **sequence-based** (red, dot markers) duplication. The x-axis shows the
+occurrence count (capped at 500) and the y-axis shows the number of reads at
+each duplication level. Most reads should appear at low occurrence counts; a
+long tail indicates high duplication.
 
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0;">
   <div>
@@ -195,6 +195,15 @@ high duplication.
     </div>
   </div>
 </div>
+
+<Aside type="caution" title="Legend labels differ from upstream RSeQC">
+RustQC's legend labels differ from upstream RSeQC. The upstream RSeQC `read_duplication.py`
+has a [bug](https://github.com/MonashBioinformaticsPlatform/RSeQC/blob/9947a22/src/qcmodule/SAM.py#L3204)
+where the legend labels are swapped: position-based data (plotted in blue) is labelled
+"Sequence-based", and sequence-based data (plotted in red) is labelled "Mapping-based".
+RustQC corrects this, using accurate labels: **Mapping-based** (blue) and
+**Sequence-based** (red). The underlying data and colours are identical.
+</Aside>
 
 ### Benchmarks
 

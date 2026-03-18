@@ -137,7 +137,7 @@ fn write_r_script(
     writeln!(f, "ym=floor(max(log10(pos_uniqRead)))")?;
     writeln!(
         f,
-        "legend(300,ym,legend=c('Sequence-based','Mapping-based'),col=c('blue','red'),pch=c(4,20))"
+        "legend(300,ym,legend=c('Mapping-based','Sequence-based'),col=c('blue','red'),pch=c(4,20))"
     )?;
     writeln!(f, "axis(side=2,at=0:ym,labels=0:ym)")?;
 

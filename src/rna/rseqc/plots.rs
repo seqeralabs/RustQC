@@ -789,9 +789,10 @@ where
 /// - Legend inside the plot area (matching upstream's `legend(300, ym, ...)`)
 /// - No gridlines, black border around plot area
 ///
-/// Note: the upstream RSeQC has a label swap in its legend — it labels the
+/// Note: the upstream RSeQC has a label swap bug in its legend — it labels the
 /// blue (position-based) series as "Sequence-based" and the red (sequence-based)
-/// series as "Mapping-based". We replicate this for visual compatibility.
+/// series as "Mapping-based". We intentionally use CORRECT labels: blue is
+/// "Mapping-based" (position/mapping data) and red is "Sequence-based".
 ///
 /// # Arguments
 /// * `result` — read duplication analysis results
@@ -825,21 +826,22 @@ pub fn read_duplication_plot(
 
 /// Render the read duplication line plot.
 ///
-/// Replicates the upstream RSeQC R script exactly:
+/// Based on the upstream RSeQC R script:
 /// ```r
 /// plot(pos_occ, log10(pos_uniqRead), ylab='Number of Reads (log10)',
 ///      xlab='Occurrence of read', pch=4, cex=0.8, col='blue',
 ///      xlim=c(1,500), yaxt='n')
 /// points(seq_occ, log10(seq_uniqRead), pch=20, cex=0.8, col='red')
 /// ym = floor(max(log10(pos_uniqRead)))
-/// legend(300, ym, legend=c('Sequence-based','Mapping-based'),
+/// legend(300, ym, legend=c('Mapping-based','Sequence-based'),
 ///        col=c('blue','red'), pch=c(4,20))
 /// axis(side=2, at=0:ym, labels=0:ym)
 /// ```
 ///
-/// Note: the upstream legend labels are swapped relative to the plotted data
+/// Note: the upstream RSeQC legend labels are swapped relative to the plotted data
 /// (blue is position-based data labelled "Sequence-based", red is sequence-based
-/// data labelled "Mapping-based"). We replicate this for visual compatibility.
+/// data labelled "Mapping-based"). We intentionally use CORRECT labels:
+/// blue = "Mapping-based" (position data), red = "Sequence-based".
 fn render_read_duplication<DB: DrawingBackend>(
     root: &DrawingArea<DB, plotters::coord::Shift>,
     result: &ReadDuplicationResult,
@@ -931,7 +933,7 @@ where
 
     // Blue: position-based data plotted first (matching upstream R script which
     // calls plot(pos_occ, ..., col='blue') first).
-    // Upstream legend labels this as "Sequence-based" (label swap in upstream).
+    // Upstream RSeQC mislabels this as "Sequence-based"; we use the correct label.
     if !pos_data.is_empty() {
         chart
             .draw_series(LineSeries::new(
@@ -942,7 +944,7 @@ where
                     stroke_width: ps(1.0),
                 },
             ))?
-            .label("Sequence-based")
+            .label("Mapping-based")
             .legend(move |(x, y)| {
                 PathElement::new(
                     vec![(x, y), (x + 20, y)],
@@ -963,7 +965,7 @@ where
 
     // Red: sequence-based data plotted second (matching upstream R script which
     // calls points(seq_occ, ..., col='red') second).
-    // Upstream legend labels this as "Mapping-based" (label swap in upstream).
+    // Upstream RSeQC mislabels this as "Mapping-based"; we use the correct label.
     if !seq_data.is_empty() {
         chart
             .draw_series(LineSeries::new(
@@ -974,7 +976,7 @@ where
                     stroke_width: ps(1.0),
                 },
             ))?
-            .label("Mapping-based")
+            .label("Sequence-based")
             .legend(move |(x, y)| {
                 PathElement::new(
                     vec![(x, y), (x + 20, y)],
