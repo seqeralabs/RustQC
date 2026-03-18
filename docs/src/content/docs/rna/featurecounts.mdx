@@ -180,9 +180,3 @@ Generating these in the traditional workflow requires additional scripting after
 ## Configuring outputs
 
 Each output file can be individually enabled or disabled. See the [Configuration](/usage/configuration/#featurecounts-output-toggles) page for details.
-
-## Differences from Subread featureCounts
-
-RustQC's read counting follows the same algorithm as featureCounts with the same default settings (exon features, gene_id attribute, 1bp overlap, strand-aware counting). The outputs are format-compatible and can be used interchangeably in downstream pipelines.
-
-The main difference is that RustQC performs counting, dupRadar analysis, and RSeQC-equivalent metrics in a single pass over the BAM file, rather than requiring separate tool invocations. RustQC also produces biotype count summaries and MultiQC-compatible files that would require additional scripting in the traditional workflow.

@@ -317,16 +317,14 @@ TIN uses the shared `--mapq` / `-q` flag for mapping quality filtering.
 
 The upstream `tin.py` tool processes each transcript independently and scales
 poorly with BAM size. On large production datasets (e.g., ~186M reads), `tin.py`
-can take **6+ hours** and may fail to complete within typical pipeline time limits.
-RustQC computes TIN scores as part of its single-pass BAM scan, completing the
-analysis in the same ~19 minutes it takes to run all other tools combined.
+can take **over 9 hours** and may fail to complete within typical pipeline time limits.
+RustQC computes TIN scores as part of its single-pass BAM scan, completing all
+analyses combined in under 15 minutes.
 
 ### Compatibility
 
 RustQC's TIN output uses the same file format and column names as RSeQC's
-`tin.py`. The main difference is that RustQC reports one row per **gene** (using
-the longest transcript as representative), while RSeQC reports one row per
-**transcript**. TIN scores are computed using the same Shannon entropy formula.
+`tin.py`. TIN scores are computed using the same Shannon entropy formula.
 
 <Aside type="note" title="Minor differences from upstream tin.py">
 TIN scores may differ very slightly from RSeQC's `tin.py`.
@@ -385,7 +383,7 @@ Both upstream RSeQC and RustQC ran on the **same BAM file** in all cases.
 
 The sum of upstream RSeQC tools on the large dataset (including TIN) is approximately
 **10 hours 37 minutes**. The upstream `tin.py` alone takes **9h 45m**;
-RustQC completes TIN as part of its single pass in under 42 minutes total.
+RustQC completes all analyses in a single pass in **14m 54s**.
 
 ### bam_stat comparison
 

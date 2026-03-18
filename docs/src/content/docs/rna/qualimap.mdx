@@ -180,7 +180,7 @@ plot.
 
 ### Chart images
 
-Six chart images are generated in `images_qualimapReport/`, matching the plots
+Chart images are generated in `images_qualimapReport/`, matching the plots
 produced by Qualimap's HTML report:
 
 <CardGrid>
@@ -324,9 +324,8 @@ are from the AWS benchmark run (2026-03-09).
 | 3' bias    | 0.57            | 0.57   | Yes      |
 | 5'-3' bias | 1.30            | 1.19   | Minor diff |
 
-The 5'-3' bias difference (1.30 vs 1.19) is the only deviation on this
-dataset. It arises because upstream Qualimap requires a name-sorted BAM while
-RustQC uses the standard coordinate-sorted BAM. All other values are identical.
+The 5'-3' bias shows a minor difference (1.30 vs 1.19) on this small dataset.
+All other values are identical.
 
 #### Large dataset (~186M reads, GM12878)
 
@@ -538,24 +537,11 @@ View the full reports from the large benchmark run:
     RustQC HTML report
   </a>
 
+Note that RustQC base64-encodes all assets within the HTML file, so it can be shared stand-alone.
+
 ## Configuration
 
 Gene body coverage can be enabled or disabled in the config. See the [Configuration](/usage/configuration/#qualimap) page for details.
-
-## Compatibility with Qualimap
-
-The output files are designed for direct parsing by MultiQC's Qualimap rnaseq
-module. The directory structure (`qualimap/raw_data_qualimapReport/`) and file
-formats match Qualimap's output. Key differences from the Java implementation:
-
-- **Single-pass**: RustQC computes Qualimap metrics alongside all other analyses
-  in one BAM scan, whereas the original requires a separate dedicated run
-- **Merged exon model**: RustQC uses the same exon-merging strategy as Qualimap
-  (Picard Gene.Transcript model) for accurate non-redundant coverage
-- **Multi-threading**: Coverage is accumulated per chromosome in parallel and
-  merged, producing identical results to the original's single-threaded approach
-- **Upstream match**: Aligned pairs count and 5'-3' coverage bias values now
-  match upstream Qualimap exactly
 
 ## References
 

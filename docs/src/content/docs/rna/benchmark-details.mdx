@@ -59,7 +59,7 @@ Standout comparisons from the large dataset:
 - TIN takes 9h 45m - more than 14x RustQC's total runtime for everything
 - dupRadar alone takes 2h 14m 24s - more than 3x RustQC's total runtime
 - Qualimap pipeline (sort + rnaseq) takes 1h 2m 14s - longer than RustQC
-- read_duplication (RSeQC) takes 33m 1s - nearly as long as all of RustQC
+- read_duplication (RSeQC) takes 33m 1s - more than twice RustQC's total runtime
 - Peak memory: RustQC uses 11.4 GB in a single process vs. up to 10.2 GB
   for read_duplication alone, with many other tools also requiring several GB
   each (Qualimap: 4.9 GB, samtools sort: 5.2 GB, GTF2BED: 2.7 GB, preseq: 2.0 GB, etc.)
