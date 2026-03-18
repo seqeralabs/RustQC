@@ -2,6 +2,7 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 import catppuccin from "@catppuccin/starlight";
+import starlightImageZoom from "starlight-image-zoom";
 
 // https://astro.build/config
 export default defineConfig({
@@ -77,6 +78,7 @@ export default defineConfig({
           dark: { flavor: "mocha", accent: "peach" },
           light: { flavor: "latte", accent: "peach" },
         }),
+        starlightImageZoom(),
       ],
     }),
   ],
