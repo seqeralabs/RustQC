@@ -5,50 +5,76 @@ Generates two SVGs for documentation:
 1. Full CLI output from a normal run (no warnings)
 2. Strandedness mismatch warning (trimmed to just the warning box)
 
+Uses short symlinks in a temp directory so the file paths printed by
+RustQC are concise and look good in the SVG screenshots.
+
 Usage:
     uv run --with rich docs/scripts/capture_cli_svg.py
 """
 
+import os
 import subprocess
 import sys
+import tempfile
 
+from pathlib import Path
 from rich.console import Console
 from rich.text import Text
 
 # Paths — adjust these if your test data is elsewhere
-RUSTQC = "./target/release/rustqc"
-GTF = "../RustQC-benchmarks/test-data/rna/small/chr6.gtf.gz"
-BAM = "../RustQC-benchmarks/test-data/rna/small/test.bam"
-OUTDIR = "/tmp/rustqc_svg_capture"
+RUSTQC = Path("./target/release/rustqc").resolve()
+GTF = Path("../RustQC-benchmarks/test-data/rna/small/chr6.gtf.gz").resolve()
+BAM = Path("../RustQC-benchmarks/test-data/rna/small/test.bam").resolve()
 
 TITLE = "rustqc rna"
 
 
 def run_rustqc(stranded: str) -> str:
-    """Run RustQC and return combined stdout+stderr as a string."""
-    cmd = [
-        RUSTQC,
-        "rna",
-        "--stranded",
-        stranded,
-        "-p",
-        "--gtf",
-        GTF,
-        BAM,
-        "--outdir",
-        OUTDIR,
-    ]
-    env = {
-        "CLICOLOR_FORCE": "1",
-        "PATH": "/usr/bin:/bin:/usr/local/bin",
-    }
-    result = subprocess.run(
-        cmd,
-        capture_output=True,
-        env=env,
-        timeout=120,
-    )
-    return (result.stdout + result.stderr).decode("utf-8", errors="replace")
+    """Run RustQC and return combined stdout+stderr as a string.
+
+    Creates a temporary directory with short symlinks so that the paths
+    printed by RustQC in its output are concise.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create short symlinks
+        gtf_link = os.path.join(tmpdir, "genes.gtf.gz")
+        bam_link = os.path.join(tmpdir, "sample.bam")
+        bai_src = str(BAM) + ".bai"
+        bai_link = os.path.join(tmpdir, "sample.bam.bai")
+        outdir = os.path.join(tmpdir, "results")
+
+        os.symlink(str(GTF), gtf_link)
+        os.symlink(str(BAM), bam_link)
+        if os.path.exists(bai_src):
+            os.symlink(bai_src, bai_link)
+
+        cmd = [
+            str(RUSTQC),
+            "rna",
+            "--stranded",
+            stranded,
+            "-p",
+            "--gtf",
+            gtf_link,
+            bam_link,
+            "--outdir",
+            outdir,
+        ]
+        env = {
+            "CLICOLOR_FORCE": "1",
+            "PATH": "/usr/bin:/bin:/usr/local/bin",
+        }
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            env=env,
+            timeout=120,
+        )
+        output = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+
+    # Replace the temp dir path with a clean short path for display
+    output = output.replace(tmpdir, "/data")
+    return output
 
 
 def write_svg(output: str, path: str, title: str = TITLE):
