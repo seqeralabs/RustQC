@@ -42,13 +42,14 @@ const HEIGHT: u32 = 480;
 /// - Red density curve overlay
 /// - Mean ± SD as main title (matching upstream R's `main=paste(...)`)
 /// - No gridlines, black border around plot area
-/// - X-axis range matches the configured lower/upper bounds
+/// - X-axis range auto-detected from actual data (first/last non-zero bins),
+///   matching upstream R's `hist()` auto-scaling behaviour
 ///
 /// # Arguments
 /// * `result` — inner distance analysis results
 /// * `step` — bin width used for histogram construction
-/// * `lower_bound` — inner distance lower bound (x-axis minimum)
-/// * `upper_bound` — inner distance upper bound (x-axis maximum)
+/// * `lower_bound` — inner distance lower bound (fallback x-axis minimum)
+/// * `upper_bound` — inner distance upper bound (fallback x-axis maximum)
 /// * `sample_name` — sample identifier shown as subtitle below the main title
 /// * `output_path` — path for the PNG output; SVG is written alongside
 pub fn inner_distance_plot(
@@ -108,8 +109,8 @@ pub fn inner_distance_plot(
 /// ```
 ///
 /// R's default `hist()` draws no gridlines and `plot()` draws a black box
-/// around the plot area. The x-axis range spans the configured lower/upper
-/// bounds (which define the histogram bins).
+/// around the plot area. The x-axis range is auto-detected from the actual
+/// data (first/last non-zero bins), matching R's `hist()` auto-scaling.
 #[allow(clippy::too_many_arguments)]
 fn render_inner_distance<DB: DrawingBackend>(
     root: &DrawingArea<DB, plotters::coord::Shift>,
@@ -147,10 +148,16 @@ where
         .map(|&(_, _, c)| c as f64 / (total_count as f64 * bin_width))
         .collect();
 
-    // X-axis range matches the configured lower/upper bounds (which define
-    // the histogram bins), matching upstream R's hist() behaviour.
-    let x_min = lower_bound as f64;
-    let x_max = upper_bound as f64;
+    // X-axis range: auto-detect from actual data, matching upstream RSeQC's
+    // behaviour. The upstream R script calls hist(fragsize, ...) without an
+    // explicit xlim, so R auto-scales the x-axis to the range of the data.
+    // We find the first and last non-zero bins and use their edges.
+    let first_nonzero = bins.iter().position(|&(_, _, c)| c > 0);
+    let last_nonzero = bins.iter().rposition(|&(_, _, c)| c > 0);
+    let (x_min, x_max) = match (first_nonzero, last_nonzero) {
+        (Some(first), Some(last)) => (bins[first].0 as f64, bins[last].1 as f64),
+        _ => (lower_bound as f64, upper_bound as f64),
+    };
     let y_max = densities.iter().copied().fold(0.0_f64, f64::max) * 1.1; // 10% headroom
 
     // --- Compute density curve (kernel density estimation) ---
