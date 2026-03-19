@@ -7,7 +7,7 @@ head:
   - tag: style
     content: |
       /* Hide the auto-generated h1 container (including its border) */
-      .content-panel:first-child { display: none !important; }
+      .content-panel:first-of-type { display: none !important; }
       .main-pane { --sl-content-width: 67.5rem; }
 ---
 
@@ -72,7 +72,8 @@ export const base = import.meta.env.BASE_URL;
     gap: 1rem;
     padding-bottom: 1rem;
   }
-  .hero > img {
+  .hero > img,
+  .hero > starlight-image-zoom-zoomable {
     object-fit: contain;
     width: min(70%, 20rem);
     height: auto;
@@ -139,7 +140,8 @@ export const base = import.meta.env.BASE_URL;
       gap: 3%;
       padding-block: clamp(2.5rem, calc(1rem + 10vmin), 10rem);
     }
-    .hero > img {
+    .hero > img,
+    .hero > starlight-image-zoom-zoomable {
       order: 2;
       width: min(100%, 25rem);
     }
