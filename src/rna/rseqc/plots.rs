@@ -908,6 +908,9 @@ pub fn read_duplication_plot(
 /// legend(300, ym, legend=c('Mapping-based','Sequence-based'),
 ///        col=c('blue','red'), pch=c(4,20))
 /// axis(side=2, at=0:ym, labels=0:ym)
+/// axis(side=4, at=c(log10(pos_uniqRead[1..4])),
+///      labels=c(round(pos_uniqRead[1..4]*100/sum(pos_uniqRead*pos_occ))))
+/// mtext(4, text="Reads %", line=2)
 /// ```
 ///
 /// Note: the upstream RSeQC legend labels are swapped relative to the plotted data
@@ -923,6 +926,8 @@ fn render_read_duplication<DB: DrawingBackend>(
 where
     DB::ErrorType: 'static,
 {
+    use plotters::style::text_anchor::{HPos, Pos, VPos};
+
     let ps = |v: f64| (v * pxs) as u32;
 
     root.fill(&WHITE)?;
@@ -970,8 +975,11 @@ where
     let y_plot_max = ym + 0.5;
 
     // --- Build chart ---
+    // Reserve right margin for the secondary "Reads %" axis.
+    // Upstream R uses par(mar=c(5,4,4,5)) to allocate right margin space.
     let mut chart = ChartBuilder::on(root)
         .margin(ps(10.0))
+        .margin_right(ps(55.0))
         .x_label_area_size(ps(35.0))
         .y_label_area_size(ps(50.0))
         .caption(sample_name, ("sans-serif", ps(14.0)))
@@ -1076,6 +1084,102 @@ where
         .border_style(BLACK.mix(0.5))
         .label_font(("sans-serif", ps(10.0)))
         .draw()?;
+
+    // -----------------------------------------------------------------------
+    // Secondary y-axis: "Reads %" on the right side
+    //
+    // Replicates the upstream RSeQC R code:
+    //   axis(side=4, at=c(log10(pos_uniqRead[1..4])),
+    //        labels=c(round(pos_uniqRead[i]*100 / sum(pos_uniqRead*pos_occ))))
+    //   mtext(4, text="Reads %", line=2)
+    //
+    // The tick positions are log10(uniqReadCount) for the first 4 histogram
+    // entries, and labels show the percentage of total reads at each level.
+    // Total reads = sum(occ * uniqReadCount) across the position histogram.
+    // -----------------------------------------------------------------------
+
+    // Compute total reads from position-based histogram:
+    // sum(pos_uniqRead * pos_occ) = sum(count * occurrence)
+    let total_reads: u64 = result
+        .pos_histogram
+        .iter()
+        .map(|(&occ, &count)| occ * count)
+        .sum();
+
+    if total_reads > 0 {
+        // Collect the first 4 entries from the position histogram (sorted by occ).
+        // These correspond to R's pos_uniqRead[1], pos_uniqRead[2], etc.
+        let tick_entries: Vec<(u64, u64)> = result
+            .pos_histogram
+            .iter()
+            .take(4)
+            .map(|(&occ, &count)| (occ, count))
+            .collect();
+
+        if !tick_entries.is_empty() {
+            // Build (log10_y, pct_label) pairs for each tick
+            let ticks: Vec<(f64, String)> = tick_entries
+                .iter()
+                .filter(|&&(_, count)| count > 0)
+                .map(|&(_occ, count)| {
+                    let log10_y = (count as f64).log10();
+                    let pct = (count as f64 * 100.0 / total_reads as f64).round();
+                    (log10_y, format!("{}", pct as i64))
+                })
+                .filter(|(log10_y, _)| *log10_y >= 0.0 && *log10_y <= y_plot_max)
+                .collect();
+
+            if !ticks.is_empty() {
+                let pa = chart.plotting_area();
+                let tick_len = ps(4.0) as i32;
+                let label_gap = ps(3.0) as i32;
+
+                // Get the right edge pixel x by mapping the max x-coordinate
+                let right_edge_x = pa.map_coordinate(&(x_max, 0.0)).0;
+
+                // Draw the right-side vertical axis line (from y=0 to y=y_plot_max)
+                let top_py = pa.map_coordinate(&(x_max, y_plot_max)).1;
+                let bot_py = pa.map_coordinate(&(x_max, 0.0)).1;
+                root.draw(&PathElement::new(
+                    vec![(right_edge_x, top_py), (right_edge_x, bot_py)],
+                    BLACK.stroke_width(ps(1.0)),
+                ))?;
+
+                // Draw tick marks and percentage labels on the right axis
+                let label_style = TextStyle::from(("sans-serif", ps(11.0) as f64).into_font())
+                    .color(&BLACK)
+                    .pos(Pos::new(HPos::Left, VPos::Center));
+
+                for (log10_y, label) in &ticks {
+                    let py = pa.map_coordinate(&(x_max, *log10_y)).1;
+
+                    // Tick mark extending rightward from the plot border
+                    root.draw(&PathElement::new(
+                        vec![(right_edge_x, py), (right_edge_x + tick_len, py)],
+                        BLACK.stroke_width(ps(1.0)),
+                    ))?;
+
+                    // Percentage label to the right of the tick
+                    root.draw_text(
+                        label,
+                        &label_style,
+                        (right_edge_x + tick_len + label_gap, py),
+                    )?;
+                }
+
+                // Draw the "Reads %" axis label, rotated 90° on the right side.
+                // Positioned to the right of the tick labels, matching R's
+                // mtext(4, text="Reads %", line=2).
+                let mid_py = (top_py + bot_py) / 2;
+                let axis_label_x = right_edge_x + ps(40.0) as i32;
+                let axis_label_style = TextStyle::from(("sans-serif", ps(12.0) as f64).into_font())
+                    .color(&BLACK)
+                    .transform(FontTransform::Rotate90)
+                    .pos(Pos::new(HPos::Center, VPos::Center));
+                root.draw_text("Reads %", &axis_label_style, (axis_label_x, mid_py))?;
+            }
+        }
+    }
 
     Ok(())
 }
