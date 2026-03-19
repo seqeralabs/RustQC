@@ -55,8 +55,6 @@ headings and number formatting. Key metrics include:
 - Proper pair and paired-on-different-chromosome counts
 - MAPQ distribution histogram
 
-### bam_stat benchmarks
-
 All values are identical between RSeQC and RustQC on both datasets.
 
 #### Small dataset
@@ -114,8 +112,6 @@ For paired-end data, the labels are `PairEnd` with `1++,1--,2+-,2-+` and
 - First fraction near 100% = forward stranded (e.g., Ligation protocol)
 - Second fraction near 100% = reverse stranded (e.g., dUTP protocol, most common)
 
-### infer_experiment benchmarks
-
 #### Small dataset - Identical
 
 | Metric                               |  RSeQC | RustQC |
@@ -165,8 +161,6 @@ Position-based deduplication groups reads by alignment position (chromosome,
 start, CIGAR-derived exon blocks). Sequence-based deduplication groups reads by
 the actual read sequence.
 
-### read_duplication plots
-
 The duplication rate plot shows two curves: **mapping-based** (blue, x markers)
 and **sequence-based** (red, dot markers) duplication. The x-axis shows the
 occurrence count (capped at 500) and the y-axis shows the number of reads at
@@ -192,8 +186,6 @@ where the legend labels are swapped: position-based data (plotted in blue) is la
 RustQC corrects this, using accurate labels: **Mapping-based** (blue) and
 **Sequence-based** (red). The underlying data and colours are identical.
 </Aside>
-
-### read_duplication benchmarks
 
 All values are identical on both datasets.
 
@@ -228,8 +220,6 @@ The output includes:
 - A table of genomic regions with columns: Group, Total_bases, Tag_count, Tags/Kb
 - Regions: CDS_Exons, 5'UTR_Exons, 3'UTR_Exons, Introns, TSS_up_1kb, TSS_up_5kb, TSS_up_10kb, TES_down_1kb, TES_down_5kb, TES_down_10kb
 - Tags assigned to each region (with priority: CDS > UTR > Intron > Intergenic)
-
-### read_distribution benchmarks
 
 All values are identical on both datasets.
 
@@ -278,8 +268,6 @@ against the reference gene model:
 - **Partial novel** -- one splice site matches, the other is novel
 - **Complete novel** -- neither splice site matches any known intron
 
-### junction_annotation plots
-
 Two pie charts are generated, one for splice **events** (reads) and one for
 splice **junctions** (unique splice sites). Each chart shows the proportion of
 known (blue), partial novel (red), and complete novel (green) splicing.
@@ -309,8 +297,6 @@ known (blue), partial novel (red), and complete novel (green) splicing.
     <img src={`${base}benchmarks/large/rseqc/junction_annotation/GM12878_REP1.markdup.sorted.splice_junction.png`} alt="RustQC splice junction plot" width="100%" style="border-radius: 8px;" />
   </div>
 </div>
-
-### junction_annotation benchmarks
 
 All values are identical on both datasets.
 
@@ -363,8 +349,6 @@ level. This reveals whether sequencing depth is sufficient for full
 junction detection. A saturated library will show a plateau in the curve; an
 unsaturated library will show continuing growth.
 
-### junction_saturation plots
-
 The junction saturation plot shows three lines: **all junctions** (blue),
 **known junctions** (red), and **novel junctions** (green). The x-axis is the
 percentage of total reads used and the y-axis is the number of splice junctions
@@ -380,8 +364,6 @@ detected (in thousands). A plateau in the curves indicates saturation.
     <img src={`${base}benchmarks/large/rseqc/junction_saturation/GM12878_REP1.markdup.sorted.junctionSaturation_plot.png`} alt="RustQC junction saturation plot" width="100%" style="border-radius: 8px;" />
   </div>
 </div>
-
-### junction_saturation benchmarks
 
 Results are identical between RSeQC and RustQC at full sampling depth on both datasets.
 
@@ -434,8 +416,6 @@ Pairs are classified as:
 The histogram bins are configurable via `--inner-distance-lower-bound`,
 `--inner-distance-upper-bound`, and `--inner-distance-step` (defaults: -250 to 250, step 5).
 
-### inner_distance plots
-
 The inner distance plot is a histogram showing the distribution of fragment
 inner distances, with a Gaussian density curve (red) overlaid. The title
 displays the mean and standard deviation. The distribution should be
@@ -451,8 +431,6 @@ approximately normal for a well-prepared library.
     <img src={`${base}benchmarks/large/rseqc/inner_distance/GM12878_REP1.markdup.sorted.inner_distance_plot.png`} alt="RustQC inner distance plot" width="100%" style="border-radius: 8px;" />
   </div>
 </div>
-
-### inner_distance benchmarks
 
 All frequency values are identical on both datasets.
 
@@ -554,8 +532,6 @@ RustQC's TIN output uses the same file format and column names as RSeQC's
   aligned across all benchmarks. Per-transcript accuracy is an active area of
   investigation.
 </Aside>
-
-### TIN benchmarks
 
 #### Small dataset - Identical
 
