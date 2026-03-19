@@ -475,6 +475,7 @@ fn render_density_scatter<DB: DrawingBackend>(
     rpkm_threshold: Option<f64>,
     rpkm_value: f64,
     title: &str,
+    subtitle: &str,
     pxs: f64, // pixel scale (SCALE for PNG, 1 for SVG)
 ) -> Result<()>
 where
@@ -484,12 +485,13 @@ where
 
     root.fill(&WHITE)?;
 
-    // ── title ──────────────────────────────────────────────────────────
-    let title_height = ps(35.0);
+    // ── title + subtitle ───────────────────────────────────────────────
+    let title_height = ps(50.0);
     let (top_area, plot_area) = root.split_vertically(title_height);
+    let cx = (top_area.dim_in_pixel().0 as i32) / 2;
     top_area.draw(&Text::new(
         title.to_string(),
-        ((top_area.dim_in_pixel().0 as i32) / 2, (pxs * 8.0) as i32),
+        (cx, (pxs * 4.0) as i32),
         ("sans-serif", ps(18.0))
             .into_font()
             .style(FontStyle::Bold)
@@ -498,6 +500,16 @@ where
                 plotters::style::text_anchor::HPos::Center,
                 plotters::style::text_anchor::VPos::Top,
             )),
+    ))?;
+    top_area.draw(&Text::new(
+        subtitle.to_string(),
+        (cx, (pxs * 25.0) as i32),
+        ("sans-serif", ps(14.0)).into_font().color(&BLACK).pos(
+            plotters::style::text_anchor::Pos::new(
+                plotters::style::text_anchor::HPos::Center,
+                plotters::style::text_anchor::VPos::Top,
+            ),
+        ),
     ))?;
 
     // ── data ───────────────────────────────────────────────────────────
@@ -709,7 +721,7 @@ where
         let lw = (pxs * 110.0) as i32;
         let lh = (pxs * (8.0 + n_rows as f64 * 14.0 + 4.0)) as i32;
         let lx = pa_x.1 - lw - (pxs * 8.0) as i32;
-        let ly = pa_y.1 - lh - (pxs * 8.0) as i32;
+        let ly = pa_y.1 - lh - (pxs * 30.0) as i32;
 
         // Background fill
         plot_area.draw(&Rectangle::new(
@@ -780,15 +792,28 @@ where
 /// Generate the density scatter plot of duplication rate vs expression.
 ///
 /// Produces both `<output_path>.png` (high-res) and `<output_path>.svg`.
-/// The `title` is drawn centered at the top of the plot.
+/// A descriptive title is drawn centered at the top of the plot, with the
+/// sample name shown as a subtitle underneath in a slightly smaller font.
+/// This matches R dupRadar's `duprateExpDensPlot(dm, main=basename(bam))`
+/// convention where the filename is passed as the plot title.
+///
+/// # Arguments
+/// * `dm` — duplication matrix
+/// * `fit` — logistic regression fit result
+/// * `rpkm_threshold` — optional RPK value at the RPKM threshold
+/// * `rpkm_value` — the RPKM threshold value (for legend label)
+/// * `sample_name` — sample/BAM filename shown as subtitle
+/// * `output_path` — base path for `.png` and `.svg` output
 pub fn density_scatter_plot(
     dm: &DupMatrix,
     fit: &FitResult,
     rpkm_threshold: Option<f64>,
     rpkm_value: f64,
-    title: &str,
+    sample_name: &str,
     output_path: &std::path::Path,
 ) -> Result<()> {
+    let title = "Density scatter plot";
+
     // PNG (high-res)
     let png_path = output_path.with_extension("png");
     let root = BitMapBackend::new(&png_path, (s(480), s(480))).into_drawing_area();
@@ -799,13 +824,23 @@ pub fn density_scatter_plot(
         rpkm_threshold,
         rpkm_value,
         title,
+        sample_name,
         SCALE as f64,
     )?;
 
     // SVG
     let svg_path = output_path.with_extension("svg");
     let root = SVGBackend::new(&svg_path, (480, 480)).into_drawing_area();
-    render_density_scatter(root, dm, fit, rpkm_threshold, rpkm_value, title, 1.0)?;
+    render_density_scatter(
+        root,
+        dm,
+        fit,
+        rpkm_threshold,
+        rpkm_value,
+        title,
+        sample_name,
+        1.0,
+    )?;
 
     Ok(())
 }
@@ -819,6 +854,7 @@ fn render_boxplot<DB: DrawingBackend>(
     root: DrawingArea<DB, plotters::coord::Shift>,
     dm: &DupMatrix,
     title: &str,
+    subtitle: &str,
     pxs: f64,
 ) -> Result<()>
 where
@@ -828,12 +864,13 @@ where
 
     root.fill(&WHITE)?;
 
-    // ── title ──────────────────────────────────────────────────────────
-    let title_height = ps(35.0);
+    // ── title + subtitle ───────────────────────────────────────────────
+    let title_height = ps(50.0);
     let (top_area, plot_area) = root.split_vertically(title_height);
+    let cx = (top_area.dim_in_pixel().0 as i32) / 2;
     top_area.draw(&Text::new(
         title.to_string(),
-        ((top_area.dim_in_pixel().0 as i32) / 2, (pxs * 8.0) as i32),
+        (cx, (pxs * 4.0) as i32),
         ("sans-serif", ps(18.0))
             .into_font()
             .style(FontStyle::Bold)
@@ -842,6 +879,16 @@ where
                 plotters::style::text_anchor::HPos::Center,
                 plotters::style::text_anchor::VPos::Top,
             )),
+    ))?;
+    top_area.draw(&Text::new(
+        subtitle.to_string(),
+        (cx, (pxs * 25.0) as i32),
+        ("sans-serif", ps(14.0)).into_font().color(&BLACK).pos(
+            plotters::style::text_anchor::Pos::new(
+                plotters::style::text_anchor::HPos::Center,
+                plotters::style::text_anchor::VPos::Top,
+            ),
+        ),
     ))?;
 
     let step = 0.05;
@@ -1029,15 +1076,29 @@ where
 /// Generate the duplication rate boxplot by expression quantile bin.
 ///
 /// Produces both `<output_path>.png` (high-res) and `<output_path>.svg`.
-/// The `title` is drawn centered at the top of the plot.
-pub fn duprate_boxplot(dm: &DupMatrix, title: &str, output_path: &std::path::Path) -> Result<()> {
+/// A descriptive title is drawn centered at the top of the plot, with the
+/// sample name shown as a subtitle underneath in a slightly smaller font.
+/// This matches R dupRadar's `duprateExpBoxplot(dm, main=basename(bam))`
+/// convention where the filename is passed as the plot title.
+///
+/// # Arguments
+/// * `dm` — duplication matrix
+/// * `sample_name` — sample/BAM filename shown as subtitle
+/// * `output_path` — base path for `.png` and `.svg` output
+pub fn duprate_boxplot(
+    dm: &DupMatrix,
+    sample_name: &str,
+    output_path: &std::path::Path,
+) -> Result<()> {
+    let title = "Percent Duplication by Expression";
+
     // PNG
     let root = BitMapBackend::new(output_path, (s(480), s(480))).into_drawing_area();
-    render_boxplot(root, dm, title, SCALE as f64)?;
+    render_boxplot(root, dm, title, sample_name, SCALE as f64)?;
     // SVG
     let svg = output_path.with_extension("svg");
     let root = SVGBackend::new(&svg, (480, 480)).into_drawing_area();
-    render_boxplot(root, dm, title, 1.0)?;
+    render_boxplot(root, dm, title, sample_name, 1.0)?;
     Ok(())
 }
 
@@ -1050,6 +1111,7 @@ fn render_histogram<DB: DrawingBackend>(
     root: DrawingArea<DB, plotters::coord::Shift>,
     dm: &DupMatrix,
     title: &str,
+    subtitle: &str,
     pxs: f64,
 ) -> Result<()>
 where
@@ -1059,12 +1121,13 @@ where
 
     root.fill(&WHITE)?;
 
-    // ── title ──────────────────────────────────────────────────────────
-    let title_height = ps(35.0);
+    // ── title + subtitle ───────────────────────────────────────────────
+    let title_height = ps(50.0);
     let (top_area, plot_area) = root.split_vertically(title_height);
+    let cx = (top_area.dim_in_pixel().0 as i32) / 2;
     top_area.draw(&Text::new(
         title.to_string(),
-        ((top_area.dim_in_pixel().0 as i32) / 2, (pxs * 8.0) as i32),
+        (cx, (pxs * 4.0) as i32),
         ("sans-serif", ps(18.0))
             .into_font()
             .style(FontStyle::Bold)
@@ -1073,6 +1136,16 @@ where
                 plotters::style::text_anchor::HPos::Center,
                 plotters::style::text_anchor::VPos::Top,
             )),
+    ))?;
+    top_area.draw(&Text::new(
+        subtitle.to_string(),
+        (cx, (pxs * 25.0) as i32),
+        ("sans-serif", ps(14.0)).into_font().color(&BLACK).pos(
+            plotters::style::text_anchor::Pos::new(
+                plotters::style::text_anchor::HPos::Center,
+                plotters::style::text_anchor::VPos::Top,
+            ),
+        ),
     ))?;
 
     let log_rpk: Vec<f64> = dm
@@ -1176,19 +1249,29 @@ where
 /// Generate expression (RPK) histogram.
 ///
 /// Produces both `<output_path>.png` (high-res) and `<output_path>.svg`.
-/// The `title` is drawn centered at the top of the plot.
+/// A descriptive title is drawn centered at the top of the plot, with the
+/// sample name shown as a subtitle underneath in a slightly smaller font.
+/// R dupRadar's `expressionHist()` uses `main=""` (no title) by default,
+/// but the nf-core pipeline convention is to include the sample name.
+///
+/// # Arguments
+/// * `dm` — duplication matrix
+/// * `sample_name` — sample/BAM filename shown as subtitle
+/// * `output_path` — base path for `.png` and `.svg` output
 pub fn expression_histogram(
     dm: &DupMatrix,
-    title: &str,
+    sample_name: &str,
     output_path: &std::path::Path,
 ) -> Result<()> {
+    let title = "Distribution of RPK values per gene";
+
     // PNG
     let root = BitMapBackend::new(output_path, (s(480), s(480))).into_drawing_area();
-    render_histogram(root, dm, title, SCALE as f64)?;
+    render_histogram(root, dm, title, sample_name, SCALE as f64)?;
     // SVG
     let svg = output_path.with_extension("svg");
     let root = SVGBackend::new(&svg, (480, 480)).into_drawing_area();
-    render_histogram(root, dm, title, 1.0)?;
+    render_histogram(root, dm, title, sample_name, 1.0)?;
     Ok(())
 }
 
