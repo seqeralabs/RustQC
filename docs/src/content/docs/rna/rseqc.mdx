@@ -173,9 +173,16 @@ occurrence count (capped at 500) and the y-axis shows the number of reads at
 each duplication level. Most reads should appear at low occurrence counts; a
 long tail indicates high duplication.
 
-| RSeQC | RustQC |
-|:---:|:---:|
-| <img src={`${base}benchmarks/large/rseqc/read_duplication/GM12878_REP1.DupRate_plot.png`} alt="RSeQC read duplication plot" width="100%" style="background: white; border-radius: 8px; padding: 0.25rem;" /> | <img src={`${base}benchmarks/large/rseqc/read_duplication/GM12878_REP1.markdup.sorted.DupRate_plot.png`} alt="RustQC read duplication plot" width="100%" style="background: white; border-radius: 8px; padding: 0.25rem;" /> |
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin: 1rem 0;">
+  <div style="text-align: center; font-weight: bold;">RSeQC</div>
+  <div style="text-align: center; font-weight: bold;">RustQC</div>
+  <div style="background: white; border-radius: 8px; padding: 0.25rem;">
+    <img src={`${base}benchmarks/large/rseqc/read_duplication/GM12878_REP1.DupRate_plot.png`} alt="RSeQC read duplication plot" width="100%" style="border-radius: 8px;" />
+  </div>
+  <div style="background: white; border-radius: 8px; padding: 0.25rem;">
+    <img src={`${base}benchmarks/large/rseqc/read_duplication/GM12878_REP1.markdup.sorted.DupRate_plot.png`} alt="RustQC read duplication plot" width="100%" style="border-radius: 8px;" />
+  </div>
+</div>
 
 <Aside type="caution" title="Legend labels differ from upstream RSeQC">
 RustQC's legend labels differ from upstream RSeQC. The upstream RSeQC `read_duplication.py`
@@ -279,15 +286,29 @@ known (blue), partial novel (red), and complete novel (green) splicing.
 
 #### Splice events
 
-| RSeQC | RustQC |
-|:---:|:---:|
-| <img src={`${base}benchmarks/large/rseqc/junction_annotation/junction_annotation.splice_events.png`} alt="RSeQC splice events plot" width="100%" style="background: white; border-radius: 8px; padding: 0.25rem;" /> | <img src={`${base}benchmarks/large/rseqc/junction_annotation/GM12878_REP1.markdup.sorted.splice_events.png`} alt="RustQC splice events plot" width="100%" style="background: white; border-radius: 8px; padding: 0.25rem;" /> |
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin: 1rem 0;">
+  <div style="text-align: center; font-weight: bold;">RSeQC</div>
+  <div style="text-align: center; font-weight: bold;">RustQC</div>
+  <div style="background: white; border-radius: 8px; padding: 0.25rem;">
+    <img src={`${base}benchmarks/large/rseqc/junction_annotation/junction_annotation.splice_events.png`} alt="RSeQC splice events plot" width="100%" style="border-radius: 8px;" />
+  </div>
+  <div style="background: white; border-radius: 8px; padding: 0.25rem;">
+    <img src={`${base}benchmarks/large/rseqc/junction_annotation/GM12878_REP1.markdup.sorted.splice_events.png`} alt="RustQC splice events plot" width="100%" style="border-radius: 8px;" />
+  </div>
+</div>
 
 #### Splice junctions
 
-| RSeQC | RustQC |
-|:---:|:---:|
-| <img src={`${base}benchmarks/large/rseqc/junction_annotation/junction_annotation.splice_junction.png`} alt="RSeQC splice junction plot" width="100%" style="background: white; border-radius: 8px; padding: 0.25rem;" /> | <img src={`${base}benchmarks/large/rseqc/junction_annotation/GM12878_REP1.markdup.sorted.splice_junction.png`} alt="RustQC splice junction plot" width="100%" style="background: white; border-radius: 8px; padding: 0.25rem;" /> |
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin: 1rem 0;">
+  <div style="text-align: center; font-weight: bold;">RSeQC</div>
+  <div style="text-align: center; font-weight: bold;">RustQC</div>
+  <div style="background: white; border-radius: 8px; padding: 0.25rem;">
+    <img src={`${base}benchmarks/large/rseqc/junction_annotation/junction_annotation.splice_junction.png`} alt="RSeQC splice junction plot" width="100%" style="border-radius: 8px;" />
+  </div>
+  <div style="background: white; border-radius: 8px; padding: 0.25rem;">
+    <img src={`${base}benchmarks/large/rseqc/junction_annotation/GM12878_REP1.markdup.sorted.splice_junction.png`} alt="RustQC splice junction plot" width="100%" style="border-radius: 8px;" />
+  </div>
+</div>
 
 ### junction_annotation benchmarks
 
@@ -349,9 +370,16 @@ The junction saturation plot shows three lines: **all junctions** (blue),
 percentage of total reads used and the y-axis is the number of splice junctions
 detected (in thousands). A plateau in the curves indicates saturation.
 
-| RSeQC | RustQC |
-|:---:|:---:|
-| <img src={`${base}benchmarks/large/rseqc/junction_saturation/junction_saturation.junctionSaturation_plot.png`} alt="RSeQC junction saturation plot" width="100%" style="background: white; border-radius: 8px; padding: 0.25rem;" /> | <img src={`${base}benchmarks/large/rseqc/junction_saturation/GM12878_REP1.markdup.sorted.junctionSaturation_plot.png`} alt="RustQC junction saturation plot" width="100%" style="background: white; border-radius: 8px; padding: 0.25rem;" /> |
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin: 1rem 0;">
+  <div style="text-align: center; font-weight: bold;">RSeQC</div>
+  <div style="text-align: center; font-weight: bold;">RustQC</div>
+  <div style="background: white; border-radius: 8px; padding: 0.25rem;">
+    <img src={`${base}benchmarks/large/rseqc/junction_saturation/junction_saturation.junctionSaturation_plot.png`} alt="RSeQC junction saturation plot" width="100%" style="border-radius: 8px;" />
+  </div>
+  <div style="background: white; border-radius: 8px; padding: 0.25rem;">
+    <img src={`${base}benchmarks/large/rseqc/junction_saturation/GM12878_REP1.markdup.sorted.junctionSaturation_plot.png`} alt="RustQC junction saturation plot" width="100%" style="border-radius: 8px;" />
+  </div>
+</div>
 
 ### junction_saturation benchmarks
 
@@ -413,9 +441,16 @@ inner distances, with a Gaussian density curve (red) overlaid. The title
 displays the mean and standard deviation. The distribution should be
 approximately normal for a well-prepared library.
 
-| RSeQC | RustQC |
-|:---:|:---:|
-| <img src={`${base}benchmarks/large/rseqc/inner_distance/inner_distance.inner_distance_plot.png`} alt="RSeQC inner distance plot" width="100%" style="background: white; border-radius: 8px; padding: 0.25rem;" /> | <img src={`${base}benchmarks/large/rseqc/inner_distance/GM12878_REP1.markdup.sorted.inner_distance_plot.png`} alt="RustQC inner distance plot" width="100%" style="background: white; border-radius: 8px; padding: 0.25rem;" /> |
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin: 1rem 0;">
+  <div style="text-align: center; font-weight: bold;">RSeQC</div>
+  <div style="text-align: center; font-weight: bold;">RustQC</div>
+  <div style="background: white; border-radius: 8px; padding: 0.25rem;">
+    <img src={`${base}benchmarks/large/rseqc/inner_distance/inner_distance.inner_distance_plot.png`} alt="RSeQC inner distance plot" width="100%" style="border-radius: 8px;" />
+  </div>
+  <div style="background: white; border-radius: 8px; padding: 0.25rem;">
+    <img src={`${base}benchmarks/large/rseqc/inner_distance/GM12878_REP1.markdup.sorted.inner_distance_plot.png`} alt="RustQC inner distance plot" width="100%" style="border-radius: 8px;" />
+  </div>
+</div>
 
 ### inner_distance benchmarks
 
