@@ -27,18 +27,18 @@ single-pass BAM scan as all other analyses -- no extra BAM pass is needed.
 
 RustQC's Qualimap module computes:
 
-- **Gene body coverage profiles** -- coverage distribution along normalized
+- Gene body coverage profiles: coverage distribution along normalized
   transcript positions from 5' to 3', revealing systematic biases such as 3'
   degradation or incomplete reverse transcription
-- **5'/3' bias metrics** -- quantitative measures of coverage uniformity across
+- 5'/3' bias metrics: quantitative measures of coverage uniformity across
   gene bodies, used for sample QC and batch-effect detection
-- **Read origin classification** -- counts reads as exonic, intronic, intergenic,
+- Read origin classification: counts reads as exonic, intronic, intergenic,
   or overlapping multiple genes' exons
-- **Strand-specificity estimation** -- validates whether the observed strand
+- Strand-specificity estimation: validates whether the observed strand
   distribution matches the expected library protocol
-- **Splice junction motif analysis** -- counts canonical and non-canonical
+- Splice junction motif analysis: counts canonical and non-canonical
   donor/acceptor junction motifs across all uniquely-mapped reads
-- **Alignment statistics** -- primary/secondary alignments, multi-mappers,
+- Alignment statistics: primary/secondary alignments, multi-mappers,
   proper pairs, and supplementary read counts
 
 <Aside type="tip" title="No name-sorted BAM required">
@@ -289,9 +289,9 @@ in any browser without external dependencies.
 
 | Metric     | Good       | Problematic                             |
 | ---------- | ---------- | --------------------------------------- |
-| 5'-3' bias | 0.8 -- 1.2 | < 0.5 or > 2.0                          |
-| 5' bias    | 0.8 -- 1.2 | > 2.0 (enrichment) or < 0.5 (depletion) |
-| 3' bias    | 0.8 -- 1.2 | > 2.0 (enrichment) or < 0.5 (depletion) |
+| 5'-3' bias | 0.8 - 1.2 | < 0.5 or > 2.0                          |
+| 5' bias    | 0.8 - 1.2 | > 2.0 (enrichment) or < 0.5 (depletion) |
+| 3' bias    | 0.8 - 1.2 | > 2.0 (enrichment) or < 0.5 (depletion) |
 
 ### Strand specificity
 

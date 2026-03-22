@@ -123,7 +123,7 @@ peak memory (RSS) are shown.
 
 ### Key observations
 
-**TIN's impact is driven by memory pressure, not computation.** When TIN
+TIN's impact is driven by memory pressure, not computation. When TIN
 is the only tool enabled, it adds just 5 seconds of marginal compute time.
 But in a full run, removing TIN saves 240 seconds. As explained
 [above](#results), TIN's ~1 GB of per-transcript data structures push
@@ -131,16 +131,16 @@ the combined working set past CPU L3 cache capacity, causing cache misses
 that slow every other tool's per-read processing. Removing TIN shrinks the
 working set enough for the remaining tools to run efficiently.
 
-**read_duplication is the most expensive counting-phase tool.** Removing it
+read_duplication is the most expensive counting-phase tool. Removing it
 saves 256s (step 2), cutting the runtime from 397s to 142s. This tool
 maintains per-read sequence hashing (SipHash over every base) for
 duplication detection, which is expensive in both CPU and memory.
 
-**The "samtools" group (bam_stat, flagstat, idxstats, samtools_stats) is cheap.**
+The "samtools" group (bam_stat, flagstat, idxstats, samtools_stats) is cheap.
 These tools add minimal overhead individually because they compute simple
 per-read counters with no complex data structures.
 
-**Memory scales with enabled tools.** Peak RSS drops from 4.5 GB (all tools)
+Memory scales with enabled tools. Peak RSS drops from 4.5 GB (all tools)
 to 0.6 GB (no tools). The largest single memory consumers are TIN
 (~1 GB for per-transcript hash sets and sampled-position indices) and
 read_duplication (~1 GB for sequence hash tables).

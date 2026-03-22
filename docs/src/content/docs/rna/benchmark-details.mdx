@@ -97,19 +97,19 @@ analyses in 25.9s.
 
 Every output file produced by RustQC matches or closely matches the original tools:
 
-- **dupRadar duplication matrix:** all 14 columns match across 63,677 genes
-- **Gene-level read counts:** identical across all 63,677 genes
-- **Model fit parameters:** intercept and slope match to 10+ significant digits
-- **Assignment statistics:** Assigned, NoFeatures, Ambiguous match exactly
-- **flagstat:** all 16 metrics identical to samtools flagstat
-- **idxstats:** all per-chromosome counts identical to samtools idxstats
-- **stats:** full samtools stats format including all histogram sections (SN, FFQ, LFQ, GCF, GCL, IS, RL, GCD, etc.) near-identical to samtools stats
-- **preseq:** extrapolation curve within &lt;0.1% of preseq v3.2.0 across entire range
-- **RSeQC tools:** all data values and R plotting scripts match Python RSeQC.
+- dupRadar duplication matrix: all 14 columns match across 63,677 genes
+- Gene-level read counts: identical across all 63,677 genes
+- Model fit parameters: intercept and slope match to 10+ significant digits
+- Assignment statistics: Assigned, NoFeatures, Ambiguous match exactly
+- flagstat: all 16 metrics identical to samtools flagstat
+- idxstats: all per-chromosome counts identical to samtools idxstats
+- stats: full samtools stats format including all histogram sections (SN, FFQ, LFQ, GCF, GCL, IS, RL, GCD, etc.) near-identical to samtools stats
+- preseq: extrapolation curve within &lt;0.1% of preseq v3.2.0 across entire range
+- RSeQC tools: all data values and R plotting scripts match Python RSeQC.
   Junction saturation intermediate sampling points show expected stochastic
   variation from random subsampling. Per-transcript TIN scores differ due to
   coverage counting approach (see [RSeQC](/rna/rseqc/))
-- **Qualimap:** all read counts, genomic origin percentages, and coverage bias metrics
+- Qualimap: all read counts, genomic origin percentages, and coverage bias metrics
   match Qualimap Java 2.3 exactly (see [Qualimap](/rna/qualimap/))
 
 See the individual tool pages for detailed per-tool comparisons:
@@ -118,20 +118,20 @@ See the individual tool pages for detailed per-tool comparisons:
 
 ## Where the speedup comes from
 
-1. **Single-pass architecture:** The traditional workflow reads the BAM file
-   many times -- once per tool. RustQC reads it once and produces everything
+1. Single-pass architecture: The traditional workflow reads the BAM file
+   many times, once per tool. RustQC reads it once and produces everything
    in that single pass.
-2. **Compiled Rust vs. interpreted R/Python:** Compiled code with zero-cost
+2. Compiled Rust vs. interpreted R/Python: Compiled code with zero-cost
    abstractions and efficient memory management.
-3. **Multi-threaded parallelism:** RustQC parallelizes across chromosomes.
+3. Multi-threaded parallelism: RustQC parallelizes across chromosomes.
    Scaling depends on the number of chromosomes with mapped reads and the
    evenness of their read distribution.
 
 ## Benchmark conditions
 
-- **Hardware:** AWS cloud (2026-03-09), run via nf-core/rnaseq pipeline.
-- **RustQC:** `--gtf` mode (all tools enabled), multi-threaded (174.2% CPU on large dataset).
-- **Traditional tools:** Each tool run in its own container as part of the nf-core/rnaseq pipeline.
+- Hardware: AWS cloud (2026-03-09), run via nf-core/rnaseq pipeline.
+- RustQC: `--gtf` mode (all tools enabled), multi-threaded (174.2% CPU on large dataset).
+- Traditional tools: each tool run in its own container as part of the nf-core/rnaseq pipeline.
   Timings are wall-clock realtime from the Nextflow execution trace.
-- **Reproducibility:** Benchmark scripts and data are in the
+- Reproducibility: benchmark scripts and data are in the
   [benchmark directory](https://github.com/seqeralabs/RustQC/tree/main/benchmark).

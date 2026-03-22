@@ -74,19 +74,19 @@ own submodule under `src/rna/`. Inter-module access uses `crate::` paths.
 
 Key conventions:
 
-- **Formatting:** Default `rustfmt`, 4-space indentation, trailing commas on
+- Default `rustfmt` formatting, 4-space indentation, trailing commas on
   multi-line constructs.
-- **Error handling:** `anyhow::Result<T>` for all fallible functions. Propagate
+- `anyhow::Result<T>` for all fallible functions. Propagate
   with `?`, add context with `.context()`. No custom error types.
-- **Documentation:** Every source file starts with `//!` module doc comments.
+- Every source file starts with `//!` module doc comments.
   All public items have `///` doc comments.
-- **Naming:** Types are `CamelCase`, functions/variables are `snake_case`,
+- Types are `CamelCase`, functions/variables are `snake_case`,
   constants are `SCREAMING_SNAKE_CASE`.
-- **Types:** `u64` for counts/positions, `f64` for metrics, `u8` for flags.
+- `u64` for counts/positions, `f64` for metrics, `u8` for flags.
   `IndexMap` when insertion order matters, `HashMap` otherwise.
-- **Tests:** Unit tests are co-located in each source file inside
+- Unit tests are co-located in each source file inside
   `#[cfg(test)] mod tests`. Test names follow `test_<description>`.
-- **`unwrap()` / `expect()`:** Restricted to test code only. In production code,
+- `unwrap()` / `expect()` are restricted to test code only. In production code,
   use `?` with `anyhow` context.
 
 ## CI pipeline

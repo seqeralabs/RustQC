@@ -33,11 +33,11 @@ all other analyses.
 
 Library complexity estimation helps answer questions like:
 
-- **Is my library saturated?** If the complexity curve plateaus, additional
+- Is my library saturated? If the complexity curve plateaus, additional
   sequencing will mostly produce duplicate molecules.
-- **How many unique molecules can I expect?** The extrapolation predicts distinct
+- How many unique molecules can I expect? The extrapolation predicts distinct
   molecule counts at depths beyond what was actually sequenced.
-- **Should I sequence more?** If the curve is still rising steeply at the current
+- Should I sequence more? If the curve is still rising steeply at the current
   depth, more sequencing will still yield new molecules.
 
 ### The Good-Toulmin method
@@ -93,12 +93,12 @@ in multi-sample QC reports.
 
 ### Complexity curve shape
 
-- **Steep initial rise:** Most fragments are unique at low depths -- good complexity.
-- **Gradual plateau:** Library is approaching saturation -- additional sequencing
+- Steep initial rise: most fragments are unique at low depths, indicating good complexity.
+- Gradual plateau: library is approaching saturation; additional sequencing
   yields diminishing returns.
-- **Sharp early plateau:** Low complexity library -- many duplicates even at
+- Sharp early plateau: low complexity library with many duplicates even at
   modest depths.
-- **Still rising at current depth:** Library has remaining complexity to capture
+- Still rising at current depth: library has remaining complexity to capture
   with additional sequencing.
 
 ### Confidence intervals

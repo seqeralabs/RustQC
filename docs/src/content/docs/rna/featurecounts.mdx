@@ -82,10 +82,10 @@ Unassigned_NoFeatures   1227
 Unassigned_Ambiguous    2395
 ```
 
-- **Assigned** -- reads successfully assigned to a gene
-- **Unassigned_Unmapped** -- unmapped reads
-- **Unassigned_NoFeatures** -- reads not overlapping any gene
-- **Unassigned_Ambiguous** -- reads overlapping multiple genes
+- Assigned: reads successfully assigned to a gene
+- Unassigned_Unmapped: unmapped reads
+- Unassigned_NoFeatures: reads not overlapping any gene
+- Unassigned_Ambiguous: reads overlapping multiple genes
 
 ### Biotype counts
 
@@ -145,10 +145,10 @@ The 1s CPU time for featureCounts reflects that the small dataset is trivially s
 
 RustQC's read counting uses the same algorithm as Subread featureCounts:
 
-- **Feature type:** exon-level features grouped by `gene_id`
-- **Overlap detection:** at least 1 base pair overlap
-- **Strand awareness:** configurable via the `-s` / `--stranded` flag
-- **Multi-mapping:** tracked separately for unique and multi-mapper columns
+- Feature type: exon-level features grouped by `gene_id`
+- Overlap detection: at least 1 base pair overlap
+- Strand awareness: configurable via the `-s` / `--stranded` flag
+- Multi-mapping: tracked separately for unique and multi-mapper columns
 
 <details>
 <summary>Assignment statistics - small dataset (test, ~52K reads)</summary>
@@ -183,9 +183,9 @@ All assignment statistics are identical across both datasets. Gene-level read co
 
 Beyond the standard featureCounts counts file and summary, RustQC also produces:
 
-- **Biotype counts** (`.biotype_counts.tsv`) -- per-biotype read count summaries
-- **Biotype MultiQC bargraph** (`.biotype_counts_mqc.tsv`) -- ready for MultiQC visualization
-- **rRNA percentage** (`.biotype_counts_rrna_mqc.tsv`) -- rRNA fraction for MultiQC general statistics
+- Biotype counts (`.biotype_counts.tsv`): per-biotype read count summaries
+- Biotype MultiQC bargraph (`.biotype_counts_mqc.tsv`): ready for MultiQC visualization
+- rRNA percentage (`.biotype_counts_rrna_mqc.tsv`): rRNA fraction for MultiQC general statistics
 
 Generating these in the traditional workflow requires additional scripting after the featureCounts run.
 

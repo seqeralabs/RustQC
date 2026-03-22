@@ -368,7 +368,7 @@ rna:
 ```
 
 Requires annotation (`--gtf` only). Runs the Qualimap RNA-Seq QC analysis:
-gene body coverage profiling (100 percentile bins, 5'→3'), 5'/3' bias metrics,
+gene body coverage profiling (100 percentile bins, 5' to 3'), 5'/3' bias metrics,
 read origin classification (exonic/intronic/intergenic), strand-specificity
 estimation, and splice junction motif counting. Produces Qualimap-compatible
 output files parseable by MultiQC.

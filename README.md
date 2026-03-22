@@ -22,7 +22,7 @@
 
 ---
 
-**RustQC** is a growing suite of fast QC tools for sequencing data, compiled to a single static binary with no runtime dependencies.
+**RustQC** is a suite of fast QC tools for sequencing data, compiled to a single static binary with no runtime dependencies.
 
 <p align="center">
 <picture>
@@ -35,7 +35,7 @@
 
 It currently includes:
 
-- **`rustqc rna`** -- A single-command RNA-Seq QC tool, designed to slot into the [nf-core/rnaseq pipeline](https://nf-co.re/rnaseq/) _(but that can be used anywhere)_ that runs all QC analyses in one pass:
+- `rustqc rna` is a single-command RNA-Seq QC tool that runs all QC analyses in one pass. Designed to slot into the [nf-core/rnaseq pipeline](https://nf-co.re/rnaseq/), but works anywhere:
 
 | Tool                | Reimplements                                                                            | Description                                                           |
 | ------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |

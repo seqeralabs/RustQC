@@ -3,7 +3,7 @@ title: Quick Start
 description: Get up and running with RustQC in minutes.
 ---
 
-This guide walks you through a basic RustQC analysis from start to finish.
+A basic RustQC analysis from install to results.
 
 ## RNA-seq duplicate analysis
 
@@ -21,9 +21,9 @@ This command:
 
 ### Input requirements
 
-- **BAM file(s)** - coordinate-sorted and duplicate-marked (not removed). See [CLI reference](/usage/cli-reference/) for supported duplicate-marking tools. The RSeQC tools do not require duplicate marking - this is only needed for the dupRadar analysis. Use `--skip-dup-check` to bypass the check.
-- **BAM index** - a `.bai` index is not strictly required, but without one RustQC falls back to a single counting thread. For multi-threaded performance, ensure an index file is present alongside each BAM.
-- **GTF annotation file** (`--gtf`) - a gene annotation file (plain or gzip-compressed). See [CLI reference](/usage/cli-reference/) for details.
+- BAM file(s): coordinate-sorted and duplicate-marked (not removed). See [CLI reference](/usage/cli-reference/) for supported duplicate-marking tools. The RSeQC tools do not require duplicate marking; this is only needed for the dupRadar analysis. Use `--skip-dup-check` to bypass the check.
+- BAM index: a `.bai` index is not strictly required, but without one RustQC falls back to a single counting thread. For multi-threaded performance, ensure an index file is present alongside each BAM.
+- GTF annotation file (`--gtf`): a gene annotation file (plain or gzip-compressed). See [CLI reference](/usage/cli-reference/) for details.
 
 ### Output
 

@@ -7,12 +7,12 @@ import BenchmarkChart from "../../../components/BenchmarkChart.astro";
 
 RustQC is a fast quality control toolkit for sequencing data, written in Rust. It reimplements several established bioinformatics QC tools as a single compiled binary with no runtime dependencies:
 
-- **[dupRadar](https://bioconductor.org/packages/dupRadar/)** -- RNA-seq PCR duplicate rate analysis
-- **[featureCounts](http://subread.sourceforge.net/)** -- gene-level read counting and biotype quantification
-- **[RSeQC](https://rseqc.sourceforge.net/)** -- 8 RNA-seq quality control modules (bam_stat, infer_experiment, read_duplication, read_distribution, junction_annotation, junction_saturation, inner_distance, TIN)
-- **[preseq](https://github.com/smithlabcode/preseq)** -- library complexity extrapolation (lc_extrap)
-- **[samtools](http://www.htslib.org/)** -- flagstat, idxstats, and full stats output including all histogram sections
-- **[Qualimap](http://qualimap.conesalab.org/)** -- gene body coverage profiling and RNA-seq QC summary
+- [dupRadar](https://bioconductor.org/packages/dupRadar/): RNA-seq PCR duplicate rate analysis
+- [featureCounts](http://subread.sourceforge.net/): gene-level read counting and biotype quantification
+- [RSeQC](https://rseqc.sourceforge.net/): 8 RNA-seq quality control modules (bam_stat, infer_experiment, read_duplication, read_distribution, junction_annotation, junction_saturation, inner_distance, TIN)
+- [preseq](https://github.com/smithlabcode/preseq): library complexity extrapolation (lc_extrap)
+- [samtools](http://www.htslib.org/): flagstat, idxstats, and full stats output including all histogram sections
+- [Qualimap](http://qualimap.conesalab.org/): gene body coverage profiling and RNA-seq QC summary
 
 ## Why RustQC?
 
@@ -22,12 +22,12 @@ RNA-seq quality control typically involves running multiple tools written in R a
 
 Key advantages:
 
-- **Speed**: Processes ~186M reads in 14m 54s vs. ~15h 34m of sequential tool runtimes on AWS, including TIN which takes 9h 45m alone in the traditional workflow
-- **Single binary**: No runtime dependencies -- no R, Python, or Bioconductor installation required
-- **Single-pass architecture**: The `rna` subcommand performs read counting and duplicate analysis simultaneously, eliminating the need for a separate featureCounts run
-- **Matching output**: Produces identical or near-identical results to the original tools (see [benchmark details](/rna/benchmark-details/))
-- **Multiple input support**: Process several BAM files in a single command with automatic parallelisation
-- **Modern format support**: Accepts SAM, BAM, and CRAM input files; GTF annotation files can be plain or gzip-compressed
+- Processes ~186M reads in 14m 54s vs. ~15h 34m of sequential tool runtimes on AWS, including TIN which takes 9h 45m alone in the traditional workflow
+- No runtime dependencies: no R, Python, or Bioconductor installation required
+- The `rna` subcommand performs read counting and duplicate analysis simultaneously, eliminating the need for a separate featureCounts run
+- Produces identical or near-identical results to the original tools (see [benchmark details](/rna/benchmark-details/))
+- Process several BAM files in a single command with automatic parallelisation
+- Accepts SAM, BAM, and CRAM input files; GTF annotation files can be plain or gzip-compressed
 
 ## Available tools
 
