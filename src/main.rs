@@ -233,6 +233,12 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
     if let Some(val) = args.preseq_n_bootstraps {
         config.preseq.n_bootstraps = val;
     }
+    if let Some(val) = args.preseq_seed {
+        config.preseq.seed = val;
+    }
+    if let Some(val) = args.preseq_seg_len {
+        config.preseq.max_segment_length = val;
+    }
 
     // Apply CLI overrides for RSeQC tool parameters
     if let Some(val) = args.infer_experiment_sample_size {

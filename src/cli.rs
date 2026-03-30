@@ -276,6 +276,22 @@ pub struct RnaArgs {
         help_heading = "Tool parameters"
     )]
     pub preseq_n_bootstraps: Option<u32>,
+
+    /// preseq: random seed for bootstrap CIs
+    #[arg(
+        long = "preseq-seed",
+        value_name = "N",
+        help_heading = "Tool parameters"
+    )]
+    pub preseq_seed: Option<u64>,
+
+    /// preseq: max segment length for PE merging
+    #[arg(
+        long = "preseq-seg-len",
+        value_name = "N",
+        help_heading = "Tool parameters"
+    )]
+    pub preseq_seg_len: Option<u64>,
 }
 
 /// Parse command-line arguments and return the Cli struct.
@@ -423,6 +439,10 @@ mod tests {
             "500000",
             "--preseq-n-bootstraps",
             "200",
+            "--preseq-seed",
+            "1",
+            "--preseq-seg-len",
+            "100000000",
         ]);
         match cli.command {
             Commands::Rna(args) => {
@@ -430,6 +450,8 @@ mod tests {
                 assert_eq!(args.preseq_max_extrap, Some(5_000_000_000.0));
                 assert_eq!(args.preseq_step_size, Some(500_000.0));
                 assert_eq!(args.preseq_n_bootstraps, Some(200));
+                assert_eq!(args.preseq_seed, Some(1));
+                assert_eq!(args.preseq_seg_len, Some(100_000_000));
             }
             #[allow(unreachable_patterns)]
             _ => panic!("Expected Rna subcommand"),
