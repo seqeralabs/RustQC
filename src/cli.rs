@@ -291,7 +291,7 @@ pub struct RnaArgs {
         value_name = "N",
         help_heading = "Tool parameters"
     )]
-    pub preseq_seg_len: Option<u64>,
+    pub preseq_seg_len: Option<i64>,
 }
 
 /// Parse command-line arguments and return the Cli struct.
