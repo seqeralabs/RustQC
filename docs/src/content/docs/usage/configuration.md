@@ -104,6 +104,7 @@ rna:
     confidence_level: 0.95
     seed: 408
     max_terms: 100
+    max_segment_length: 100000000
     defects: false
 
   # Samtools-compatible outputs
@@ -385,12 +386,14 @@ rna:
     confidence_level: 0.95 # CI confidence level (default: 0.95)
     seed: 408 # Random seed for reproducibility (default: 408, matching upstream preseq)
     max_terms: 100 # Maximum terms in power series (default: 100)
+    max_segment_length: 100000000 # Max merged PE fragment length in bp (default: 1e8)
     defects: false # Use defects model for problematic histograms (default: false)
 ```
 
 Only needs BAM fragment info (no annotation required). The `max_extrap`,
-`step_size`, and `n_bootstraps` can also be set via CLI flags (`--preseq-max-extrap`,
-`--preseq-step-size`, `--preseq-n-bootstraps`). Use `--skip-preseq` to disable entirely.
+`step_size`, `n_bootstraps`, `seed`, and `max_segment_length` can also be set via CLI
+flags (`--preseq-max-extrap`, `--preseq-step-size`, `--preseq-n-bootstraps`,
+`--preseq-seed`, `--preseq-seg-len`). Use `--skip-preseq` to disable entirely.
 
 ## samtools
 

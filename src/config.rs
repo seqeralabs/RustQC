@@ -1001,4 +1001,30 @@ inner_distance:
         assert_eq!(config.inner_distance.upper_bound, Some(500));
         assert_eq!(config.inner_distance.step, Some(10));
     }
+
+    #[test]
+    fn test_preseq_config() {
+        let yaml = r#"
+preseq:
+  enabled: true
+  seed: 1
+  max_segment_length: 500000
+  max_extrap: 5000000000
+  step_size: 500000
+  n_bootstraps: 50
+  confidence_level: 0.99
+  max_terms: 50
+  defects: true
+"#;
+        let config: RnaConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        assert!(config.preseq.enabled);
+        assert_eq!(config.preseq.seed, 1);
+        assert_eq!(config.preseq.max_segment_length, 500_000);
+        assert_eq!(config.preseq.max_extrap, 5_000_000_000.0);
+        assert_eq!(config.preseq.step_size, 500_000.0);
+        assert_eq!(config.preseq.n_bootstraps, 50);
+        assert_eq!(config.preseq.confidence_level, 0.99);
+        assert_eq!(config.preseq.max_terms, 50);
+        assert!(config.preseq.defects);
+    }
 }
