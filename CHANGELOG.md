@@ -1,5 +1,28 @@
 # RustQC Changelog
 
+## [Version 0.1.1](https://github.com/seqeralabs/RustQC/releases/tag/v0.1.1)
+
+### Bug fixes
+
+- Fix qualimap SE strand logic for stranded protocols (#41)
+- Remove TSV header row from dupradar MultiQC curve file (#38)
+
+### Enhancements
+
+- Expose `--preseq-seed` and `--preseq-seg-len` CLI flags (#40)
+- Use mm:ss instead of hundreds of seconds for timing display
+
+### Docs & CI
+
+- Move from Netlify to GitHub Pages
+- Clean up some of the docs language (#33)
+- Pin GitHub Actions to commit SHAs (security)
+
+### Dependencies
+
+- Update dtolnay/rust-toolchain requirement (#34)
+- Update numerous docs npm dependencies
+
 ## [Version 0.1.0](https://github.com/seqeralabs/RustQC/releases/tag/v0.1.0)
 
 Initial release of RustQC — fast quality control tools for sequencing data, written in Rust.
