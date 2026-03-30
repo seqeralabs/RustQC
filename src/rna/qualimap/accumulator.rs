@@ -338,7 +338,17 @@ impl QualimapAccum {
 
         // Determine enclosing genes using cached results (with strand filtering)
         let is_reverse = flags & BAM_FREVERSE != 0;
-        let is_first_of_pair = flags & BAM_FREAD1 != 0;
+        // SE reads lack BAM_FREAD1 (0x40), but should be treated as "first of
+        // pair" for strand flip logic, matching Java qualimap's getReadIntervals():
+        //   boolean firstOfPair = true;
+        //   if (pairedRead) { firstOfPair = read.getFirstOfPairFlag(); ... }
+        //   else { if (protocol == STRAND_SPECIFIC_REVERSE) strand = !strand; }
+        // See: bitbucket.org/kokonech/qualimap ComputeCountsTask.java
+        let is_first_of_pair = if flags & BAM_FPAIRED != 0 {
+            flags & BAM_FREAD1 != 0
+        } else {
+            true
+        };
         let enclosing_genes =
             find_enclosing_genes_cached(&cached_hits, self.stranded, is_reverse, is_first_of_pair);
 
