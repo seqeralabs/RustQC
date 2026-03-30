@@ -1356,7 +1356,6 @@ pub fn write_mqc_curve(fit: &FitResult, dm: &DupMatrix, path: &std::path::Path) 
     let lmax = mx.log10();
     let n = 100;
 
-    writeln!(f, "RPK\tDuplication Rate (%)")?;
     for i in 0..=n {
         let lr = lmin + (lmax - lmin) * (i as f64) / (n as f64);
         let rpk = 10.0_f64.powf(lr);
