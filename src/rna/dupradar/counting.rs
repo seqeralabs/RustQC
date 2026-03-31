@@ -364,6 +364,10 @@ pub struct CountResult {
     pub biotype_names: Vec<String>,
     /// Total reads assigned at the biotype level
     pub fc_biotype_assigned: u64,
+    /// Reads overlapping genes of multiple different biotypes
+    pub fc_biotype_ambiguous: u64,
+    /// Reads with no biotype hit (no gene overlap, or genes lack biotype attribute)
+    pub fc_biotype_no_features: u64,
 
     // --- RSeQC results (collected during the same BAM pass) ---
     /// Accumulated RSeQC tool results, if RSeQC tools were enabled
@@ -607,6 +611,10 @@ struct ChromResult {
     biotype_reads: Vec<u64>,
     /// Total reads assigned at the biotype level (biotype-level fc_assigned)
     fc_biotype_assigned: u64,
+    /// Reads overlapping genes of multiple different biotypes
+    fc_biotype_ambiguous: u64,
+    /// Reads with no biotype hit (no gene overlap, or genes lack biotype attribute)
+    fc_biotype_no_features: u64,
 
     /// Qualimap RNA-Seq QC accumulator (if enabled).
     qualimap: Option<QualimapAccum>,
@@ -640,6 +648,8 @@ impl ChromResult {
             fc_chimera: 0,
             biotype_reads: vec![0u64; num_biotypes],
             fc_biotype_assigned: 0,
+            fc_biotype_ambiguous: 0,
+            fc_biotype_no_features: 0,
             qualimap: None,
         }
     }
@@ -722,6 +732,8 @@ impl ChromResult {
             self.biotype_reads[i] += count;
         }
         self.fc_biotype_assigned += other.fc_biotype_assigned;
+        self.fc_biotype_ambiguous += other.fc_biotype_ambiguous;
+        self.fc_biotype_no_features += other.fc_biotype_no_features;
         // Merge Qualimap accumulator
         if let Some(other_qm) = other.qualimap {
             if let Some(ref mut self_qm) = self.qualimap {
@@ -774,8 +786,13 @@ fn classify_read_fc_biotype(
     biotype_hits_buf: &mut Vec<u16>,
     result: &mut ChromResult,
 ) {
-    // Multi-mapped reads are excluded from biotype counting too
-    if is_multi || gene_hits.is_empty() {
+    // Multi-mapped reads are excluded from biotype counting (same as gene-level)
+    if is_multi {
+        return;
+    }
+    if gene_hits.is_empty() {
+        // No gene overlap → NoFeatures at biotype level too
+        result.fc_biotype_no_features += 1;
         return;
     }
     // Map gene_hits to unique biotype hits
@@ -796,9 +813,13 @@ fn classify_read_fc_biotype(
             result.biotype_reads[bidx] += 1;
             result.fc_biotype_assigned += 1;
         }
+    } else if biotype_hits_buf.is_empty() {
+        // Gene overlap but no biotype attribute → NoFeatures at biotype level
+        result.fc_biotype_no_features += 1;
+    } else {
+        // Multiple biotype hits → Ambiguous at biotype level
+        result.fc_biotype_ambiguous += 1;
     }
-    // Multiple biotype hits → Ambiguous at biotype level (not counted)
-    // Zero biotype hits (all unknown) → not counted
 }
 
 // ===================================================================
@@ -886,44 +907,14 @@ fn process_counting_record(
     }
 
     // --- Per-read featureCounts counting (independent of mate pairing) ---
-    // For paired-end data, apply -B (require both mates mapped) and -C
-    // (exclude chimeric fragments) filtering to match subread featureCounts
-    // behaviour when invoked with -B -C (as nf-core/rnaseq does).
-    //
-    // -B: skip reads whose mate is unmapped (BAM_FMUNMAP).
-    // -C: skip chimeric fragments. featureCounts defines chimeric as mates
-    //     on different chromosomes OR same chromosome but same strand
-    //     (improper orientation). A proper pair requires same chromosome
-    //     AND opposite strands.
-    let skip_fc = paired && {
-        if flags & BAM_FMUNMAP != 0 {
-            // -B: mate is unmapped, classify as singleton
-            result.fc_singleton += 1;
-            true
-        } else {
-            let same_chrom = record.tid() == record.mtid();
-            let opposite_strand =
-                (flags & BAM_FREVERSE != 0) != (flags & BAM_FMREVERSE != 0);
-            if !(same_chrom && opposite_strand) {
-                // -C: chimeric fragment (different chromosomes or same-strand)
-                result.fc_chimera += 1;
-                true
-            } else {
-                false
-            }
-        }
-    };
-
-    if !skip_fc {
-        classify_read_fc(is_multi, gene_hits, result);
-        classify_read_fc_biotype(
-            is_multi,
-            gene_hits,
-            gene_to_biotype,
-            biotype_hits_buf,
-            result,
-        );
-    }
+    classify_read_fc(is_multi, gene_hits, result);
+    classify_read_fc_biotype(
+        is_multi,
+        gene_hits,
+        gene_to_biotype,
+        biotype_hits_buf,
+        result,
+    );
 
     // --- Single-end counting ---
     if !paired {
@@ -1792,6 +1783,8 @@ pub fn count_reads(
         biotype_reads: merged.biotype_reads,
         biotype_names,
         fc_biotype_assigned: merged.fc_biotype_assigned,
+        fc_biotype_ambiguous: merged.fc_biotype_ambiguous,
+        fc_biotype_no_features: merged.fc_biotype_no_features,
         rseqc: merged_rseqc,
         qualimap: match (merged.qualimap, qualimap_index) {
             (Some(mut a), Some(idx)) => {

@@ -1123,7 +1123,12 @@ fn process_single_bam(
 
         if config.featurecounts.summary_file {
             let summary_path = fc_dir.join(format!("{}.featureCounts.tsv.summary", bam_stem));
-            rna::featurecounts::output::write_summary_file(&summary_path, &count_result, bam_path)?;
+            rna::featurecounts::output::write_summary_file(
+                &summary_path,
+                &count_result,
+                bam_path,
+                params.biotype_in_gtf,
+            )?;
             let p = summary_path.display().to_string();
             ui.output_detail(&format!("Summary: {p}"));
             written_outputs.push(("featureCounts summary".into(), p));
