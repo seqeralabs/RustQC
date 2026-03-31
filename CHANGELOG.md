@@ -1,5 +1,20 @@
 # RustQC Changelog
 
+## [Version 0.1.2](https://github.com/seqeralabs/RustQC/releases/tag/v0.1.2)
+
+### Bug fixes
+
+- Fix deterministic qualimap bias tie-breaking (#56)
+- Align junction motif extraction guard with qualimap (#52)
+- Use biotype-level stats in featureCounts summary (#51)
+- Add header/footer lines to junction_annotation summary (#54)
+- Use clean sample name in biotype_counts_rrna_mqc.tsv (#55)
+- Use (tid, start) key for SE reads in preseq (#44)
+
+### Enhancements
+
+- Add per-tool seed flags (`--dupradar-seed`, `--qualimap-seed`, `--tin-seed`) for reproducible results (#53)
+
 ## [Version 0.1.1](https://github.com/seqeralabs/RustQC/releases/tag/v0.1.1)
 
 ### Bug fixes
