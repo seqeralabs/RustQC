@@ -311,11 +311,7 @@ pub fn write_junction_plot_r(results: &JunctionResults, prefix: &str, path: &Pat
 /// Format matches RSeQC's `junction_annotation.log` output, including the
 /// header lines ("Reading reference gene model …", "Load BAM file …") and
 /// footer lines ("Create BED file …", "Create Interact file …").
-pub fn write_summary(
-    results: &JunctionResults,
-    path: &Path,
-    gtf_path: &str,
-) -> Result<()> {
+pub fn write_summary(results: &JunctionResults, path: &Path, gtf_path: &str) -> Result<()> {
     let mut f = std::fs::File::create(path)
         .with_context(|| format!("Failed to create file: {}", path.display()))?;
 
@@ -324,7 +320,11 @@ pub fn write_summary(
         .file_name()
         .unwrap_or_default()
         .to_string_lossy();
-    writeln!(f, "Reading reference gene model:  {}  ...  Done", gtf_filename)?;
+    writeln!(
+        f,
+        "Reading reference gene model:  {}  ...  Done",
+        gtf_filename
+    )?;
     writeln!(f, "Load BAM file ...  Done")?;
 
     // Blank line before the stats block
