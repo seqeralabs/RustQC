@@ -645,7 +645,6 @@ impl QualimapAccum {
                         self.counters.ambiguous += 2;
                     }
                 }
-
             } else {
                 self.mate_buffer.insert(key, info);
             }
