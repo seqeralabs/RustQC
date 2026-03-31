@@ -315,10 +315,8 @@ impl QualimapAccum {
         // even when the motif extraction guard fails. Match that behavior.
         self.counters.reads_at_junctions += n_op_count as u64;
 
-        // Count junction motifs immediately per-read, matching Java qualimap
-        // which processes each mate independently for junction/motif counting.
-        // Previously motifs were deferred to reconcile_pair(), which lost
-        // orphaned PE mates' motifs when flush_unpaired() cleared the buffer.
+        // Count junction motifs per-read, matching Java qualimap which
+        // calls collectJunctionInfo independently for each SAMRecord.
         for motif in &motifs {
             *self
                 .junction_motifs
@@ -428,8 +426,6 @@ impl QualimapAccum {
         self.add_per_block_coverage_cached(&r1.m_blocks, &r1.cached_hits, index);
         self.add_per_block_coverage_cached(&r2.m_blocks, &r2.cached_hits, index);
 
-        // Junction motifs already counted per-read in process_record().
-
         // Check for overlapping_exon using cached hits from both mates.
         // At most one increment per fragment: check r2 only if r1 didn't trigger.
         if !check_has_overlap_not_enclosed(&r1.cached_hits) {
@@ -480,8 +476,6 @@ impl QualimapAccum {
         index: &QualimapIndex,
         num_reads: u64,
     ) {
-        // Junction motifs already counted per-read in process_record().
-
         // Check for overlapping_exon using cached results.
         self.check_overlapping_exon_cached(&data.cached_hits);
 
@@ -652,7 +646,6 @@ impl QualimapAccum {
                     }
                 }
 
-                // Junction motifs already counted per-read in process_record().
             } else {
                 self.mate_buffer.insert(key, info);
             }
