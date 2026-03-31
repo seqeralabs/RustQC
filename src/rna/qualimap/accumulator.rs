@@ -315,7 +315,7 @@ impl QualimapAccum {
         // even when the motif extraction guard fails. Match that behavior.
         self.counters.reads_at_junctions += n_op_count as u64;
 
-        // Count junction motifs per-read, matching Java qualimap which
+        // Count junction motifs per-read, matching Qualimap which
         // calls collectJunctionInfo independently for each SAMRecord.
         for motif in &motifs {
             *self
@@ -347,7 +347,7 @@ impl QualimapAccum {
         // Determine enclosing genes using cached results (with strand filtering)
         let is_reverse = flags & BAM_FREVERSE != 0;
         // SE reads lack BAM_FREAD1 (0x40), but should be treated as "first of
-        // pair" for strand flip logic, matching Java qualimap's getReadIntervals():
+        // pair" for strand flip logic, matching Qualimap's getReadIntervals():
         //   boolean firstOfPair = true;
         //   if (pairedRead) { firstOfPair = read.getFirstOfPairFlag(); ... }
         //   else { if (protocol == STRAND_SPECIFIC_REVERSE) strand = !strand; }
@@ -788,7 +788,7 @@ fn extract_m_blocks_and_junctions(
 
                 // Extract donor motif: 2bp at end of preceding exon in read
                 // Extract acceptor motif: 2bp at start of next exon in read
-                // Guard matches Java qualimap: posInRead - 2 > 0, i.e. posInRead >= 3.
+                // Guard matches Qualimap: posInRead - 2 > 0, i.e. posInRead >= 3.
                 // This requires at least 3 query bases before the junction.
                 if seq_pos > 2 && seq_pos + 1 < seq_len {
                     let donor = [seq.encoded_base(seq_pos - 2), seq.encoded_base(seq_pos - 1)];
