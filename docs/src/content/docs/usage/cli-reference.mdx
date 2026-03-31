@@ -163,7 +163,7 @@ tool runs by default as part of `rustqc rna` and can be disabled via the
 | Option                    | Default | Description                                         |
 | ------------------------- | ------- | --------------------------------------------------- |
 | `--skip-tin`              | `false` | Skip the TIN (Transcript Integrity Number) analysis |
-| `--tin-seed <N>`          |         | Random seed for reproducible TIN results            |
+| `--tin-seed <N>`          | random  | Random seed for reproducible TIN results            |
 | `--skip-read-duplication` | `false` | Skip the read duplication analysis                  |
 
 #### infer_experiment
@@ -182,7 +182,7 @@ tool runs by default as part of `rustqc rna` and can be disabled via the
 
 | Option                                         | Default | Description                                       |
 | ---------------------------------------------- | ------- | ------------------------------------------------- |
-| `--junction-saturation-seed <N>`               |         | Random seed for reproducible sampling             |
+| `--junction-saturation-seed <N>`               | `42`    | Random seed for reproducible sampling             |
 | `--junction-saturation-min-coverage <N>`       | `1`     | Minimum reads for a junction to count as detected |
 | `--junction-saturation-percentile-floor <N>`   | `5`     | Sampling start percentage                         |
 | `--junction-saturation-percentile-ceiling <N>` | `100`   | Sampling end percentage                           |

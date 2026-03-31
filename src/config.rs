@@ -428,7 +428,7 @@ pub struct JunctionSaturationConfig {
     pub percentile_step: Option<u64>,
 
     /// Random seed for the observation shuffle in saturation sampling.
-    /// When set via `--seed`, replaces the default hard-coded seed (42).
+    /// When set via `--junction-saturation-seed`, replaces the default hard-coded seed (42).
     pub seed: Option<u64>,
 }
 
