@@ -74,6 +74,7 @@ rna:
     min_intron: 50
   junction_saturation:
     enabled: true
+    seed: 42
     min_coverage: 1
     percentile_floor: 5
     percentile_ceiling: 100
@@ -88,6 +89,7 @@ rna:
   # TIN (Transcript Integrity Number)
   tin:
     enabled: true
+    seed: 12345
     sample_size: 100
     min_coverage: 10
 
@@ -318,6 +320,7 @@ Requires annotation (`--gtf`). The `min_intron` can also be set via `--min-intro
 rna:
   junction_saturation:
     enabled: true
+    seed: 42 # Random seed for reproducible sampling (default: 42)
     min_coverage: 1 # Minimum read count to consider a junction (default: 1)
     percentile_floor: 5 # Sampling start percentage (default: 5)
     percentile_ceiling: 100 # Sampling end percentage (default: 100)
@@ -325,7 +328,7 @@ rna:
 ```
 
 Requires annotation (`--gtf`). These parameters can also be set via CLI flags:
-`--junction-saturation-min-coverage`,
+`--junction-saturation-seed`, `--junction-saturation-min-coverage`,
 `--junction-saturation-percentile-floor`, `--junction-saturation-percentile-ceiling`,
 `--junction-saturation-percentile-step`.
 
@@ -351,12 +354,14 @@ Requires annotation (`--gtf`). These parameters can also be set via CLI flags:
 rna:
   tin:
     enabled: true
+    seed: 12345 # Random seed for reproducible results (default: none, non-deterministic)
     sample_size: 100 # Equally-spaced positions to sample per transcript (default: 100)
     min_coverage: 10 # Minimum read-start count to compute TIN (default: 10)
 ```
 
 Requires annotation (`--gtf`). The TIN (Transcript Integrity Number)
 measures transcript integrity via Shannon entropy of read coverage uniformity.
+The `seed` can also be set via `--tin-seed`.
 
 > **CLI shortcut:** Use `--skip-tin` to disable without a config file.
 
