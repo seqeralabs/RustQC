@@ -1132,7 +1132,12 @@ fn process_single_bam(
 
         if config.featurecounts.summary_file {
             let summary_path = fc_dir.join(format!("{}.featureCounts.tsv.summary", bam_stem));
-            rna::featurecounts::output::write_summary_file(&summary_path, &count_result, bam_path)?;
+            rna::featurecounts::output::write_summary_file(
+                &summary_path,
+                &count_result,
+                bam_path,
+                params.biotype_in_gtf,
+            )?;
             let p = summary_path.display().to_string();
             ui.output_detail(&format!("Summary: {p}"));
             written_outputs.push(("featureCounts summary".into(), p));
@@ -1173,7 +1178,7 @@ fn process_single_bam(
                     &mqc_rrna_path,
                     &biotype_counts,
                     count_result.fc_biotype_assigned,
-                    bam_stem,
+                    &sample_name,
                 )?;
                 let p = mqc_rrna_path.display().to_string();
                 ui.output_detail(&format!("rRNA MultiQC: {p}"));
@@ -1669,7 +1674,7 @@ fn write_rseqc_outputs(
 
         let summary_path =
             rseqc_junc_annot_dir.join(format!("{}.junction_annotation.txt", bam_stem));
-        rna::rseqc::junction_annotation::write_summary(&results, &summary_path)?;
+        rna::rseqc::junction_annotation::write_summary(&results, &summary_path, params.gtf_path)?;
 
         // Only print the detailed junction summary in verbose mode
         if ui.is_verbose() {

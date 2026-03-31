@@ -66,8 +66,6 @@ struct MateData {
     m_blocks: Vec<(i32, i32)>,
     /// Genes whose exons enclose ALL M-blocks of this mate.
     enclosing_genes: HashSet<u32>,
-    /// Splice junction motifs extracted from N-operations.
-    junction_motifs: Vec<JunctionMotif>,
     /// Cached per-block tree query results for this mate.
     cached_hits: Vec<CachedBlockHits>,
     /// Whether this mate is on the reverse strand (flag 0x10).
@@ -317,6 +315,16 @@ impl QualimapAccum {
         // even when the motif extraction guard fails. Match that behavior.
         self.counters.reads_at_junctions += n_op_count as u64;
 
+        // Count junction motifs per-read, matching Qualimap which
+        // calls collectJunctionInfo independently for each SAMRecord.
+        for motif in &motifs {
+            *self
+                .junction_motifs
+                .counts
+                .entry((motif.donor, motif.acceptor))
+                .or_insert(0) += 1;
+        }
+
         // Classify junction events as known/partly known/novel using the
         // Qualimap junction location map (exon boundary positions ±1 tolerance).
         for &(pos_ref1, pos_ref2) in &junction_ref_positions {
@@ -339,7 +347,7 @@ impl QualimapAccum {
         // Determine enclosing genes using cached results (with strand filtering)
         let is_reverse = flags & BAM_FREVERSE != 0;
         // SE reads lack BAM_FREAD1 (0x40), but should be treated as "first of
-        // pair" for strand flip logic, matching Java qualimap's getReadIntervals():
+        // pair" for strand flip logic, matching Qualimap's getReadIntervals():
         //   boolean firstOfPair = true;
         //   if (pairedRead) { firstOfPair = read.getFirstOfPairFlag(); ... }
         //   else { if (protocol == STRAND_SPECIFIC_REVERSE) strand = !strand; }
@@ -364,7 +372,6 @@ impl QualimapAccum {
         let data = MateData {
             m_blocks,
             enclosing_genes,
-            junction_motifs: motifs,
             cached_hits,
             is_reverse,
             is_first_of_pair,
@@ -419,15 +426,6 @@ impl QualimapAccum {
         self.add_per_block_coverage_cached(&r1.m_blocks, &r1.cached_hits, index);
         self.add_per_block_coverage_cached(&r2.m_blocks, &r2.cached_hits, index);
 
-        // Collect junction motifs from both mates
-        for motif in r1.junction_motifs.iter().chain(r2.junction_motifs.iter()) {
-            *self
-                .junction_motifs
-                .counts
-                .entry((motif.donor, motif.acceptor))
-                .or_insert(0) += 1;
-        }
-
         // Check for overlapping_exon using cached hits from both mates.
         // At most one increment per fragment: check r2 only if r1 didn't trigger.
         if !check_has_overlap_not_enclosed(&r1.cached_hits) {
@@ -478,15 +476,6 @@ impl QualimapAccum {
         index: &QualimapIndex,
         num_reads: u64,
     ) {
-        // Record junction motifs
-        for motif in &data.junction_motifs {
-            *self
-                .junction_motifs
-                .counts
-                .entry((motif.donor, motif.acceptor))
-                .or_insert(0) += 1;
-        }
-
         // Check for overlapping_exon using cached results.
         self.check_overlapping_exon_cached(&data.cached_hits);
 
@@ -656,19 +645,6 @@ impl QualimapAccum {
                         self.counters.ambiguous += 2;
                     }
                 }
-
-                // Junction motifs from both mates
-                for motif in existing
-                    .junction_motifs
-                    .iter()
-                    .chain(info.junction_motifs.iter())
-                {
-                    *self
-                        .junction_motifs
-                        .counts
-                        .entry((motif.donor, motif.acceptor))
-                        .or_insert(0) += 1;
-                }
             } else {
                 self.mate_buffer.insert(key, info);
             }
@@ -812,7 +788,9 @@ fn extract_m_blocks_and_junctions(
 
                 // Extract donor motif: 2bp at end of preceding exon in read
                 // Extract acceptor motif: 2bp at start of next exon in read
-                if seq_pos >= 2 && seq_pos + 1 < seq_len {
+                // Guard matches Qualimap: posInRead - 2 > 0, i.e. posInRead >= 3.
+                // This requires at least 3 query bases before the junction.
+                if seq_pos > 2 && seq_pos + 1 < seq_len {
                     let donor = [seq.encoded_base(seq_pos - 2), seq.encoded_base(seq_pos - 1)];
                     let acceptor = [seq.encoded_base(seq_pos), seq.encoded_base(seq_pos + 1)];
 

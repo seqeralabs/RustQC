@@ -88,7 +88,17 @@ pub fn write_counts_file(
 ///
 /// Produces a tab-separated file with read assignment statistics.
 /// The status categories match featureCounts output.
-pub fn write_summary_file(path: &Path, counts: &CountResult, bam_path: &str) -> Result<()> {
+///
+/// When `biotype_in_gtf` is true, uses biotype-level assignment stats
+/// (matching `featureCounts -g gene_biotype -B -C` as nf-core/rnaseq runs).
+/// Reads overlapping multiple genes of the same biotype are Assigned at the
+/// biotype level, not Ambiguous. When false, uses gene-level stats.
+pub fn write_summary_file(
+    path: &Path,
+    counts: &CountResult,
+    bam_path: &str,
+    biotype_in_gtf: bool,
+) -> Result<()> {
     let file = std::fs::File::create(path)?;
     let mut w = std::io::BufWriter::new(file);
 
@@ -97,24 +107,38 @@ pub fn write_summary_file(path: &Path, counts: &CountResult, bam_path: &str) -> 
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| bam_path.to_string());
 
+    // When biotype counting is active, use biotype-level Assigned/Ambiguous/
+    // NoFeatures to match the nf-core pipeline's `featureCounts -g gene_biotype`
+    // summary. Otherwise fall back to gene-level stats.
+    let (assigned, ambiguous, no_features) = if biotype_in_gtf {
+        (
+            counts.fc_biotype_assigned,
+            counts.fc_biotype_ambiguous,
+            counts.fc_biotype_no_features,
+        )
+    } else {
+        (
+            counts.fc_assigned,
+            counts.fc_ambiguous,
+            counts.fc_no_features,
+        )
+    };
+
     writeln!(w, "Status\t{}", bam_name)?;
-    // Use per-read featureCounts stats (matching featureCounts -p behavior where
-    // each read is counted independently, not as fragments). The fc_* fields track
-    // per-read assignment with multi-mapping reads separated out.
-    writeln!(w, "Assigned\t{}", counts.fc_assigned)?;
+    writeln!(w, "Assigned\t{}", assigned)?;
     writeln!(w, "Unassigned_Unmapped\t{}", counts.fc_unmapped)?;
     writeln!(w, "Unassigned_Read_Type\t0")?;
     writeln!(w, "Unassigned_Singleton\t{}", counts.fc_singleton)?;
     writeln!(w, "Unassigned_MappingQuality\t0")?;
-    writeln!(w, "Unassigned_Chimera\t0")?;
+    writeln!(w, "Unassigned_Chimera\t{}", counts.fc_chimera)?;
     writeln!(w, "Unassigned_FragmentLength\t0")?;
     writeln!(w, "Unassigned_Duplicate\t0")?;
     writeln!(w, "Unassigned_MultiMapping\t{}", counts.fc_multimapping)?;
     writeln!(w, "Unassigned_Secondary\t0")?;
     writeln!(w, "Unassigned_NonSplit\t0")?;
-    writeln!(w, "Unassigned_NoFeatures\t{}", counts.fc_no_features)?;
+    writeln!(w, "Unassigned_NoFeatures\t{}", no_features)?;
     writeln!(w, "Unassigned_Overlapping_Length\t0")?;
-    writeln!(w, "Unassigned_Ambiguity\t{}", counts.fc_ambiguous)?;
+    writeln!(w, "Unassigned_Ambiguity\t{}", ambiguous)?;
 
     Ok(())
 }
@@ -323,9 +347,12 @@ mod tests {
             fc_multimapping: 0,
             fc_unmapped: 0,
             fc_singleton: 0,
+            fc_chimera: 0,
             biotype_reads: vec![150, 25],
             biotype_names: vec!["protein_coding".to_string(), "rRNA".to_string()],
             fc_biotype_assigned: 175,
+            fc_biotype_ambiguous: 0,
+            fc_biotype_no_features: 10,
             rseqc: None,
             qualimap: None,
         };

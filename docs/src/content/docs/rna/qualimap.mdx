@@ -344,6 +344,14 @@ Both tools were run on the same BAM file with matching parameters
 (`--stranded reverse` / `strand-specific-reverse`, same GENCODE GTF). Results below
 are from the AWS benchmark run (2026-03-09).
 
+<Aside type="tip" title="Deterministic output">
+Qualimap uses `HashMap` internally, whose iteration order
+is not guaranteed across JVM versions. This means bias metrics (especially
+5'-3' bias) can vary slightly between runs or environments in the Java
+version. RustQC avoids this by using a stable tie-breaking rule when
+multiple transcripts of the same gene have identical mean coverage.
+</Aside>
+
 <details>
 <summary>Small dataset (~52K reads, chr6)</summary>
 

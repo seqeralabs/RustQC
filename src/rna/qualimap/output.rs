@@ -173,9 +173,10 @@ fn compute_bias(entries: &[TranscriptCoverageEntry]) -> (f64, f64, f64) {
     // Step 1: Pick best transcript per gene (highest mean coverage).
     // Qualimap selects one transcript per gene, then filters by length >= 500
     // and mean >= 1.0, then takes the top 1000 by mean coverage.
-    // Use flat insertion order (not java_ordered_indices which is for coverage
-    // profile TreeMap output).  For ties in mean coverage, the last entry in
-    // insertion order wins, matching qualimap's HashMap iteration behavior.
+    // Java qualimap uses strict > with HashMap iteration order (effectively
+    // non-deterministic across JVM versions). We use >= so that when two
+    // transcripts tie, the later one in GTF order wins. This is deterministic
+    // within RustQC and closer to HashMap's overwrite-on-put semantics.
     let mut best_per_gene: HashMap<u32, &TranscriptCoverageEntry> = HashMap::new();
     for entry in entries {
         if entry.coverage.len() < MIN_TRANSCRIPT_LENGTH_FOR_BIAS || entry.mean_coverage < 1.0 {
@@ -184,7 +185,7 @@ fn compute_bias(entries: &[TranscriptCoverageEntry]) -> (f64, f64, f64) {
         let gene = entry.gene_idx;
         let dominated = match best_per_gene.get(&gene) {
             None => true,
-            Some(best) => entry.mean_coverage > best.mean_coverage,
+            Some(best) => entry.mean_coverage >= best.mean_coverage,
         };
         if dominated {
             best_per_gene.insert(gene, entry);

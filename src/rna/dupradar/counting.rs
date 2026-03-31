@@ -352,6 +352,8 @@ pub struct CountResult {
     pub fc_unmapped: u64,
     /// Per-read: singleton reads (unmatched mates after cross-chromosome reconciliation)
     pub fc_singleton: u64,
+    /// Per-read: chimeric reads (mates on different chromosomes)
+    pub fc_chimera: u64,
 
     // --- featureCounts biotype-level per-read counts ---
     // Matches `featureCounts -g gene_biotype` behaviour where exons are grouped
@@ -362,6 +364,10 @@ pub struct CountResult {
     pub biotype_names: Vec<String>,
     /// Total reads assigned at the biotype level
     pub fc_biotype_assigned: u64,
+    /// Reads overlapping genes of multiple different biotypes
+    pub fc_biotype_ambiguous: u64,
+    /// Reads with no biotype hit (no gene overlap, or genes lack biotype attribute)
+    pub fc_biotype_no_features: u64,
 
     // --- RSeQC results (collected during the same BAM pass) ---
     /// Accumulated RSeQC tool results, if RSeQC tools were enabled
@@ -595,6 +601,8 @@ struct ChromResult {
     fc_unmapped: u64,
     /// Per-read: singleton reads (mate unmapped or missing)
     fc_singleton: u64,
+    /// Per-read: chimeric reads (mates on different chromosomes)
+    fc_chimera: u64,
 
     // --- featureCounts biotype-level per-read statistics ---
     // Matches `featureCounts -g gene_biotype` behaviour: exons are grouped
@@ -603,6 +611,10 @@ struct ChromResult {
     biotype_reads: Vec<u64>,
     /// Total reads assigned at the biotype level (biotype-level fc_assigned)
     fc_biotype_assigned: u64,
+    /// Reads overlapping genes of multiple different biotypes
+    fc_biotype_ambiguous: u64,
+    /// Reads with no biotype hit (no gene overlap, or genes lack biotype attribute)
+    fc_biotype_no_features: u64,
 
     /// Qualimap RNA-Seq QC accumulator (if enabled).
     qualimap: Option<QualimapAccum>,
@@ -633,8 +645,11 @@ impl ChromResult {
             fc_multimapping: 0,
             fc_unmapped: 0,
             fc_singleton: 0,
+            fc_chimera: 0,
             biotype_reads: vec![0u64; num_biotypes],
             fc_biotype_assigned: 0,
+            fc_biotype_ambiguous: 0,
+            fc_biotype_no_features: 0,
             qualimap: None,
         }
     }
@@ -711,11 +726,14 @@ impl ChromResult {
         self.fc_multimapping += other.fc_multimapping;
         self.fc_unmapped += other.fc_unmapped;
         self.fc_singleton += other.fc_singleton;
+        self.fc_chimera += other.fc_chimera;
         // Merge biotype-level counts
         for (i, &count) in other.biotype_reads.iter().enumerate() {
             self.biotype_reads[i] += count;
         }
         self.fc_biotype_assigned += other.fc_biotype_assigned;
+        self.fc_biotype_ambiguous += other.fc_biotype_ambiguous;
+        self.fc_biotype_no_features += other.fc_biotype_no_features;
         // Merge Qualimap accumulator
         if let Some(other_qm) = other.qualimap {
             if let Some(ref mut self_qm) = self.qualimap {
@@ -759,6 +777,12 @@ fn classify_read_fc(is_multi: bool, gene_hits: &[GeneIdx], result: &mut ChromRes
 /// overlapping two different genes of the SAME biotype is therefore Assigned
 /// (not ambiguous), because it maps to a single biotype meta-feature.
 ///
+/// Genes lacking the biotype attribute are each treated as their own distinct
+/// meta-feature, matching featureCounts' placeholder behaviour (LINE_XXXXXXX).
+/// This means a read overlapping one known-biotype gene and one unknown-biotype
+/// gene is Ambiguous (two distinct meta-features), and a read overlapping two
+/// unknown-biotype genes is also Ambiguous (each gene is a separate placeholder).
+///
 /// `gene_to_biotype` maps each gene_idx to a biotype_idx (u16::MAX = unknown).
 /// `biotype_hits_buf` is a reusable scratch buffer to avoid per-call allocation.
 fn classify_read_fc_biotype(
@@ -768,31 +792,50 @@ fn classify_read_fc_biotype(
     biotype_hits_buf: &mut Vec<u16>,
     result: &mut ChromResult,
 ) {
-    // Multi-mapped reads are excluded from biotype counting too
-    if is_multi || gene_hits.is_empty() {
+    // Multi-mapped reads are excluded from biotype counting (same as gene-level)
+    if is_multi {
         return;
     }
-    // Map gene_hits to unique biotype hits
+    if gene_hits.is_empty() {
+        // No gene overlap → NoFeatures at biotype level too
+        result.fc_biotype_no_features += 1;
+        return;
+    }
+    // Map gene_hits to unique biotype hits, counting genes without the
+    // attribute separately. featureCounts gives each such gene its own
+    // placeholder meta-feature, so each counts as a distinct hit.
     biotype_hits_buf.clear();
+    let mut unknown_gene_count: u32 = 0;
     for &gidx in gene_hits {
         let bidx = gene_to_biotype[gidx as usize];
         if bidx != u16::MAX {
             biotype_hits_buf.push(bidx);
+        } else {
+            unknown_gene_count += 1;
         }
     }
     biotype_hits_buf.sort_unstable();
     biotype_hits_buf.dedup();
 
-    if biotype_hits_buf.len() == 1 {
-        // Single biotype hit → Assigned at biotype level
-        let bidx = biotype_hits_buf[0] as usize;
-        if bidx < result.biotype_reads.len() {
-            result.biotype_reads[bidx] += 1;
+    let total_meta_features = biotype_hits_buf.len() as u32 + unknown_gene_count;
+
+    if total_meta_features == 1 {
+        if let Some(&bidx) = biotype_hits_buf.first() {
+            // Single known biotype → Assigned and tracked in biotype counts
+            let idx = bidx as usize;
+            if idx < result.biotype_reads.len() {
+                result.biotype_reads[idx] += 1;
+                result.fc_biotype_assigned += 1;
+            }
+        } else {
+            // Single unknown-biotype gene → Assigned (to its placeholder
+            // meta-feature), but not tracked in named biotype counts
             result.fc_biotype_assigned += 1;
         }
+    } else {
+        // Multiple distinct meta-features → Ambiguous at biotype level
+        result.fc_biotype_ambiguous += 1;
     }
-    // Multiple biotype hits → Ambiguous at biotype level (not counted)
-    // Zero biotype hits (all unknown) → not counted
 }
 
 // ===================================================================
@@ -1752,9 +1795,12 @@ pub fn count_reads(
         fc_multimapping: merged.fc_multimapping,
         fc_unmapped: merged.fc_unmapped,
         fc_singleton: merged.fc_singleton,
+        fc_chimera: merged.fc_chimera,
         biotype_reads: merged.biotype_reads,
         biotype_names,
         fc_biotype_assigned: merged.fc_biotype_assigned,
+        fc_biotype_ambiguous: merged.fc_biotype_ambiguous,
+        fc_biotype_no_features: merged.fc_biotype_no_features,
         rseqc: merged_rseqc,
         qualimap: match (merged.qualimap, qualimap_index) {
             (Some(mut a), Some(idx)) => {
