@@ -269,10 +269,14 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         config.inner_distance.step = Some(val);
     }
 
-    // Apply global seed to all tools that use randomness
-    if let Some(seed) = args.seed {
+    // Apply per-tool seed overrides from CLI flags
+    if let Some(seed) = args.preseq_seed {
         config.preseq.seed = seed;
+    }
+    if let Some(seed) = args.tin_seed {
         config.tin.seed = Some(seed);
+    }
+    if let Some(seed) = args.junction_saturation_seed {
         config.junction_saturation.seed = Some(seed);
     }
 

@@ -157,10 +157,6 @@ pub struct RnaArgs {
     #[arg(short = 'v', long, conflicts_with = "quiet", help_heading = "General")]
     pub verbose: bool,
 
-    /// Random seed for reproducible results
-    #[arg(long, value_name = "N", help_heading = "General")]
-    pub seed: Option<u64>,
-
     // ── Tool parameters ─────────────────────────────────────────────────
     /// infer_experiment: sample size [default: 200000]
     #[arg(
@@ -177,6 +173,14 @@ pub struct RnaArgs {
         help_heading = "Tool parameters"
     )]
     pub min_intron: Option<u64>,
+
+    /// junction_saturation: random seed for reproducible results
+    #[arg(
+        long = "junction-saturation-seed",
+        value_name = "N",
+        help_heading = "Tool parameters"
+    )]
+    pub junction_saturation_seed: Option<u64>,
 
     /// junction_saturation: min coverage [default: 1]
     #[arg(
@@ -245,6 +249,10 @@ pub struct RnaArgs {
     )]
     pub inner_distance_step: Option<i64>,
 
+    /// TIN: random seed for reproducible results
+    #[arg(long = "tin-seed", value_name = "N", help_heading = "Tool parameters")]
+    pub tin_seed: Option<u64>,
+
     /// Skip TIN analysis
     #[arg(long, default_value_t = false, help_heading = "Tool parameters")]
     pub skip_tin: bool,
@@ -256,6 +264,14 @@ pub struct RnaArgs {
     /// Skip preseq library complexity analysis
     #[arg(long, default_value_t = false, help_heading = "Tool parameters")]
     pub skip_preseq: bool,
+
+    /// preseq: random seed for bootstrap CIs
+    #[arg(
+        long = "preseq-seed",
+        value_name = "N",
+        help_heading = "Tool parameters"
+    )]
+    pub preseq_seed: Option<u64>,
 
     /// preseq: max extrapolation depth
     #[arg(
@@ -452,19 +468,25 @@ mod tests {
     }
 
     #[test]
-    fn test_rna_global_seed() {
+    fn test_rna_tool_seeds() {
         let cli = Cli::parse_from([
             "rustqc",
             "rna",
             "test.bam",
             "--gtf",
             "genes.gtf",
-            "--seed",
-            "42",
+            "--preseq-seed",
+            "1",
+            "--tin-seed",
+            "2",
+            "--junction-saturation-seed",
+            "3",
         ]);
         match cli.command {
             Commands::Rna(args) => {
-                assert_eq!(args.seed, Some(42));
+                assert_eq!(args.preseq_seed, Some(1));
+                assert_eq!(args.tin_seed, Some(2));
+                assert_eq!(args.junction_saturation_seed, Some(3));
             }
             #[allow(unreachable_patterns)]
             _ => panic!("Expected Rna subcommand"),
