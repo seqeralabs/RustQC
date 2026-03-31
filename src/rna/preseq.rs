@@ -86,15 +86,18 @@ struct MateInfo {
 ///    `(chrom, min_start, max_end)`. If the merged length exceeds
 ///    [`MAX_SEGMENT_LENGTH`] (5000), or if mates are on different chromosomes,
 ///    both reads are counted as individual fragments.
-/// 3. Unpaired reads are counted as individual fragments.
-/// 4. Duplicate fragments are identified by identical `(tid, start, end)` tuples.
+/// 3. Unpaired reads are counted as individual fragments, keyed by
+///    `(tid, start)` only (matching preseq's SE `aln_pos` struct).
+/// 4. Paired fragments are identified by `(tid, start, end)` tuples;
+///    unpaired fragments by `(tid, start)` only.
 ///
 /// Thread-safe via per-chromosome accumulators that are merged after parallel
 /// processing. During merge, dangling mates from different chromosomes are
 /// matched and merged or promoted to individual fragments.
 #[derive(Debug)]
 pub struct PreseqAccum {
-    /// Maps fragment key `(tid, start, end)` hash to observation count.
+    /// Maps fragment key hash to observation count.
+    /// PE keys use `(tid, start, end)`; SE keys use `(tid, start)` only.
     fragment_counts: HashMap<u64, u32>,
     /// Total number of fragments (merged pairs + unpaired) counted so far.
     pub total_fragments: u64,
@@ -127,15 +130,20 @@ impl PreseqAccum {
 
     /// Process a BAM record for library complexity estimation.
     ///
-    /// Matches preseq v3.2.0's `load_counts_BAM_pe` behavior:
-    /// - Only primary, mapped reads are counted.
-    /// - Paired reads are merged by read name into genomic intervals.
-    /// - Unpaired reads are counted as individual fragments.
+    /// Matches preseq v3.2.0 behavior:
+    /// - Only primary, mapped reads are counted (secondary/supplementary
+    ///   skipped). Note: preseq's C++ source appears to only check
+    ///   `tid == -1`, but empirically it processes only primary reads
+    ///   (47,713 for our SE test BAM, not 48,977 total mapped).
+    /// - Paired reads are merged by read name into genomic intervals
+    ///   (keyed by `(tid, start, end)`, matching `load_counts_BAM_pe`).
+    /// - Unpaired reads are keyed by `(tid, start)` only, matching
+    ///   `load_counts_BAM_se` / `aln_pos`.
     ///
     /// # Arguments
     /// * `record` - The BAM record to process.
     pub fn process_read(&mut self, record: &bam::Record) {
-        // Filter: primary + mapped only (matches preseq v3.2.0 `is_primary && is_mapped`)
+        // Filter: primary + mapped only (matches preseq v3.2.0 empirical behavior).
         if record.tid() < 0 {
             return;
         }
@@ -187,16 +195,31 @@ impl PreseqAccum {
                 self.dangling_mates.insert(qname_hash, info);
             }
         } else {
-            // Unpaired read — count as individual fragment
-            self.add_fragment(tid, start, end);
+            // Unpaired read — count as individual fragment using SE key (tid, start)
+            // only, matching preseq v3.2.0's `load_counts_BAM_se` / `aln_pos`.
+            self.add_fragment_se(tid, start);
             self.n_unpaired += 1;
         }
     }
 
-    /// Add a fragment to the counting table.
+    /// Add a PE fragment (merged pair) to the counting table.
+    ///
+    /// Uses `(tid, start, end)` as the fragment key, matching preseq v3.2.0's
+    /// PE mode where merged genomic intervals define fragment identity.
     #[cfg_attr(test, allow(dead_code))]
     pub(crate) fn add_fragment(&mut self, tid: i32, start: i64, end: i64) {
         let key = fragment_hash(tid, start, end);
+        *self.fragment_counts.entry(key).or_insert(0) += 1;
+        self.total_fragments += 1;
+    }
+
+    /// Add an SE (unpaired) fragment to the counting table.
+    ///
+    /// Uses `(tid, start)` only as the fragment key, matching preseq v3.2.0's
+    /// SE mode (`aln_pos`) where duplicate identity is determined by chromosome
+    /// and start position alone, ignoring CIGAR-derived end position.
+    fn add_fragment_se(&mut self, tid: i32, start: i64) {
+        let key = fragment_hash_se(tid, start);
         *self.fragment_counts.entry(key).or_insert(0) += 1;
         self.total_fragments += 1;
     }
@@ -287,16 +310,28 @@ impl PreseqAccum {
     }
 }
 
-/// Compute a hash for a fragment key `(tid, start, end)`.
+/// Compute a hash for a PE fragment key `(tid, start, end)`.
 ///
-/// Uses FNV-1a hashing for speed with small keys. This matches preseq v3.2.0's
-/// GenomicRegion comparison: two fragments are duplicates iff they have the
-/// same chromosome, start, and end positions.
+/// Uses FNV-1a hashing for speed with small keys. Used for merged PE pairs
+/// where the fragment interval `(chrom, min_start, max_end)` defines identity,
+/// matching preseq v3.2.0's `load_counts_BAM_pe` behavior.
 fn fragment_hash(tid: i32, start: i64, end: i64) -> u64 {
     let mut buf = [0u8; 24];
     buf[0..8].copy_from_slice(&(tid as u64).to_le_bytes());
     buf[8..16].copy_from_slice(&(start as u64).to_le_bytes());
     buf[16..24].copy_from_slice(&(end as u64).to_le_bytes());
+    crate::io::fnv1a(&buf)
+}
+
+/// Compute a hash for an SE fragment key `(tid, start)`.
+///
+/// Matches preseq v3.2.0's `load_counts_BAM_se` / `aln_pos` behavior: two
+/// reads are duplicates iff they share the same chromosome and start position,
+/// regardless of CIGAR-derived end position.
+fn fragment_hash_se(tid: i32, start: i64) -> u64 {
+    let mut buf = [0u8; 16];
+    buf[0..8].copy_from_slice(&(tid as u64).to_le_bytes());
+    buf[8..16].copy_from_slice(&(start as u64).to_le_bytes());
     crate::io::fnv1a(&buf)
 }
 
@@ -1312,6 +1347,42 @@ mod tests {
         // Different inputs should (almost certainly) give different hashes
         let h3 = fragment_hash(1, 100, 300);
         assert_ne!(h1, h3);
+    }
+
+    #[test]
+    fn test_se_fragment_hash_ignores_end() {
+        // SE hash uses (tid, start) only — reads at the same start but
+        // different ends must hash identically, matching preseq's aln_pos.
+        let h1 = fragment_hash_se(1, 200);
+        let h2 = fragment_hash_se(1, 200);
+        assert_eq!(h1, h2);
+
+        // Different start → different hash
+        let h3 = fragment_hash_se(1, 300);
+        assert_ne!(h1, h3);
+    }
+
+    #[test]
+    fn test_se_fragments_collapse_same_start_different_end() {
+        // In SE mode, reads at the same (tid, start) but different CIGAR-derived
+        // ends should be counted as duplicates, matching preseq lc_extrap
+        // without -pe.
+        let mut accum = PreseqAccum::new(DEFAULT_MAX_SEGMENT_LENGTH);
+
+        // Three reads at chr0:100 with different end positions
+        accum.add_fragment_se(0, 100); // read ending at 200
+        accum.add_fragment_se(0, 100); // read ending at 250 (same key)
+        accum.add_fragment_se(0, 100); // read ending at 300 (same key)
+
+        // One read at a different start
+        accum.add_fragment_se(0, 200);
+
+        assert_eq!(accum.total_fragments, 4);
+        assert_eq!(accum.n_distinct(), 2, "SE: same start = same fragment");
+
+        let hist = accum.into_histogram();
+        assert!(hist.contains(&(1, 1)), "One singleton");
+        assert!(hist.contains(&(3, 1)), "One triplet");
     }
 
     #[test]
