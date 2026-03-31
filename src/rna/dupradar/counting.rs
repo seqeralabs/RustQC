@@ -777,6 +777,12 @@ fn classify_read_fc(is_multi: bool, gene_hits: &[GeneIdx], result: &mut ChromRes
 /// overlapping two different genes of the SAME biotype is therefore Assigned
 /// (not ambiguous), because it maps to a single biotype meta-feature.
 ///
+/// Genes lacking the biotype attribute are each treated as their own distinct
+/// meta-feature, matching featureCounts' placeholder behaviour (LINE_XXXXXXX).
+/// This means a read overlapping one known-biotype gene and one unknown-biotype
+/// gene is Ambiguous (two distinct meta-features), and a read overlapping two
+/// unknown-biotype genes is also Ambiguous (each gene is a separate placeholder).
+///
 /// `gene_to_biotype` maps each gene_idx to a biotype_idx (u16::MAX = unknown).
 /// `biotype_hits_buf` is a reusable scratch buffer to avoid per-call allocation.
 fn classify_read_fc_biotype(
@@ -795,29 +801,39 @@ fn classify_read_fc_biotype(
         result.fc_biotype_no_features += 1;
         return;
     }
-    // Map gene_hits to unique biotype hits
+    // Map gene_hits to unique biotype hits, counting genes without the
+    // attribute separately. featureCounts gives each such gene its own
+    // placeholder meta-feature, so each counts as a distinct hit.
     biotype_hits_buf.clear();
+    let mut unknown_gene_count: u32 = 0;
     for &gidx in gene_hits {
         let bidx = gene_to_biotype[gidx as usize];
         if bidx != u16::MAX {
             biotype_hits_buf.push(bidx);
+        } else {
+            unknown_gene_count += 1;
         }
     }
     biotype_hits_buf.sort_unstable();
     biotype_hits_buf.dedup();
 
-    if biotype_hits_buf.len() == 1 {
-        // Single biotype hit → Assigned at biotype level
-        let bidx = biotype_hits_buf[0] as usize;
-        if bidx < result.biotype_reads.len() {
-            result.biotype_reads[bidx] += 1;
+    let total_meta_features = biotype_hits_buf.len() as u32 + unknown_gene_count;
+
+    if total_meta_features == 1 {
+        if let Some(&bidx) = biotype_hits_buf.first() {
+            // Single known biotype → Assigned and tracked in biotype counts
+            let idx = bidx as usize;
+            if idx < result.biotype_reads.len() {
+                result.biotype_reads[idx] += 1;
+                result.fc_biotype_assigned += 1;
+            }
+        } else {
+            // Single unknown-biotype gene → Assigned (to its placeholder
+            // meta-feature), but not tracked in named biotype counts
             result.fc_biotype_assigned += 1;
         }
-    } else if biotype_hits_buf.is_empty() {
-        // Gene overlap but no biotype attribute → NoFeatures at biotype level
-        result.fc_biotype_no_features += 1;
     } else {
-        // Multiple biotype hits → Ambiguous at biotype level
+        // Multiple distinct meta-features → Ambiguous at biotype level
         result.fc_biotype_ambiguous += 1;
     }
 }
