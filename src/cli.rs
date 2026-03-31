@@ -157,6 +157,10 @@ pub struct RnaArgs {
     #[arg(short = 'v', long, conflicts_with = "quiet", help_heading = "General")]
     pub verbose: bool,
 
+    /// Random seed for reproducible results
+    #[arg(long, value_name = "N", help_heading = "General")]
+    pub seed: Option<u64>,
+
     // ── Tool parameters ─────────────────────────────────────────────────
     /// infer_experiment: sample size [default: 200000]
     #[arg(
@@ -276,14 +280,6 @@ pub struct RnaArgs {
         help_heading = "Tool parameters"
     )]
     pub preseq_n_bootstraps: Option<u32>,
-
-    /// preseq: random seed for bootstrap CIs
-    #[arg(
-        long = "preseq-seed",
-        value_name = "N",
-        help_heading = "Tool parameters"
-    )]
-    pub preseq_seed: Option<u64>,
 
     /// preseq: max segment length for PE merging
     #[arg(
@@ -439,8 +435,6 @@ mod tests {
             "500000",
             "--preseq-n-bootstraps",
             "200",
-            "--preseq-seed",
-            "1",
             "--preseq-seg-len",
             "100000000",
         ]);
@@ -450,8 +444,27 @@ mod tests {
                 assert_eq!(args.preseq_max_extrap, Some(5_000_000_000.0));
                 assert_eq!(args.preseq_step_size, Some(500_000.0));
                 assert_eq!(args.preseq_n_bootstraps, Some(200));
-                assert_eq!(args.preseq_seed, Some(1));
                 assert_eq!(args.preseq_seg_len, Some(100_000_000));
+            }
+            #[allow(unreachable_patterns)]
+            _ => panic!("Expected Rna subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_rna_global_seed() {
+        let cli = Cli::parse_from([
+            "rustqc",
+            "rna",
+            "test.bam",
+            "--gtf",
+            "genes.gtf",
+            "--seed",
+            "42",
+        ]);
+        match cli.command {
+            Commands::Rna(args) => {
+                assert_eq!(args.seed, Some(42));
             }
             #[allow(unreachable_patterns)]
             _ => panic!("Expected Rna subcommand"),

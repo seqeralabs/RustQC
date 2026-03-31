@@ -6,14 +6,45 @@
 
 use rust_htslib::bam;
 use std::collections::{HashMap, HashSet};
+use std::hash::{BuildHasher, Hasher};
 use std::io::Write;
 use std::path::Path;
 
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
 use log::debug;
+use rand::Rng;
 
 use crate::gtf::Gene;
+
+// ===================================================================
+// Deterministic hash state for reproducible TIN
+// ===================================================================
+
+/// A [`BuildHasher`] that produces deterministic hashes seeded from a `u64`.
+///
+/// When `--tin-seed` is provided, the seed is used directly, making the
+/// [`HashSet`] layout (and therefore threshold-crossing behaviour during
+/// parallel accumulation) identical across runs. Without a seed, a random
+/// value is drawn so the default non-deterministic behaviour is preserved.
+#[derive(Clone, Debug)]
+pub(crate) struct TinHashState(u64);
+
+impl BuildHasher for TinHashState {
+    type Hasher = std::collections::hash_map::DefaultHasher;
+
+    fn build_hasher(&self) -> Self::Hasher {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        h.write_u64(self.0);
+        h
+    }
+}
+
+impl TinHashState {
+    fn new(seed: Option<u64>) -> Self {
+        TinHashState(seed.unwrap_or_else(|| rand::rng().next_u64()))
+    }
+}
 
 // ===================================================================
 // Data structures
@@ -300,7 +331,7 @@ pub struct TinAccum {
     /// Per-transcript unique read start positions, capped at `min_cov + 1`.
     /// Once exceeded, the set is drained and `exceeded_threshold[tx_idx]`
     /// is set instead.
-    pub unique_starts: Vec<HashSet<u64>>,
+    pub unique_starts: Vec<HashSet<u64, TinHashState>>,
     /// Per-transcript flag: true once unique start count exceeded `min_cov`.
     /// Avoids further HashSet inserts for high-coverage transcripts.
     pub exceeded_threshold: Vec<bool>,
@@ -313,6 +344,8 @@ pub struct TinAccum {
     pub mapq_cut: u8,
     /// Minimum coverage threshold (unique read start positions).
     pub min_cov: u32,
+    /// Hash state used for unique_starts sets (deterministic when seeded).
+    hash_state: TinHashState,
     /// Reusable scratch buffer for aligned blocks, avoids per-read allocation.
     blocks_buf: Vec<(u64, u64)>,
     /// Last chromosome seen -- used to detect chromosome transitions and
@@ -330,10 +363,16 @@ pub struct TinAccum {
 
 impl TinAccum {
     /// Create a new TIN accumulator for the given index.
-    pub fn new(index: &TinIndex, mapq_cut: u8, min_cov: u32) -> Self {
+    ///
+    /// When `seed` is `Some(n)`, the internal hash sets use a deterministic
+    /// hash function seeded from `n`, making TIN results reproducible across
+    /// runs. When `None`, the default random hash state is used.
+    pub fn new(index: &TinIndex, mapq_cut: u8, min_cov: u32, seed: Option<u64>) -> Self {
         let n_transcripts = index.transcripts.len();
         let mut coverage = Vec::with_capacity(n_transcripts);
         let mut n_samples = Vec::with_capacity(n_transcripts);
+
+        let hash_state = TinHashState::new(seed);
 
         for tx in &index.transcripts {
             let n = tx.sampled_positions.len();
@@ -341,13 +380,18 @@ impl TinAccum {
             n_samples.push(n as u32);
         }
 
+        let unique_starts = (0..n_transcripts)
+            .map(|_| HashSet::with_hasher(hash_state.clone()))
+            .collect();
+
         TinAccum {
             coverage,
-            unique_starts: vec![HashSet::new(); n_transcripts],
+            unique_starts,
             exceeded_threshold: vec![false; n_transcripts],
             n_samples,
             mapq_cut,
             min_cov,
+            hash_state,
             blocks_buf: Vec::with_capacity(8),
             cursor_chrom: String::new(),
             cursor_span: 0,
@@ -426,7 +470,7 @@ impl TinAccum {
                     if self.unique_starts[idx].len() > self.min_cov as usize {
                         self.exceeded_threshold[idx] = true;
                         // Free the HashSet memory; the flag is sufficient.
-                        self.unique_starts[idx] = HashSet::new();
+                        self.unique_starts[idx] = HashSet::with_hasher(self.hash_state.clone());
                     }
                 }
             }
@@ -484,12 +528,12 @@ impl TinAccum {
             // result also exceeds it -- no need to union the sets.
             if self.exceeded_threshold[i] || other.exceeded_threshold[i] {
                 self.exceeded_threshold[i] = true;
-                self.unique_starts[i] = HashSet::new();
+                self.unique_starts[i] = HashSet::with_hasher(self.hash_state.clone());
             } else {
                 self.unique_starts[i].extend(other.unique_starts[i].iter());
                 if self.unique_starts[i].len() > self.min_cov as usize {
                     self.exceeded_threshold[i] = true;
-                    self.unique_starts[i] = HashSet::new();
+                    self.unique_starts[i] = HashSet::with_hasher(self.hash_state.clone());
                 }
             }
         }

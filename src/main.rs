@@ -233,9 +233,6 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
     if let Some(val) = args.preseq_n_bootstraps {
         config.preseq.n_bootstraps = val;
     }
-    if let Some(val) = args.preseq_seed {
-        config.preseq.seed = val;
-    }
     if let Some(val) = args.preseq_seg_len {
         config.preseq.max_segment_length = val;
     }
@@ -270,6 +267,13 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
     }
     if let Some(val) = args.inner_distance_step {
         config.inner_distance.step = Some(val);
+    }
+
+    // Apply global seed to all tools that use randomness
+    if let Some(seed) = args.seed {
+        config.preseq.seed = seed;
+        config.tin.seed = Some(seed);
+        config.junction_saturation.seed = Some(seed);
     }
 
     // Warn early if CRAM input is likely but no reference is provided
@@ -564,6 +568,7 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
             .junction_saturation
             .percentile_step
             .unwrap_or(5),
+        junction_saturation_seed: config.junction_saturation.seed.unwrap_or(42),
         inner_distance_sample_size: config.inner_distance.sample_size.unwrap_or(1_000_000),
         inner_distance_lower_bound: config.inner_distance.lower_bound.unwrap_or(-250),
         inner_distance_upper_bound: config.inner_distance.upper_bound.unwrap_or(250),
@@ -785,6 +790,8 @@ struct SharedParams<'a> {
     junction_saturation_percentile_ceiling: u64,
     /// Sampling step percentage for junction saturation.
     junction_saturation_percentile_step: u64,
+    /// Random seed for junction saturation shuffle.
+    junction_saturation_seed: u64,
     /// Maximum read pairs to sample for inner distance.
     inner_distance_sample_size: u64,
     /// Lower bound of inner distance histogram.
@@ -967,6 +974,8 @@ fn process_single_bam(
         tin_enabled: config.tin.enabled && params.tin_index.is_some(),
         tin_sample_size: params.tin_sample_size,
         tin_min_coverage: params.tin_min_coverage,
+        tin_seed: config.tin.seed,
+        junction_saturation_seed: config.junction_saturation.seed.unwrap_or(42),
         preseq_enabled: config.preseq.enabled,
         preseq_max_segment_length: config.preseq.max_segment_length,
     };
@@ -1688,6 +1697,7 @@ fn write_rseqc_outputs(
             params.junction_saturation_percentile_ceiling as u32,
             params.junction_saturation_percentile_step as u32,
             params.junction_saturation_min_coverage as u32,
+            params.junction_saturation_seed,
         );
 
         rna::rseqc::junction_saturation::write_r_script(&results, &prefix)?;

@@ -101,6 +101,11 @@ pub struct RseqcConfig {
     pub tin_sample_size: usize,
     /// Minimum number of read starts for a transcript to compute TIN.
     pub tin_min_coverage: u32,
+    /// Random seed for reproducible TIN results (deterministic hash state).
+    pub tin_seed: Option<u64>,
+    /// Random seed for junction_saturation observation shuffle.
+    /// Defaults to 42 when not set via `--seed`.
+    pub junction_saturation_seed: u64,
     /// Whether preseq library complexity estimation is enabled.
     pub preseq_enabled: bool,
     /// Maximum merged PE fragment length for preseq (preseq's `-seg_len`).
@@ -2188,7 +2193,7 @@ impl RseqcAccumulators {
             tin: if config.tin_enabled {
                 annotations
                     .and_then(|a| a.tin_index)
-                    .map(|idx| TinAccum::new(idx, config.mapq_cut, config.tin_min_coverage))
+                    .map(|idx| TinAccum::new(idx, config.mapq_cut, config.tin_min_coverage, config.tin_seed))
             } else {
                 None
             },
@@ -2659,6 +2664,7 @@ impl JuncSatAccum {
         sample_end: u32,
         sample_step: u32,
         min_coverage: u32,
+        seed: u64,
     ) -> SaturationResult {
         use rand::seq::SliceRandom;
         use rand::SeedableRng;
@@ -2673,7 +2679,7 @@ impl JuncSatAccum {
             .collect();
 
         // Phase 2: deterministic shuffle
-        let mut rng = ChaCha8Rng::seed_from_u64(42);
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
         self.observations.shuffle(&mut rng);
 
         // Build percentage series

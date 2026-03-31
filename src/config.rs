@@ -426,6 +426,10 @@ pub struct JunctionSaturationConfig {
     /// Sampling step percentage.
     /// Can be overridden by `--junction-saturation-percentile-step` CLI flag.
     pub percentile_step: Option<u64>,
+
+    /// Random seed for the observation shuffle in saturation sampling.
+    /// When set via `--seed`, replaces the default hard-coded seed (42).
+    pub seed: Option<u64>,
 }
 
 impl Default for JunctionSaturationConfig {
@@ -436,6 +440,7 @@ impl Default for JunctionSaturationConfig {
             percentile_floor: None,
             percentile_ceiling: None,
             percentile_step: None,
+            seed: None,
         }
     }
 }
@@ -534,6 +539,12 @@ pub struct TinConfig {
     pub sample_size: Option<u32>,
     /// Minimum number of reads covering a transcript to compute TIN.
     pub min_coverage: Option<u32>,
+    /// Random seed for reproducible TIN results. When set, the internal
+    /// hash state used for read-start tracking is seeded deterministically,
+    /// ensuring identical output across runs. Without a seed the default
+    /// random hash state may produce slightly different results for PE
+    /// samples due to non-deterministic hash ordering.
+    pub seed: Option<u64>,
 }
 
 impl Default for TinConfig {
@@ -542,6 +553,7 @@ impl Default for TinConfig {
             enabled: true,
             sample_size: None,
             min_coverage: None,
+            seed: None,
         }
     }
 }
