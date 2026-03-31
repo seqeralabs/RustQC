@@ -352,6 +352,8 @@ pub struct CountResult {
     pub fc_unmapped: u64,
     /// Per-read: singleton reads (unmatched mates after cross-chromosome reconciliation)
     pub fc_singleton: u64,
+    /// Per-read: chimeric reads (mates on different chromosomes)
+    pub fc_chimera: u64,
 
     // --- featureCounts biotype-level per-read counts ---
     // Matches `featureCounts -g gene_biotype` behaviour where exons are grouped
@@ -595,6 +597,8 @@ struct ChromResult {
     fc_unmapped: u64,
     /// Per-read: singleton reads (mate unmapped or missing)
     fc_singleton: u64,
+    /// Per-read: chimeric reads (mates on different chromosomes)
+    fc_chimera: u64,
 
     // --- featureCounts biotype-level per-read statistics ---
     // Matches `featureCounts -g gene_biotype` behaviour: exons are grouped
@@ -633,6 +637,7 @@ impl ChromResult {
             fc_multimapping: 0,
             fc_unmapped: 0,
             fc_singleton: 0,
+            fc_chimera: 0,
             biotype_reads: vec![0u64; num_biotypes],
             fc_biotype_assigned: 0,
             qualimap: None,
@@ -711,6 +716,7 @@ impl ChromResult {
         self.fc_multimapping += other.fc_multimapping;
         self.fc_unmapped += other.fc_unmapped;
         self.fc_singleton += other.fc_singleton;
+        self.fc_chimera += other.fc_chimera;
         // Merge biotype-level counts
         for (i, &count) in other.biotype_reads.iter().enumerate() {
             self.biotype_reads[i] += count;
@@ -880,14 +886,44 @@ fn process_counting_record(
     }
 
     // --- Per-read featureCounts counting (independent of mate pairing) ---
-    classify_read_fc(is_multi, gene_hits, result);
-    classify_read_fc_biotype(
-        is_multi,
-        gene_hits,
-        gene_to_biotype,
-        biotype_hits_buf,
-        result,
-    );
+    // For paired-end data, apply -B (require both mates mapped) and -C
+    // (exclude chimeric fragments) filtering to match subread featureCounts
+    // behaviour when invoked with -B -C (as nf-core/rnaseq does).
+    //
+    // -B: skip reads whose mate is unmapped (BAM_FMUNMAP).
+    // -C: skip chimeric fragments. featureCounts defines chimeric as mates
+    //     on different chromosomes OR same chromosome but same strand
+    //     (improper orientation). A proper pair requires same chromosome
+    //     AND opposite strands.
+    let skip_fc = paired && {
+        if flags & BAM_FMUNMAP != 0 {
+            // -B: mate is unmapped, classify as singleton
+            result.fc_singleton += 1;
+            true
+        } else {
+            let same_chrom = record.tid() == record.mtid();
+            let opposite_strand =
+                (flags & BAM_FREVERSE != 0) != (flags & BAM_FMREVERSE != 0);
+            if !(same_chrom && opposite_strand) {
+                // -C: chimeric fragment (different chromosomes or same-strand)
+                result.fc_chimera += 1;
+                true
+            } else {
+                false
+            }
+        }
+    };
+
+    if !skip_fc {
+        classify_read_fc(is_multi, gene_hits, result);
+        classify_read_fc_biotype(
+            is_multi,
+            gene_hits,
+            gene_to_biotype,
+            biotype_hits_buf,
+            result,
+        );
+    }
 
     // --- Single-end counting ---
     if !paired {
@@ -1752,6 +1788,7 @@ pub fn count_reads(
         fc_multimapping: merged.fc_multimapping,
         fc_unmapped: merged.fc_unmapped,
         fc_singleton: merged.fc_singleton,
+        fc_chimera: merged.fc_chimera,
         biotype_reads: merged.biotype_reads,
         biotype_names,
         fc_biotype_assigned: merged.fc_biotype_assigned,

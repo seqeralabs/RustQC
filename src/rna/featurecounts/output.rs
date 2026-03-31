@@ -106,7 +106,7 @@ pub fn write_summary_file(path: &Path, counts: &CountResult, bam_path: &str) -> 
     writeln!(w, "Unassigned_Read_Type\t0")?;
     writeln!(w, "Unassigned_Singleton\t{}", counts.fc_singleton)?;
     writeln!(w, "Unassigned_MappingQuality\t0")?;
-    writeln!(w, "Unassigned_Chimera\t0")?;
+    writeln!(w, "Unassigned_Chimera\t{}", counts.fc_chimera)?;
     writeln!(w, "Unassigned_FragmentLength\t0")?;
     writeln!(w, "Unassigned_Duplicate\t0")?;
     writeln!(w, "Unassigned_MultiMapping\t{}", counts.fc_multimapping)?;
@@ -323,6 +323,7 @@ mod tests {
             fc_multimapping: 0,
             fc_unmapped: 0,
             fc_singleton: 0,
+            fc_chimera: 0,
             biotype_reads: vec![150, 25],
             biotype_names: vec!["protein_coding".to_string(), "rRNA".to_string()],
             fc_biotype_assigned: 175,
