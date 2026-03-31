@@ -1164,7 +1164,7 @@ fn process_single_bam(
                     &mqc_rrna_path,
                     &biotype_counts,
                     count_result.fc_biotype_assigned,
-                    bam_stem,
+                    &sample_name,
                 )?;
                 let p = mqc_rrna_path.display().to_string();
                 ui.output_detail(&format!("rRNA MultiQC: {p}"));
