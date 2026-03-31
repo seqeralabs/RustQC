@@ -2191,9 +2191,14 @@ impl RseqcAccumulators {
                 None
             },
             tin: if config.tin_enabled {
-                annotations
-                    .and_then(|a| a.tin_index)
-                    .map(|idx| TinAccum::new(idx, config.mapq_cut, config.tin_min_coverage, config.tin_seed))
+                annotations.and_then(|a| a.tin_index).map(|idx| {
+                    TinAccum::new(
+                        idx,
+                        config.mapq_cut,
+                        config.tin_min_coverage,
+                        config.tin_seed,
+                    )
+                })
             } else {
                 None
             },
