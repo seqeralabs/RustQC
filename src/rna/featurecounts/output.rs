@@ -117,7 +117,11 @@ pub fn write_summary_file(
             counts.fc_biotype_no_features,
         )
     } else {
-        (counts.fc_assigned, counts.fc_ambiguous, counts.fc_no_features)
+        (
+            counts.fc_assigned,
+            counts.fc_ambiguous,
+            counts.fc_no_features,
+        )
     };
 
     writeln!(w, "Status\t{}", bam_name)?;
