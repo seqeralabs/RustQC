@@ -1660,7 +1660,7 @@ fn write_rseqc_outputs(
 
         let summary_path =
             rseqc_junc_annot_dir.join(format!("{}.junction_annotation.txt", bam_stem));
-        rna::rseqc::junction_annotation::write_summary(&results, &summary_path)?;
+        rna::rseqc::junction_annotation::write_summary(&results, &summary_path, params.gtf_path)?;
 
         // Only print the detailed junction summary in verbose mode
         if ui.is_verbose() {
