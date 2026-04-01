@@ -285,14 +285,17 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
         "insert size standard deviation:",
         fmt_1dp(insert_sd),
     )?;
-    // Orientation counts: each pair is counted once (only the upstream mate
-    // contributes), matching samtools stats behavior. No division needed.
-    sn_no_comment(&mut out, "inward oriented pairs:", result.inward_pairs)?;
-    sn_no_comment(&mut out, "outward oriented pairs:", result.outward_pairs)?;
+    // Orientation counts: both mates are counted, so halve to match samtools.
+    sn_no_comment(&mut out, "inward oriented pairs:", result.inward_pairs / 2)?;
+    sn_no_comment(
+        &mut out,
+        "outward oriented pairs:",
+        result.outward_pairs / 2,
+    )?;
     sn_no_comment(
         &mut out,
         "pairs with other orientation:",
-        result.other_orientation,
+        result.other_orientation / 2,
     )?;
     sn_no_comment(
         &mut out,
@@ -668,15 +671,48 @@ fn write_insert_size<W: std::io::Write>(
         return Ok(());
     }
 
-    let max_isize = *is_hist.keys().max().unwrap_or(&0);
-    // Cap at 8000 to match samtools stats default MAX_INSERT_SIZE
-    let limit = max_isize.min(8000);
-    for isize_val in 0..=limit {
+    // Compute the "main bulk" cutoff matching samtools stats' isize_main_bulk.
+    // Samtools halves counts (each pair counted twice), then accumulates into
+    // nisize, then finds the isize where cumulative/nisize > 0.99.
+    // We compute on the raw (double-counted) histogram using f64 to match
+    // samtools' 0.5 multiplication (which preserves fractional halves).
+    const MAX_INSERT_SIZE: u64 = 8000;
+    let max_key = is_hist
+        .keys()
+        .filter(|&&k| k < MAX_INSERT_SIZE)
+        .max()
+        .copied()
+        .unwrap_or(0);
+
+    // Halved total (nisize), matching samtools: sum of (count * 0.5)
+    // across ALL buckets including the overflow cap.
+    let nisize: f64 = is_hist.values().map(|v| v[0] as f64 * 0.5).sum();
+
+    let mut bulk: f64 = 0.0;
+    let mut bulk_limit: u64 = max_key;
+    for isize_val in 0..=max_key {
+        let count = is_hist.get(&isize_val).map(|v| v[0]).unwrap_or(0);
+        if count > 0 {
+            bulk_limit = isize_val + 1;
+        }
+        bulk += count as f64 * 0.5;
+        if nisize > 0.0 && bulk / nisize > 0.99 {
+            bulk_limit = isize_val + 1;
+            break;
+        }
+    }
+
+    // Output halved counts (each pair was counted twice).
+    // Use f64 * 0.5 and round to match samtools' integer truncation.
+    for isize_val in 0..bulk_limit {
         let counts = is_hist.get(&isize_val).copied().unwrap_or([0; 4]);
         writeln!(
             out,
             "IS\t{isize_val}\t{}\t{}\t{}\t{}",
-            counts[0], counts[1], counts[2], counts[3]
+            (counts[0] as f64 * 0.5) as u64,
+            (counts[1] as f64 * 0.5) as u64,
+            (counts[2] as f64 * 0.5) as u64,
+            (counts[3] as f64 * 0.5) as u64
         )?;
     }
     Ok(())
