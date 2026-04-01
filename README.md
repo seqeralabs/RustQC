@@ -1,8 +1,8 @@
 <h1 align="center">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/public/RustQC-logo-darkbg.svg">
-  <source media="(prefers-color-scheme: light)" srcset="docs/public/RustQC-logo.svg">
-  <img width="500" src="docs/public/RustQC-logo.svg" alt="RustQC">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/seqeralabs/RustQC/main/docs/public/RustQC-logo-darkbg.svg">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/seqeralabs/RustQC/main/docs/public/RustQC-logo.svg">
+  <img width="500" src="https://raw.githubusercontent.com/seqeralabs/RustQC/main/docs/public/RustQC-logo.svg" alt="RustQC">
 </picture>
 </h1>
 
@@ -11,6 +11,7 @@
 <p align="center">
   <a href="https://github.com/seqeralabs/RustQC/actions/workflows/ci.yml"><img src="https://github.com/seqeralabs/RustQC/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/seqeralabs/RustQC/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
+  <a href="https://rewrites.bio"><img src="https://rewrites.bio/badges/rewrites-bio.svg" alt="rewrites.bio - Follows best practice principles for rewriting bioinformatics tools with AI"></a>
 </p>
 
 <p align="center">
@@ -26,8 +27,8 @@
 
 <p align="center">
 <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="docs/public/benchmarks/benchmark_dark.png">
-   <img src="docs/public/benchmarks/benchmark_light.png" alt="Benchmark: RustQC ~14m 54s vs traditional tools ~15h 34m sequential (dupRadar + featureCounts + 8 RSeQC tools incl. TIN + preseq + samtools + Qualimap)" width="600">
+   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/seqeralabs/RustQC/main/docs/public/benchmarks/benchmark_dark.png">
+   <img src="https://raw.githubusercontent.com/seqeralabs/RustQC/main/docs/public/benchmarks/benchmark_light.png" alt="Benchmark: RustQC ~14m 54s vs traditional tools ~15h 34m sequential (dupRadar + featureCounts + 8 RSeQC tools incl. TIN + preseq + samtools + Qualimap)" width="600">
 </picture>
 </p>
 
