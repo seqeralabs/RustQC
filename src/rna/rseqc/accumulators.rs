@@ -595,65 +595,62 @@ impl BamStatAccum {
                 // Both mates contribute (samtools divides by 2 at output).
                 // We combine insert size histogram and orientation in one block
                 // to store per-insert-size orientation breakdown.
+                // Insert size + orientation for paired primary reads where both
+                // mates are mapped. Matches samtools stats gate:
+                //   IS_PAIRED_AND_MAPPED && IS_ORIGINAL
+                //   if (isize > 0 || tid == mtid)
+                // Samtools counts both mates and divides by 2 at output.
+                // We match this by counting both mates and halving in
+                // write_insert_size().
                 if is_paired && !mate_unmapped {
                     let tid = record.tid();
                     let mtid = record.mtid();
-                    if tid == mtid {
+                    let tlen = record.insert_size();
+                    let abs_tlen = tlen.unsigned_abs();
+
+                    if abs_tlen > 0 || tid == mtid {
                         let pos = record.pos();
                         let mpos = record.mpos();
 
-                        // Count each pair only once: process only when this
-                        // read's position is upstream of its mate, or at the
-                        // same position and is read1. This matches samtools
-                        // stats (stats.c) which uses:
-                        //   pos < mpos || (pos == mpos && READ1)
-                        let count_this_mate =
-                            pos < mpos || (pos == mpos && flags & BAM_FREAD1 != 0);
+                        // Compute orientation (only meaningful for same-chromosome)
+                        let pos_fst = mpos - pos;
+                        let is_fst: i64 = if flags & BAM_FREAD1 != 0 { 1 } else { -1 };
+                        let is_fwd: i64 = if flags & BAM_FREVERSE != 0 { -1 } else { 1 };
+                        let is_mfwd: i64 = if flags & BAM_FMREVERSE != 0 { -1 } else { 1 };
 
-                        if count_this_mate {
-                            let tlen = record.insert_size();
-                            let abs_tlen = tlen.unsigned_abs();
-
-                            // Compute orientation
-                            let pos_fst = mpos - pos;
-                            let is_fst: i64 = if flags & BAM_FREAD1 != 0 { 1 } else { -1 };
-                            let is_fwd: i64 = if flags & BAM_FREVERSE != 0 { -1 } else { 1 };
-                            let is_mfwd: i64 = if flags & BAM_FMREVERSE != 0 { -1 } else { 1 };
-
-                            // orientation_idx: 1=inward, 2=outward, 3=other
-                            let orientation_idx = if is_fwd * is_mfwd > 0 {
-                                self.other_orientation += 1;
-                                3usize
-                            } else if is_fst * pos_fst > 0 {
-                                if is_fst * is_fwd > 0 {
-                                    self.inward_pairs += 1;
-                                    1usize
-                                } else {
-                                    self.outward_pairs += 1;
-                                    2usize
-                                }
-                            } else if is_fst * pos_fst < 0 {
-                                if is_fst * is_fwd > 0 {
-                                    self.outward_pairs += 1;
-                                    2usize
-                                } else {
-                                    self.inward_pairs += 1;
-                                    1usize
-                                }
+                        // orientation_idx: 1=inward, 2=outward, 3=other
+                        let orientation_idx = if is_fwd * is_mfwd > 0 {
+                            self.other_orientation += 1;
+                            3usize
+                        } else if is_fst * pos_fst > 0 {
+                            if is_fst * is_fwd > 0 {
+                                self.inward_pairs += 1;
+                                1usize
+                            } else {
+                                self.outward_pairs += 1;
+                                2usize
+                            }
+                        } else if is_fst * pos_fst < 0 {
+                            if is_fst * is_fwd > 0 {
+                                self.outward_pairs += 1;
+                                2usize
                             } else {
                                 self.inward_pairs += 1;
                                 1usize
-                            };
-
-                            if abs_tlen > 0 {
-                                // Cap at MAX_INSERT_SIZE (8000), matching
-                                // samtools stats which accumulates overflow
-                                // into the cap bucket.
-                                let capped = abs_tlen.min(8000);
-                                let entry = self.is_hist.entry(capped).or_insert([0; 4]);
-                                entry[0] += 1; // total
-                                entry[orientation_idx] += 1;
                             }
+                        } else {
+                            self.inward_pairs += 1;
+                            1usize
+                        };
+
+                        if abs_tlen > 0 {
+                            // Cap at MAX_INSERT_SIZE (8000), matching
+                            // samtools stats which accumulates overflow
+                            // into the cap bucket.
+                            let capped = abs_tlen.min(8000);
+                            let entry = self.is_hist.entry(capped).or_insert([0; 4]);
+                            entry[0] += 1; // total
+                            entry[orientation_idx] += 1;
                         }
                     }
                 }

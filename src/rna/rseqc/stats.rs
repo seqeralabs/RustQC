@@ -668,42 +668,48 @@ fn write_insert_size<W: std::io::Write>(
         return Ok(());
     }
 
-    // Compute the "main bulk" cutoff: the smallest insert size that
-    // accounts for 99% of all pairs, matching samtools stats' isize_main_bulk.
-    // Only emit IS rows up to this point (excludes the overflow cap bucket
-    // and sparse outlier entries beyond the bulk of the distribution).
+    // Compute the "main bulk" cutoff matching samtools stats' isize_main_bulk.
+    // Samtools halves counts (each pair counted twice), then accumulates into
+    // nisize, then finds the isize where cumulative/nisize > 0.99.
+    // We compute on the raw (double-counted) histogram using f64 to match
+    // samtools' 0.5 multiplication (which preserves fractional halves).
     const MAX_INSERT_SIZE: u64 = 8000;
-    let total_pairs: u64 = is_hist
-        .iter()
-        .filter(|(&k, _)| k < MAX_INSERT_SIZE)
-        .map(|(_, v)| v[0])
-        .sum();
-    let bulk_threshold = (total_pairs as f64 * 0.99).ceil() as u64;
-
-    // Find the insert size at which cumulative count reaches the threshold
     let max_key = is_hist
         .keys()
         .filter(|&&k| k < MAX_INSERT_SIZE)
         .max()
         .copied()
         .unwrap_or(0);
-    let mut cumulative: u64 = 0;
+
+    // Halved total (nisize), matching samtools: sum of (count * 0.5)
+    // across ALL buckets including the overflow cap.
+    let nisize: f64 = is_hist.values().map(|v| v[0] as f64 * 0.5).sum();
+
+    let mut bulk: f64 = 0.0;
     let mut bulk_limit: u64 = max_key;
     for isize_val in 0..=max_key {
         let count = is_hist.get(&isize_val).map(|v| v[0]).unwrap_or(0);
-        cumulative += count;
-        if cumulative >= bulk_threshold {
-            bulk_limit = isize_val;
+        if count > 0 {
+            bulk_limit = isize_val + 1;
+        }
+        bulk += count as f64 * 0.5;
+        if nisize > 0.0 && bulk / nisize > 0.99 {
+            bulk_limit = isize_val + 1;
             break;
         }
     }
 
-    for isize_val in 0..=bulk_limit {
+    // Output halved counts (each pair was counted twice).
+    // Use f64 * 0.5 and round to match samtools' integer truncation.
+    for isize_val in 0..bulk_limit {
         let counts = is_hist.get(&isize_val).copied().unwrap_or([0; 4]);
         writeln!(
             out,
             "IS\t{isize_val}\t{}\t{}\t{}\t{}",
-            counts[0], counts[1], counts[2], counts[3]
+            (counts[0] as f64 * 0.5) as u64,
+            (counts[1] as f64 * 0.5) as u64,
+            (counts[2] as f64 * 0.5) as u64,
+            (counts[3] as f64 * 0.5) as u64
         )?;
     }
     Ok(())
