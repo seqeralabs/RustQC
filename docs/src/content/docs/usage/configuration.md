@@ -55,6 +55,7 @@ rna:
   featurecounts:
     counts_file: true
     summary_file: true
+    biotype_summary_file: true
     biotype_counts: true
     biotype_counts_mqc: true
     biotype_rrna_mqc: true
@@ -246,7 +247,8 @@ are generated, plus the biotype attribute setting.
 rna:
   featurecounts:
     counts_file: true # featureCounts-compatible counts TSV
-    summary_file: true # Assignment summary file
+    summary_file: true # Gene-level assignment summary
+    biotype_summary_file: true # Biotype-level assignment summary
     biotype_counts: true # Biotype counts TSV
     biotype_counts_mqc: true # Biotype counts MultiQC bargraph file
     biotype_rrna_mqc: true # Biotype rRNA percentage MultiQC file
