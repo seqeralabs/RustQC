@@ -677,20 +677,14 @@ fn write_insert_size<W: std::io::Write>(
     // We compute on the raw (double-counted) histogram using f64 to match
     // samtools' 0.5 multiplication (which preserves fractional halves).
     const MAX_INSERT_SIZE: u64 = 8000;
-    let max_key = is_hist
-        .keys()
-        .filter(|&&k| k < MAX_INSERT_SIZE)
-        .max()
-        .copied()
-        .unwrap_or(0);
 
     // Halved total (nisize), matching samtools: sum of (count * 0.5)
     // across ALL buckets including the overflow cap.
     let nisize: f64 = is_hist.values().map(|v| v[0] as f64 * 0.5).sum();
 
     let mut bulk: f64 = 0.0;
-    let mut bulk_limit: u64 = max_key;
-    for isize_val in 0..=max_key {
+    let mut bulk_limit: u64 = 0;
+    for isize_val in 0..=MAX_INSERT_SIZE {
         let count = is_hist.get(&isize_val).map(|v| v[0]).unwrap_or(0);
         if count > 0 {
             bulk_limit = isize_val + 1;
