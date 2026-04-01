@@ -74,6 +74,11 @@ docker run --rm -v "$PWD":/data ghcr.io/seqeralabs/rustqc:latest \
   rustqc rna /data/sample.markdup.bam --gtf /data/genes.gtf --outdir /data/results
 ```
 
+```bash
+# Or install from crates.io
+cargo install rustqc
+```
+
 See the [documentation](https://seqeralabs.github.io/RustQC/) for full usage details, configuration options, output file descriptions, and benchmark results.
 
 ## License

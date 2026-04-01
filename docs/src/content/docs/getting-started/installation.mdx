@@ -58,6 +58,16 @@ docker run -v $(pwd):/data ghcr.io/seqeralabs/rustqc:latest \
 
 Building from source requires the Rust toolchain, a C++ compiler, and a few system libraries needed by [rust-htslib](https://github.com/rust-bio/rust-htslib) for SAM/BAM/CRAM I/O. The C++ compiler is used both by rust-htslib and by RustQC's preseq FFI shim (a small C++ wrapper that links against the host's `std::mt19937` and `std::binomial_distribution` for exact bootstrap compatibility with upstream preseq).
 
+### Install from crates.io
+
+If you already have the Rust toolchain and system dependencies installed, you can install directly from [crates.io](https://crates.io/crates/rustqc):
+
+```bash
+cargo install rustqc
+```
+
+### Build from a git clone
+
 Select your operating system for build instructions:
 
 <Tabs>
