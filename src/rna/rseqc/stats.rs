@@ -668,15 +668,10 @@ fn write_insert_size<W: std::io::Write>(
         return Ok(());
     }
 
-    // Find the last insert size with non-zero counts, matching samtools
-    // stats which truncates at the largest observed insert size.
-    let mut last_nonzero: u64 = 0;
-    for (&isize_val, counts) in is_hist.iter() {
-        if counts.iter().any(|&c| c > 0) && isize_val > last_nonzero {
-            last_nonzero = isize_val;
-        }
-    }
-    for isize_val in 0..=last_nonzero {
+    let max_isize = *is_hist.keys().max().unwrap_or(&0);
+    // Cap at 8000 to match samtools stats default MAX_INSERT_SIZE
+    let limit = max_isize.min(8000);
+    for isize_val in 0..=limit {
         let counts = is_hist.get(&isize_val).copied().unwrap_or([0; 4]);
         writeln!(
             out,
