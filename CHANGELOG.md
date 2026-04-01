@@ -1,5 +1,25 @@
 # RustQC Changelog
 
+## [Version 0.1.3](https://github.com/seqeralabs/RustQC/releases/tag/v0.1.3)
+
+### Bug fixes
+
+- Match samtools stats IS histogram and orientation counts exactly (#60)
+- Align cosmetic output differences with upstream tools (#61)
+  - Remove trailing newline from Qualimap `rnaseq_qc_results.txt`
+  - Fix "reads aligned" whitespace for SE samples in Qualimap
+  - Include zero-count biotypes in `biotype_counts_mqc.tsv` with alphabetical tie-breaking
+  - Match nf-core/rnaseq `mqc_features_stat.py` format for `biotype_counts_rrna_mqc.tsv`
+
+### Enhancements
+
+- Add `--sample-name` flag to override BAM-derived sample name in output filenames, replacing the heuristic suffix-stripping logic (#58)
+- Support `sample_name` in config file, with validation against multi-BAM usage
+
+### Docs
+
+- Add og:image social card for docs
+
 ## [Version 0.1.2](https://github.com/seqeralabs/RustQC/releases/tag/v0.1.2)
 
 ### Bug fixes
