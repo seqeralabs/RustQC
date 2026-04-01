@@ -809,43 +809,40 @@ fn bootstrap_resample(
     histogram: &[(u64, u64)],
     rng: &mut CppMt19937,
 ) -> (Vec<(u64, u64)>, u64, u64) {
-    // Build a dense histogram vector from 0..=max_j, matching upstream preseq's
-    // `counts_hist` representation. This is critical for RNG compatibility:
-    // upstream's multinomial() iterates over ALL indices (including zero-weight
-    // entries), calling binomial() for each. Skipping zero-weight entries would
-    // cause the RNG state to diverge.
-    let max_j = histogram.iter().map(|&(j, _)| j).max().unwrap_or(0) as usize;
-    let mut dense_hist = vec![0u64; max_j + 1];
+    // Build parallel vectors of histogram indices and their counts (n_j values).
+    let mut hist_indices: Vec<u64> = Vec::new();
+    let mut hist_weights: Vec<u64> = Vec::new();
     for &(j, n_j) in histogram {
-        dense_hist[j as usize] = n_j;
+        if n_j > 0 {
+            hist_indices.push(j);
+            hist_weights.push(n_j);
+        }
     }
 
-    // Total distinct molecules = sum of all non-zero n_j values
-    let n_distinct: u64 = dense_hist.iter().sum();
+    // Total distinct molecules = sum of all n_j values
+    let n_distinct: u64 = hist_weights.iter().sum();
 
-    if n_distinct == 0 {
+    if n_distinct == 0 || hist_weights.is_empty() {
         return (Vec::new(), 0, 0);
     }
 
     // Sequential binomial sampling (multinomial via sequential binomials).
     // Matches upstream preseq's multinomial() in common.hpp exactly.
     //
-    // IMPORTANT: We must call rng.binomial() for EVERY category in the dense
-    // histogram, including zero-weight entries, even when remaining_trials == 0
-    // or p >= 1.0, because the C++ code does:
+    // IMPORTANT: We must call rng.binomial() for EVERY category, even when
+    // remaining_trials == 0 or p >= 1.0, because the C++ code does:
     //   *r = binom_dist(trials, (*p) / remaining_prob)(gen);
-    // unconditionally for every category. Skipping any call (even for zero
-    // weights) would cause the RNG state to diverge from upstream, producing
-    // different bootstrap results.
+    // unconditionally for every category. Skipping any call would cause the
+    // RNG state to diverge from upstream, producing different bootstrap results.
     let mut remaining_trials = n_distinct;
-    let mut remaining_prob: f64 = n_distinct as f64;
-    let mut sample = vec![0u64; dense_hist.len()];
+    let mut remaining_prob: f64 = hist_weights.iter().sum::<u64>() as f64;
+    let mut sample = vec![0u64; hist_indices.len()];
 
-    for i in 0..dense_hist.len() {
-        let p = (dense_hist[i] as f64) / remaining_prob;
+    for i in 0..hist_indices.len() {
+        let p = (hist_weights[i] as f64) / remaining_prob;
         let drawn = rng.binomial(remaining_trials, p);
         sample[i] = drawn;
-        remaining_prob -= dense_hist[i] as f64;
+        remaining_prob -= hist_weights[i] as f64;
         remaining_trials -= drawn;
     }
 
@@ -855,7 +852,7 @@ fn bootstrap_resample(
     let mut resample_distinct = 0u64;
     for (k, &count) in sample.iter().enumerate() {
         if count > 0 {
-            let freq = k as u64;
+            let freq = hist_indices[k];
             *freq_of_freq.entry(freq).or_insert(0) += count;
             resample_total += freq * count;
             resample_distinct += count;
