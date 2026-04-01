@@ -94,6 +94,10 @@ pub struct RnaArgs {
     )]
     pub outdir: String,
 
+    /// Override sample name for output filenames (default: derived from BAM filename)
+    #[arg(long, value_name = "NAME", help_heading = "Input / Output")]
+    pub sample_name: Option<String>,
+
     /// Write outputs to a flat directory (no subdirs)
     #[arg(long, default_value_t = false, help_heading = "Input / Output")]
     pub flat_output: bool,

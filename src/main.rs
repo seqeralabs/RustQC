@@ -33,45 +33,6 @@ use rna::rseqc::accumulators::{RseqcAccumulators, RseqcAnnotations, RseqcConfig}
 
 /// Common BAM filename suffixes added by alignment and duplicate-marking tools.
 ///
-/// These are stripped (case-insensitively) from the BAM file stem to derive a
-/// clean sample name for output content (e.g., intercept/slope tables). Longer
-/// / more specific suffixes come first so they are matched greedily.
-const BAM_SUFFIXES_TO_STRIP: &[&str] = &[
-    ".Aligned.sortedByCoord.out.markDups",
-    ".Aligned.sortedByCoord.out",
-    ".Aligned.toTranscriptome.out",
-    ".markdup.sorted",
-    ".sorted.markdup",
-    ".markDups.sorted",
-    ".sorted.markDups",
-    ".mrkdup.sorted",
-    ".sorted.mrkdup",
-    ".dedup.sorted",
-    ".sorted.dedup",
-    ".markdup",
-    ".markDups",
-    ".mrkdup",
-    ".dedup",
-    ".sorted",
-];
-
-/// Derive a clean sample name from a BAM file stem.
-///
-/// Strips common alignment / duplicate-marking suffixes (case-insensitive) so
-/// that e.g. `GM12878_REP1.markdup.sorted` becomes `GM12878_REP1`. If no known
-/// suffix matches, the stem is returned unchanged.
-fn clean_sample_name(bam_stem: &str) -> String {
-    for suffix in BAM_SUFFIXES_TO_STRIP {
-        if bam_stem.len() >= suffix.len() {
-            let split = bam_stem.len() - suffix.len();
-            if bam_stem[split..].eq_ignore_ascii_case(suffix) {
-                return bam_stem[..split].to_string();
-            }
-        }
-    }
-    bam_stem.to_string()
-}
-
 /// Return the current UTC time formatted as ISO-8601 (e.g. `2026-03-07T12:34:56Z`).
 ///
 /// Uses only `std::time` — no external chrono dependency.
@@ -581,6 +542,7 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         tin_sample_size,
         tin_min_coverage: config.tin.min_coverage.unwrap_or(10),
         gtf_path: &args.gtf,
+        sample_name_override: args.sample_name.as_deref(),
     };
 
     // Step 2: Process all alignment files (in parallel when multiple)
@@ -756,6 +718,8 @@ struct SharedParams<'a> {
     outdir: &'a Path,
     /// When true, write all files directly to outdir (no subdirectories).
     flat_output: bool,
+    /// Optional override for the sample name used in output filenames.
+    sample_name_override: Option<&'a str>,
     /// Optional reference FASTA for CRAM files.
     reference: Option<&'a str>,
     /// Whether to skip duplicate-marking validation.
@@ -939,7 +903,10 @@ fn process_single_bam(
         .context("Input path has no filename")?
         .to_str()
         .context("Input filename is not valid UTF-8")?;
-    let sample_name = clean_sample_name(bam_stem);
+    let sample_name = params
+        .sample_name_override
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| bam_stem.to_string());
 
     let bam_start = Instant::now();
     let config = params.config;
@@ -1051,7 +1018,7 @@ fn process_single_bam(
 
     // Summary box
     ui.summary_box(
-        &format!("{} — Counting Summary", bam_stem),
+        &format!("{} — Counting Summary", sample_name),
         &[
             (
                 "Total reads:",
@@ -1121,7 +1088,7 @@ fn process_single_bam(
         })?;
 
         if config.featurecounts.counts_file {
-            let counts_path = fc_dir.join(format!("{}.featureCounts.tsv", bam_stem));
+            let counts_path = fc_dir.join(format!("{}.featureCounts.tsv", sample_name));
             rna::featurecounts::output::write_counts_file(
                 &counts_path,
                 genes,
@@ -1135,7 +1102,7 @@ fn process_single_bam(
         }
 
         if config.featurecounts.summary_file {
-            let summary_path = fc_dir.join(format!("{}.featureCounts.tsv.summary", bam_stem));
+            let summary_path = fc_dir.join(format!("{}.featureCounts.tsv.summary", sample_name));
             rna::featurecounts::output::write_summary_file(
                 &summary_path,
                 &count_result,
@@ -1157,7 +1124,7 @@ fn process_single_bam(
             ));
 
             if config.featurecounts.biotype_counts {
-                let biotype_path = fc_dir.join(format!("{}.biotype_counts.tsv", bam_stem));
+                let biotype_path = fc_dir.join(format!("{}.biotype_counts.tsv", sample_name));
                 rna::featurecounts::output::write_biotype_counts(&biotype_path, &biotype_counts)?;
                 let p = biotype_path.display().to_string();
                 ui.output_detail(&format!("Biotype counts: {p}"));
@@ -1165,7 +1132,8 @@ fn process_single_bam(
             }
 
             if config.featurecounts.biotype_counts_mqc {
-                let mqc_biotype_path = fc_dir.join(format!("{}.biotype_counts_mqc.tsv", bam_stem));
+                let mqc_biotype_path =
+                    fc_dir.join(format!("{}.biotype_counts_mqc.tsv", sample_name));
                 rna::featurecounts::output::write_biotype_counts_mqc(
                     &mqc_biotype_path,
                     &biotype_counts,
@@ -1177,7 +1145,7 @@ fn process_single_bam(
 
             if config.featurecounts.biotype_rrna_mqc {
                 let mqc_rrna_path =
-                    fc_dir.join(format!("{}.biotype_counts_rrna_mqc.tsv", bam_stem));
+                    fc_dir.join(format!("{}.biotype_counts_rrna_mqc.tsv", sample_name));
                 rna::featurecounts::output::write_biotype_rrna_mqc(
                     &mqc_rrna_path,
                     &biotype_counts,
@@ -1214,7 +1182,7 @@ fn process_single_bam(
 
         // Write duplication matrix
         if config.dupradar.dup_matrix {
-            let matrix_path = dr_dir.join(format!("{}_dupMatrix.txt", bam_stem));
+            let matrix_path = dr_dir.join(format!("{}_dupMatrix.txt", sample_name));
             dup_matrix.write_tsv(&matrix_path)?;
             let p = matrix_path.display().to_string();
             written_outputs.push(("dupRadar matrix".into(), p));
@@ -1240,7 +1208,7 @@ fn process_single_bam(
                         fit.intercept, fit.slope
                     ));
                     if config.dupradar.intercept_slope {
-                        let fit_path = dr_dir.join(format!("{}_intercept_slope.txt", bam_stem));
+                        let fit_path = dr_dir.join(format!("{}_intercept_slope.txt", sample_name));
                         rna::dupradar::plots::write_intercept_slope(fit, &sample_name, &fit_path)?;
                         let p = fit_path.display().to_string();
                         ui.output_detail(&format!("Fit results: {p}"));
@@ -1274,10 +1242,11 @@ fn process_single_bam(
                 )
             });
 
-            let density_path = dr_dir.join(format!("{}_duprateExpDens.png", bam_stem));
-            let boxplot_path = dr_dir.join(format!("{}_duprateExpBoxplot.png", bam_stem));
-            let histogram_path = dr_dir.join(format!("{}_expressionHist.png", bam_stem));
+            let density_path = dr_dir.join(format!("{}_duprateExpDens.png", sample_name));
+            let boxplot_path = dr_dir.join(format!("{}_duprateExpBoxplot.png", sample_name));
+            let histogram_path = dr_dir.join(format!("{}_expressionHist.png", sample_name));
 
+            let sample_name_str = sample_name.as_str();
             std::thread::scope(|s| -> Result<()> {
                 // Density scatter plot (only if fit succeeded and enabled)
                 let density_handle = if config.dupradar.density_scatter_plot {
@@ -1291,7 +1260,7 @@ fn process_single_bam(
                                 fit,
                                 thresh,
                                 rpkm_threshold,
-                                bam_stem,
+                                sample_name_str,
                                 path,
                             )
                         })
@@ -1305,7 +1274,7 @@ fn process_single_bam(
                     let dm_ref = &dup_matrix;
                     let path = &boxplot_path;
                     Some(s.spawn(move || {
-                        rna::dupradar::plots::duprate_boxplot(dm_ref, bam_stem, path)
+                        rna::dupradar::plots::duprate_boxplot(dm_ref, sample_name_str, path)
                     }))
                 } else {
                     None
@@ -1316,7 +1285,7 @@ fn process_single_bam(
                     let dm_ref = &dup_matrix;
                     let path = &histogram_path;
                     Some(s.spawn(move || {
-                        rna::dupradar::plots::expression_histogram(dm_ref, bam_stem, path)
+                        rna::dupradar::plots::expression_histogram(dm_ref, sample_name_str, path)
                     }))
                 } else {
                     None
@@ -1349,7 +1318,8 @@ fn process_single_bam(
         // Write MultiQC-compatible output files
         if let Some(ref fit) = fit_ok {
             if config.dupradar.multiqc_intercept {
-                let mqc_intercept_path = dr_dir.join(format!("{}_dup_intercept_mqc.txt", bam_stem));
+                let mqc_intercept_path =
+                    dr_dir.join(format!("{}_dup_intercept_mqc.txt", sample_name));
                 rna::dupradar::plots::write_mqc_intercept(fit, &sample_name, &mqc_intercept_path)?;
                 written_outputs.push((
                     "dupRadar MultiQC".into(),
@@ -1359,7 +1329,7 @@ fn process_single_bam(
 
             if config.dupradar.multiqc_curve {
                 let mqc_curve_path =
-                    dr_dir.join(format!("{}_duprateExpDensCurve_mqc.txt", bam_stem));
+                    dr_dir.join(format!("{}_duprateExpDensCurve_mqc.txt", sample_name));
                 rna::dupradar::plots::write_mqc_curve(fit, &dup_matrix, &mqc_curve_path)?;
                 written_outputs.push((
                     "dupRadar MultiQC curve".into(),
@@ -1397,7 +1367,7 @@ fn process_single_bam(
             params.gtf_path,
             params.stranded,
             &qm_dir,
-            bam_stem,
+            &sample_name,
         )?;
         let p = qm_dir.display().to_string();
         ui.output_item("Qualimap", &format!("{p}/*"));
@@ -1422,8 +1392,13 @@ fn process_single_bam(
             })
             .collect::<Vec<(String, u64)>>()
     };
-    let rseqc_outputs =
-        write_rseqc_outputs(bam_path, bam_stem, params, rseqc_accums, &bam_header_refs)?;
+    let rseqc_outputs = write_rseqc_outputs(
+        bam_path,
+        &sample_name,
+        params,
+        rseqc_accums,
+        &bam_header_refs,
+    )?;
     written_outputs.extend(rseqc_outputs.written);
 
     let bam_duration = bam_start.elapsed();
@@ -1469,7 +1444,7 @@ struct RseqcOutputs {
 /// the infer_experiment result (if available) for strandedness mismatch checking.
 fn write_rseqc_outputs(
     bam_path: &str,
-    bam_stem: &str,
+    sample_name: &str,
     params: &SharedParams,
     accums: RseqcAccumulators,
     bam_header_refs: &[(String, u64)],
@@ -1539,7 +1514,7 @@ fn write_rseqc_outputs(
         // --- flagstat ---
         if params.config.flagstat.enabled {
             std::fs::create_dir_all(&samtools_dir)?;
-            let flagstat_path = samtools_dir.join(format!("{}.flagstat", bam_stem));
+            let flagstat_path = samtools_dir.join(format!("{}.flagstat", sample_name));
             rna::rseqc::flagstat::write_flagstat(result, &flagstat_path)?;
             let p = flagstat_path.display().to_string();
             ui.output_item("flagstat", &p);
@@ -1549,7 +1524,7 @@ fn write_rseqc_outputs(
         // --- idxstats ---
         if params.config.idxstats.enabled {
             std::fs::create_dir_all(&samtools_dir)?;
-            let idxstats_path = samtools_dir.join(format!("{}.idxstats", bam_stem));
+            let idxstats_path = samtools_dir.join(format!("{}.idxstats", sample_name));
             rna::rseqc::idxstats::write_idxstats(result, bam_header_refs, &idxstats_path)?;
             let p = idxstats_path.display().to_string();
             ui.output_item("idxstats", &p);
@@ -1559,7 +1534,7 @@ fn write_rseqc_outputs(
         // --- samtools stats SN ---
         if params.config.samtools_stats.enabled {
             std::fs::create_dir_all(&samtools_dir)?;
-            let stats_path = samtools_dir.join(format!("{}.stats", bam_stem));
+            let stats_path = samtools_dir.join(format!("{}.stats", sample_name));
             rna::rseqc::stats::write_stats(result, &stats_path)?;
             let p = stats_path.display().to_string();
             ui.output_item("stats", &p);
@@ -1586,7 +1561,7 @@ fn write_rseqc_outputs(
     if let Some(ref result) = bam_stat_result {
         if params.config.bam_stat.enabled {
             std::fs::create_dir_all(&rseqc_bam_stat_dir)?;
-            let output_path = rseqc_bam_stat_dir.join(format!("{}.bam_stat.txt", bam_stem));
+            let output_path = rseqc_bam_stat_dir.join(format!("{}.bam_stat.txt", sample_name));
             rna::rseqc::bam_stat::write_bam_stat(result, &output_path)?;
             let p = output_path.display().to_string();
             ui.output_item("bam_stat", &p);
@@ -1601,13 +1576,12 @@ fn write_rseqc_outputs(
         rna::rseqc::read_duplication::write_read_duplication(
             &result,
             &rseqc_read_dup_dir,
-            bam_stem,
+            sample_name,
         )?;
-        let plot_path = rseqc_read_dup_dir.join(format!("{}.DupRate_plot.png", bam_stem));
-        let sample_name = clean_sample_name(bam_stem);
-        rna::rseqc::plots::read_duplication_plot(&result, &sample_name, &plot_path)?;
+        let plot_path = rseqc_read_dup_dir.join(format!("{}.DupRate_plot.png", sample_name));
+        rna::rseqc::plots::read_duplication_plot(&result, sample_name, &plot_path)?;
         let p = rseqc_read_dup_dir.display().to_string();
-        ui.output_item("read_duplication", &format!("{p}/{bam_stem}.*"));
+        ui.output_item("read_duplication", &format!("{p}/{sample_name}.*"));
         written.push(("read_duplication".into(), p));
     }
 
@@ -1615,7 +1589,7 @@ fn write_rseqc_outputs(
     if let Some(accum) = accums.infer_exp {
         std::fs::create_dir_all(&rseqc_infer_exp_dir)?;
         let result = accum.into_result();
-        let output_path = rseqc_infer_exp_dir.join(format!("{}.infer_experiment.txt", bam_stem));
+        let output_path = rseqc_infer_exp_dir.join(format!("{}.infer_experiment.txt", sample_name));
         rna::rseqc::infer_experiment::write_infer_experiment(&result, &output_path)?;
         let p = output_path.display().to_string();
         ui.output_item("infer_experiment", &p);
@@ -1634,7 +1608,8 @@ fn write_rseqc_outputs(
             .rd_regions
             .context("rd_regions must be Some when read_distribution accumulator exists")?;
         let result = accum.into_result(rd_regions);
-        let output_path = rseqc_read_dist_dir.join(format!("{}.read_distribution.txt", bam_stem));
+        let output_path =
+            rseqc_read_dist_dir.join(format!("{}.read_distribution.txt", sample_name));
         rna::rseqc::read_distribution::write_read_distribution(&result, &output_path)?;
         let p = output_path.display().to_string();
         ui.output_item("read_distribution", &p);
@@ -1651,33 +1626,32 @@ fn write_rseqc_outputs(
     if let Some(accum) = accums.junc_annot {
         std::fs::create_dir_all(&rseqc_junc_annot_dir)?;
         let prefix = rseqc_junc_annot_dir
-            .join(bam_stem)
+            .join(sample_name)
             .to_string_lossy()
             .to_string();
         let results = accum.into_result(bam_header_refs);
 
-        let xls_path = rseqc_junc_annot_dir.join(format!("{}.junction.xls", bam_stem));
+        let xls_path = rseqc_junc_annot_dir.join(format!("{}.junction.xls", sample_name));
         rna::rseqc::junction_annotation::write_junction_xls(&results, &xls_path)?;
 
-        let bed_out_path = rseqc_junc_annot_dir.join(format!("{}.junction.bed", bam_stem));
+        let bed_out_path = rseqc_junc_annot_dir.join(format!("{}.junction.bed", sample_name));
         rna::rseqc::junction_annotation::write_junction_bed(&results, &bed_out_path)?;
 
         let interact_path =
-            rseqc_junc_annot_dir.join(format!("{}.junction.Interact.bed", bam_stem));
+            rseqc_junc_annot_dir.join(format!("{}.junction.Interact.bed", sample_name));
         rna::rseqc::junction_annotation::write_junction_interact_bed(
             &results,
             bam_path,
             &interact_path,
         )?;
 
-        let r_path = rseqc_junc_annot_dir.join(format!("{}.junction_plot.r", bam_stem));
+        let r_path = rseqc_junc_annot_dir.join(format!("{}.junction_plot.r", sample_name));
         rna::rseqc::junction_annotation::write_junction_plot_r(&results, &prefix, &r_path)?;
 
-        let sample_name = clean_sample_name(bam_stem);
-        rna::rseqc::plots::junction_annotation_plot(&results, &prefix, &sample_name)?;
+        rna::rseqc::plots::junction_annotation_plot(&results, &prefix, sample_name)?;
 
         let summary_path =
-            rseqc_junc_annot_dir.join(format!("{}.junction_annotation.txt", bam_stem));
+            rseqc_junc_annot_dir.join(format!("{}.junction_annotation.txt", sample_name));
         rna::rseqc::junction_annotation::write_summary(&results, &summary_path, params.gtf_path)?;
 
         // Only print the detailed junction summary in verbose mode
@@ -1686,7 +1660,7 @@ fn write_rseqc_outputs(
         }
 
         let p = rseqc_junc_annot_dir.display().to_string();
-        ui.output_item("junction_annotation", &format!("{p}/{bam_stem}.*"));
+        ui.output_item("junction_annotation", &format!("{p}/{sample_name}.*"));
         written.push(("junction_annotation".into(), p));
     }
 
@@ -1694,7 +1668,7 @@ fn write_rseqc_outputs(
     if let Some(accum) = accums.junc_sat {
         std::fs::create_dir_all(&rseqc_junc_sat_dir)?;
         let prefix = rseqc_junc_sat_dir
-            .join(bam_stem)
+            .join(sample_name)
             .to_string_lossy()
             .to_string();
         let known_junctions = params
@@ -1712,15 +1686,14 @@ fn write_rseqc_outputs(
         rna::rseqc::junction_saturation::write_r_script(&results, &prefix)?;
 
         let plot_path =
-            rseqc_junc_sat_dir.join(format!("{}.junctionSaturation_plot.png", bam_stem));
-        let sample_name = clean_sample_name(bam_stem);
-        rna::rseqc::plots::junction_saturation_plot(&results, &sample_name, &plot_path)?;
+            rseqc_junc_sat_dir.join(format!("{}.junctionSaturation_plot.png", sample_name));
+        rna::rseqc::plots::junction_saturation_plot(&results, sample_name, &plot_path)?;
 
         let summary_path = format!("{prefix}.junctionSaturation_summary.txt");
         rna::rseqc::junction_saturation::write_summary(&results, &summary_path)?;
 
         let p = rseqc_junc_sat_dir.display().to_string();
-        ui.output_item("junction_saturation", &format!("{p}/{bam_stem}.*"));
+        ui.output_item("junction_saturation", &format!("{p}/{sample_name}.*"));
         written.push(("junction_saturation".into(), p));
     }
 
@@ -1728,7 +1701,7 @@ fn write_rseqc_outputs(
     if let Some(accum) = accums.inner_dist {
         std::fs::create_dir_all(&rseqc_inner_dist_dir)?;
         let prefix = rseqc_inner_dist_dir
-            .join(bam_stem)
+            .join(sample_name)
             .to_string_lossy()
             .to_string();
         let results = accum.into_result(
@@ -1751,14 +1724,14 @@ fn write_rseqc_outputs(
             params.inner_distance_step,
         )?;
 
-        let plot_path = rseqc_inner_dist_dir.join(format!("{}.inner_distance_plot.png", bam_stem));
-        let sample_name = clean_sample_name(bam_stem);
+        let plot_path =
+            rseqc_inner_dist_dir.join(format!("{}.inner_distance_plot.png", sample_name));
         rna::rseqc::plots::inner_distance_plot(
             &results,
             params.inner_distance_step,
             params.inner_distance_lower_bound,
             params.inner_distance_upper_bound,
-            &sample_name,
+            sample_name,
             &plot_path,
         )?;
 
@@ -1766,11 +1739,10 @@ fn write_rseqc_outputs(
         rna::rseqc::inner_distance::write_summary(&results, &summary_path)?;
 
         let mean_path = format!("{prefix}.inner_distance_mean.txt");
-        let clean_name = clean_sample_name(bam_stem);
-        rna::rseqc::inner_distance::write_mean_file(&results, &clean_name, &mean_path)?;
+        rna::rseqc::inner_distance::write_mean_file(&results, sample_name, &mean_path)?;
 
         let p = rseqc_inner_dist_dir.display().to_string();
-        ui.output_item("inner_distance", &format!("{p}/{bam_stem}.*"));
+        ui.output_item("inner_distance", &format!("{p}/{sample_name}.*"));
         ui.output_detail(&format!(
             "{} read pairs processed",
             format_count(results.total_pairs),
@@ -1786,7 +1758,10 @@ fn write_rseqc_outputs(
             outdir.join("rseqc").join("tin")
         };
         std::fs::create_dir_all(&rseqc_tin_dir)?;
-        let prefix = rseqc_tin_dir.join(bam_stem).to_string_lossy().to_string();
+        let prefix = rseqc_tin_dir
+            .join(sample_name)
+            .to_string_lossy()
+            .to_string();
         let tin_index = params
             .tin_index
             .as_ref()
@@ -1815,7 +1790,7 @@ fn write_rseqc_outputs(
             outdir.join("preseq")
         };
         std::fs::create_dir_all(&preseq_dir)?;
-        let output_path = preseq_dir.join(format!("{}.lc_extrap.txt", bam_stem));
+        let output_path = preseq_dir.join(format!("{}.lc_extrap.txt", sample_name));
         accum.finalize();
         let total_reads = accum.total_fragments;
         let n_distinct = accum.n_distinct();
@@ -1853,68 +1828,4 @@ fn write_rseqc_outputs(
         written,
         infer_experiment: infer_experiment_result,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_clean_sample_name_markdup_sorted() {
-        assert_eq!(
-            clean_sample_name("GM12878_REP1.markdup.sorted"),
-            "GM12878_REP1"
-        );
-    }
-
-    #[test]
-    fn test_clean_sample_name_sorted_markdup() {
-        assert_eq!(clean_sample_name("SAMPLE.sorted.markdup"), "SAMPLE");
-    }
-
-    #[test]
-    fn test_clean_sample_name_star_suffix() {
-        assert_eq!(
-            clean_sample_name("MySample.Aligned.sortedByCoord.out.markDups"),
-            "MySample"
-        );
-    }
-
-    #[test]
-    fn test_clean_sample_name_star_no_markdups() {
-        assert_eq!(
-            clean_sample_name("MySample.Aligned.sortedByCoord.out"),
-            "MySample"
-        );
-    }
-
-    #[test]
-    fn test_clean_sample_name_case_insensitive() {
-        assert_eq!(clean_sample_name("SAMPLE.MARKDUP.SORTED"), "SAMPLE");
-    }
-
-    #[test]
-    fn test_clean_sample_name_no_suffix() {
-        assert_eq!(clean_sample_name("CleanName"), "CleanName");
-    }
-
-    #[test]
-    fn test_clean_sample_name_only_sorted() {
-        assert_eq!(clean_sample_name("data.sorted"), "data");
-    }
-
-    #[test]
-    fn test_clean_sample_name_dedup() {
-        assert_eq!(clean_sample_name("run1.dedup.sorted"), "run1");
-    }
-
-    #[test]
-    fn test_clean_sample_name_mrkdup() {
-        assert_eq!(clean_sample_name("abc.mrkdup"), "abc");
-    }
-
-    #[test]
-    fn test_clean_sample_name_empty_after_strip() {
-        assert_eq!(clean_sample_name(".sorted"), "");
-    }
 }
