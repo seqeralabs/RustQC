@@ -668,11 +668,14 @@ fn write_insert_size<W: std::io::Write>(
         return Ok(());
     }
 
-    // Find the last insert size with non-zero counts, matching samtools
-    // stats which truncates at the largest observed insert size.
+    // Find the last real insert size with non-zero counts, excluding the
+    // overflow cap bucket (8000). Samtools stats does not emit the overflow
+    // bucket, so we skip it to match.
+    const MAX_INSERT_SIZE: u64 = 8000;
     let mut last_nonzero: u64 = 0;
     for (&isize_val, counts) in is_hist.iter() {
-        if counts.iter().any(|&c| c > 0) && isize_val > last_nonzero {
+        if isize_val < MAX_INSERT_SIZE && counts.iter().any(|&c| c > 0) && isize_val > last_nonzero
+        {
             last_nonzero = isize_val;
         }
     }
