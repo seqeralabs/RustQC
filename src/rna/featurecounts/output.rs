@@ -240,7 +240,10 @@ pub fn write_biotype_rrna_mqc(
     writeln!(w, "#    percent_rRNA:")?;
     writeln!(w, "#        title: '% rRNA'")?;
     writeln!(w, "#        namespace: 'Biotype Counts'")?;
-    writeln!(w, "#        description: '% reads overlapping rRNA features'")?;
+    writeln!(
+        w,
+        "#        description: '% reads overlapping rRNA features'"
+    )?;
     writeln!(w, "#        max: 100")?;
     writeln!(w, "#        min: 0")?;
     writeln!(w, "#        scale: 'RdYlGn-rev'")?;
