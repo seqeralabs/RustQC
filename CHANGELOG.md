@@ -1,77 +1,19 @@
 # RustQC Changelog
 
-## [Version 0.1.3](https://github.com/seqeralabs/RustQC/releases/tag/v0.1.3) - 2026-04-01
+## [Version 0.1.0](https://github.com/seqeralabs/RustQC/releases/tag/v0.1.0) - 2026-04-01
 
-### Bug fixes
-
-- Match samtools stats IS histogram and orientation counts exactly (#60)
-- Align cosmetic output differences with upstream tools (#61)
-  - Remove trailing newline from Qualimap `rnaseq_qc_results.txt`
-  - Fix "reads aligned" whitespace for SE samples in Qualimap
-  - Include zero-count biotypes in `biotype_counts_mqc.tsv` with alphabetical tie-breaking
-  - Match nf-core/rnaseq `mqc_features_stat.py` format for `biotype_counts_rrna_mqc.tsv`
-
-### Enhancements
-
-- Add `--sample-name` flag to override BAM-derived sample name in output filenames, replacing the heuristic suffix-stripping logic (#58)
-- Support `sample_name` in config file, with validation against multi-BAM usage
-
-### Docs
-
-- Add og:image social card for docs
-
-## [Version 0.1.2](https://github.com/seqeralabs/RustQC/releases/tag/v0.1.2) - 2026-04-01
-
-### Bug fixes
-
-- Fix deterministic qualimap bias tie-breaking (#56)
-- Align junction motif extraction guard with qualimap (#52)
-- Use biotype-level stats in featureCounts summary (#51)
-- Add header/footer lines to junction_annotation summary (#54)
-- Use clean sample name in biotype_counts_rrna_mqc.tsv (#55)
-- Use (tid, start) key for SE reads in preseq (#44)
-
-### Enhancements
-
-- Add per-tool seed flags (`--tin-seed`, `--junction-saturation-seed`, `--preseq-seed`) for reproducible results (#53)
-
-## [Version 0.1.1](https://github.com/seqeralabs/RustQC/releases/tag/v0.1.1) - 2026-03-30
-
-### Bug fixes
-
-- Fix qualimap SE strand logic for stranded protocols (#41)
-- Remove TSV header row from dupradar MultiQC curve file (#38)
-
-### Enhancements
-
-- Expose `--preseq-seed` and `--preseq-seg-len` CLI flags (#40)
-- Use mm:ss instead of hundreds of seconds for timing display
-
-### Docs & CI
-
-- Move from Netlify to GitHub Pages
-- Clean up some of the docs language (#33)
-- Pin GitHub Actions to commit SHAs (security)
-
-### Dependencies
-
-- Update dtolnay/rust-toolchain requirement (#34)
-- Update numerous docs npm dependencies
-
-## [Version 0.1.0](https://github.com/seqeralabs/RustQC/releases/tag/v0.1.0) - 2026-03-19
-
-Initial release of RustQC — fast quality control tools for sequencing data, written in Rust.
+Initial release of RustQC -- fast quality control tools for sequencing data, written in Rust.
 
 A single `rustqc rna` command runs 15 QC analyses in one pass over the BAM file, producing output that is format- and numerically identical to the upstream tools and fully compatible with [MultiQC](https://multiqc.info/).
 
 ### Tools
 
-- **dupRadar** — PCR duplicate rate vs. expression analysis with density scatter plots, boxplots, and expression histograms. 14-column duplication matrix with logistic-regression model fitting matching the [R dupRadar](https://github.com/ssayols/dupRadar) package.
-- **featureCounts** — Gene-level read counting with assignment summary, compatible with [Subread featureCounts](http://subread.sourceforge.net/). Includes per-biotype read counting and MultiQC integration.
-- **RSeQC** (8 tools) — [RSeQC](https://rseqc.sourceforge.net/)-compatible implementations of bam_stat, infer_experiment, read_duplication, read_distribution, junction_annotation, junction_saturation, inner_distance, and TIN (Transcript Integrity Number). Includes native plot generation (PNG + SVG) with no R dependency.
-- **preseq** — Library complexity extrapolation (`lc_extrap`) matching [preseq](http://smithlabresearch.org/software/preseq/) v3.2.0, including C++ RNG FFI for reproducible bootstrap sampling.
-- **Qualimap rnaseq** — Gene body coverage profiling, read genomic origin, junction analysis, and transcript coverage bias matching [Qualimap](http://qualimap.conesalab.org/).
-- **samtools** — flagstat, idxstats, and full stats output (SN section + all histogram sections) matching [samtools](http://www.htslib.org/).
+- **dupRadar** -- PCR duplicate rate vs. expression analysis with density scatter plots, boxplots, and expression histograms. 14-column duplication matrix with logistic-regression model fitting matching the [R dupRadar](https://github.com/ssayols/dupRadar) package.
+- **featureCounts** -- Gene-level read counting with assignment summary, compatible with [Subread featureCounts](http://subread.sourceforge.net/). Includes per-biotype read counting and MultiQC integration.
+- **RSeQC** (8 tools) -- [RSeQC](https://rseqc.sourceforge.net/)-compatible implementations of bam_stat, infer_experiment, read_duplication, read_distribution, junction_annotation, junction_saturation, inner_distance, and TIN (Transcript Integrity Number). Includes native plot generation (PNG + SVG) with no R dependency.
+- **preseq** -- Library complexity extrapolation (`lc_extrap`) matching [preseq](http://smithlabresearch.org/software/preseq/) v3.2.0, including C++ RNG FFI for reproducible bootstrap sampling.
+- **Qualimap rnaseq** -- Gene body coverage profiling, read genomic origin, junction analysis, and transcript coverage bias matching [Qualimap](http://qualimap.conesalab.org/).
+- **samtools** -- flagstat, idxstats, and full stats output (SN section + all histogram sections) matching [samtools](http://www.htslib.org/).
 
 ### Features
 
@@ -81,5 +23,7 @@ A single `rustqc rna` command runs 15 QC analyses in one pass over the BAM file,
 - GTF annotation support (gzip-compressed files accepted)
 - YAML configuration for output control, chromosome name mapping, and tool parameters
 - Multiple BAM file support via positional arguments
+- `--sample-name` flag to override BAM-derived sample name in output filenames
+- Per-tool seed flags (`--tin-seed`, `--junction-saturation-seed`, `--preseq-seed`) for reproducible results
 - Docker container at `ghcr.io/seqeralabs/rustqc`
 - Cross-platform builds (Linux x86_64/aarch64, macOS x86_64/aarch64)
