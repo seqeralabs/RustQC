@@ -590,18 +590,11 @@ impl BamStatAccum {
                 }
 
                 // Insert size + orientation for paired primary reads where both
-                // mates are mapped on the same chromosome. Upstream samtools
-                // stats uses IS_PAIRED_AND_MAPPED (paired + both mapped).
-                // Both mates contribute (samtools divides by 2 at output).
-                // We combine insert size histogram and orientation in one block
-                // to store per-insert-size orientation breakdown.
-                // Insert size + orientation for paired primary reads where both
                 // mates are mapped. Matches samtools stats gate:
                 //   IS_PAIRED_AND_MAPPED && IS_ORIGINAL
                 //   if (isize > 0 || tid == mtid)
-                // Samtools counts both mates and divides by 2 at output.
-                // We match this by counting both mates and halving in
-                // write_insert_size().
+                // Both mates contribute; samtools divides by 2 at output.
+                // We do the same in write_insert_size() and the SN section.
                 if is_paired && !mate_unmapped {
                     let tid = record.tid();
                     let mtid = record.mtid();
