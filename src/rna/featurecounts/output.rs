@@ -92,11 +92,7 @@ pub fn write_counts_file(
 /// Always uses gene-level assignment stats (matching `featureCounts -g gene_id`
 /// behaviour), since this summary accompanies the gene-level counts file.
 /// Biotype-level stats are reported separately via the biotype counts outputs.
-pub fn write_summary_file(
-    path: &Path,
-    counts: &CountResult,
-    bam_path: &str,
-) -> Result<()> {
+pub fn write_summary_file(path: &Path, counts: &CountResult, bam_path: &str) -> Result<()> {
     let file = std::fs::File::create(path)?;
     let mut w = std::io::BufWriter::new(file);
 
@@ -133,11 +129,7 @@ pub fn write_summary_file(
 /// Uses biotype-level assignment stats (matching `featureCounts -g gene_biotype`
 /// behaviour). Reads overlapping multiple genes of the same biotype are Assigned,
 /// not Ambiguous, because they map to a single biotype meta-feature.
-pub fn write_biotype_summary_file(
-    path: &Path,
-    counts: &CountResult,
-    bam_path: &str,
-) -> Result<()> {
+pub fn write_biotype_summary_file(path: &Path, counts: &CountResult, bam_path: &str) -> Result<()> {
     let file = std::fs::File::create(path)?;
     let mut w = std::io::BufWriter::new(file);
 
@@ -158,7 +150,11 @@ pub fn write_biotype_summary_file(
     writeln!(w, "Unassigned_MultiMapping\t{}", counts.fc_multimapping)?;
     writeln!(w, "Unassigned_Secondary\t0")?;
     writeln!(w, "Unassigned_NonSplit\t0")?;
-    writeln!(w, "Unassigned_NoFeatures\t{}", counts.fc_biotype_no_features)?;
+    writeln!(
+        w,
+        "Unassigned_NoFeatures\t{}",
+        counts.fc_biotype_no_features
+    )?;
     writeln!(w, "Unassigned_Overlapping_Length\t0")?;
     writeln!(w, "Unassigned_Ambiguity\t{}", counts.fc_biotype_ambiguous)?;
 
