@@ -633,7 +633,7 @@ fn write_results_file(
     } else {
         writeln!(
             f,
-            "    reads aligned = {}",
+            "    reads aligned  = {}",
             format_with_commas(result.read_count)
         )?;
     }
@@ -763,7 +763,6 @@ fn write_results_file(
             writeln!(f, "    {} : {}%", motif, format_bias(*pct))?;
         }
     }
-    writeln!(f)?;
 
     Ok(())
 }

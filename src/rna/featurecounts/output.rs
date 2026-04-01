@@ -155,14 +155,12 @@ pub fn aggregate_biotype_counts(counts: &CountResult) -> IndexMap<String, u64> {
 
     for (idx, name) in counts.biotype_names.iter().enumerate() {
         let count = counts.biotype_reads.get(idx).copied().unwrap_or(0);
-        if count > 0 {
-            biotype_counts.insert(name.clone(), count);
-        }
+        biotype_counts.insert(name.clone(), count);
     }
 
-    // Sort by count descending for readability
+    // Sort by count descending, then alphabetically for stable ordering of ties
     let mut pairs: Vec<(String, u64)> = biotype_counts.into_iter().collect();
-    pairs.sort_by(|a, b| b.1.cmp(&a.1));
+    pairs.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     pairs.into_iter().collect()
 }
 
@@ -194,7 +192,11 @@ pub fn write_biotype_counts_mqc(path: &Path, biotype_counts: &IndexMap<String, u
     writeln!(w, "# section_name: 'Biotype Counts'")?;
     writeln!(
         w,
-        "# description: \"shows reads overlapping genomic features of different biotypes,\""
+        "# description: \"shows reads overlapping genomic features of different biotypes,"
+    )?;
+    writeln!(
+        w,
+        "#     counted by RustQC based on the <a href='http://bioinf.wehi.edu.au/featureCounts'>featureCounts</a> implementation.\""
     )?;
     writeln!(w, "# plot_type: 'bargraph'")?;
     writeln!(w, "# anchor: 'featurecounts_biotype'")?;
@@ -232,21 +234,18 @@ pub fn write_biotype_rrna_mqc(
     };
 
     // MultiQC YAML header for general stats
-    writeln!(w, "# id: 'biotype_counts_rrna'")?;
-    writeln!(w, "# plot_type: 'generalstats'")?;
-    writeln!(w, "# pconfig:")?;
-    writeln!(w, "#     percent_rRNA:")?;
-    writeln!(w, "#         title: '% rRNA'")?;
-    writeln!(w, "#         namespace: 'Biotype Counts'")?;
-    writeln!(
-        w,
-        "#         description: 'Percentage of reads assigned to rRNA genes'"
-    )?;
-    writeln!(w, "#         max: 100")?;
-    writeln!(w, "#         min: 0")?;
-    writeln!(w, "#         format: '{{:.2f}}'")?;
+    writeln!(w, "#id: 'biotype-gs'")?;
+    writeln!(w, "#plot_type: 'generalstats'")?;
+    writeln!(w, "#pconfig:")?;
+    writeln!(w, "#    percent_rRNA:")?;
+    writeln!(w, "#        title: '% rRNA'")?;
+    writeln!(w, "#        namespace: 'Biotype Counts'")?;
+    writeln!(w, "#        description: '% reads overlapping rRNA features'")?;
+    writeln!(w, "#        max: 100")?;
+    writeln!(w, "#        min: 0")?;
+    writeln!(w, "#        scale: 'RdYlGn-rev'")?;
     writeln!(w, "Sample\tpercent_rRNA")?;
-    writeln!(w, "{}\t{:.4}", sample_name, rrna_pct)?;
+    writeln!(w, "'{}'\t{}", sample_name, rrna_pct)?;
 
     Ok(())
 }
