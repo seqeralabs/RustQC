@@ -668,18 +668,37 @@ fn write_insert_size<W: std::io::Write>(
         return Ok(());
     }
 
-    // Find the last real insert size with non-zero counts, excluding the
-    // overflow cap bucket (8000). Samtools stats does not emit the overflow
-    // bucket, so we skip it to match.
+    // Compute the "main bulk" cutoff: the smallest insert size that
+    // accounts for 99% of all pairs, matching samtools stats' isize_main_bulk.
+    // Only emit IS rows up to this point (excludes the overflow cap bucket
+    // and sparse outlier entries beyond the bulk of the distribution).
     const MAX_INSERT_SIZE: u64 = 8000;
-    let mut last_nonzero: u64 = 0;
-    for (&isize_val, counts) in is_hist.iter() {
-        if isize_val < MAX_INSERT_SIZE && counts.iter().any(|&c| c > 0) && isize_val > last_nonzero
-        {
-            last_nonzero = isize_val;
+    let total_pairs: u64 = is_hist
+        .iter()
+        .filter(|(&k, _)| k < MAX_INSERT_SIZE)
+        .map(|(_, v)| v[0])
+        .sum();
+    let bulk_threshold = (total_pairs as f64 * 0.99).ceil() as u64;
+
+    // Find the insert size at which cumulative count reaches the threshold
+    let max_key = is_hist
+        .keys()
+        .filter(|&&k| k < MAX_INSERT_SIZE)
+        .max()
+        .copied()
+        .unwrap_or(0);
+    let mut cumulative: u64 = 0;
+    let mut bulk_limit: u64 = max_key;
+    for isize_val in 0..=max_key {
+        let count = is_hist.get(&isize_val).map(|v| v[0]).unwrap_or(0);
+        cumulative += count;
+        if cumulative >= bulk_threshold {
+            bulk_limit = isize_val;
+            break;
         }
     }
-    for isize_val in 0..=last_nonzero {
+
+    for isize_val in 0..=bulk_limit {
         let counts = is_hist.get(&isize_val).copied().unwrap_or([0; 4]);
         writeln!(
             out,
