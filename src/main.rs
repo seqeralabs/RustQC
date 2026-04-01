@@ -270,6 +270,23 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
     let start_time = format_utc_now();
     let n_bams = args.input.len();
 
+    // --sample-name (or config sample_name) only makes sense for a single BAM
+    let effective_sample_name = args
+        .sample_name
+        .as_deref()
+        .or(config.sample_name.as_deref());
+    if n_bams > 1 && effective_sample_name.is_some() {
+        let source = if args.sample_name.is_some() {
+            "--sample-name flag"
+        } else {
+            "config file sample_name"
+        };
+        anyhow::bail!(
+            "{source} cannot be used with multiple input files \
+             (would produce identical output filenames)"
+        );
+    }
+
     ui.header(
         env!("CARGO_PKG_VERSION"),
         env!("GIT_SHORT_HASH"),
@@ -542,7 +559,7 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         tin_sample_size,
         tin_min_coverage: config.tin.min_coverage.unwrap_or(10),
         gtf_path: &args.gtf,
-        sample_name_override: args.sample_name.as_deref(),
+        sample_name_override: effective_sample_name,
     };
 
     // Step 2: Process all alignment files (in parallel when multiple)

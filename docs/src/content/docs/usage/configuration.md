@@ -37,7 +37,8 @@ rna:
   chromosome_mapping:
     chrM: "MT"
 
-  # Output directory layout
+  # Output settings
+  sample_name: "MySample" # Override BAM-derived sample name for output filenames
   flat_output: false # Set to true to skip subdirectories
 
   # dupRadar output toggles
@@ -149,6 +150,25 @@ or the config file value is `true`, paired-end mode is enabled.
 rna:
   stranded: reverse
   paired: true
+```
+
+## Output settings
+
+### `sample_name`
+
+Override the sample name used for output filenames. By default, the sample name
+is derived from the BAM file stem (e.g., `sample.markdup.sorted.bam` produces
+files named `sample.markdup.sorted.*`). When set, the provided name is used
+instead.
+
+**Default:** derived from BAM filename
+
+This can also be set via the `--sample-name` CLI flag, which takes precedence
+over the config file value. Can only be used with a single input file.
+
+```yaml
+rna:
+  sample_name: "MySample"
 ```
 
 ## Chromosome name mapping

@@ -87,6 +87,14 @@ pub struct RnaConfig {
     #[serde(default)]
     pub paired: Option<bool>,
 
+    /// Override sample name for output filenames.
+    ///
+    /// By default, the sample name is derived from the BAM file stem. When set,
+    /// this value is used instead for all output filenames.
+    /// The CLI `--sample-name` flag takes precedence over this setting.
+    #[serde(default)]
+    pub sample_name: Option<String>,
+
     /// Write all output files to a flat directory (no subdirectories).
     ///
     /// By default (`false`), output files are organised into subdirectories by

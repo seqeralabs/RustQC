@@ -135,6 +135,27 @@ If not specified, RustQC defaults to `gene_biotype` and auto-detects the
 attribute. If the specified attribute is not found in the GTF, a warning is
 printed and biotype counting is skipped.
 
+#### `--sample-name <NAME>`
+
+Override the sample name used for output filenames. By default, the sample name
+is derived from the BAM file stem (e.g., `sample.markdup.sorted.bam` produces
+output files named `sample.markdup.sorted.*`).
+
+When this flag is set, the provided name is used instead, so output files are
+named `<NAME>.*`. This is useful when a pipeline already knows the clean sample
+ID and wants output filenames to match, without relying on BAM filename
+conventions.
+
+<Aside type="note">
+This option can only be used with a single input file. When multiple BAM files
+are provided, RustQC will exit with an error because all files would produce
+identically-named outputs.
+</Aside>
+
+```bash
+rustqc rna sample.markdup.sorted.bam --gtf genes.gtf --sample-name sample
+```
+
 #### `--flat-output`
 
 Write all output files directly into the output directory instead of organizing
