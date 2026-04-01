@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/seqeralabs/RustQC/actions/workflows/ci.yml"><img src="https://github.com/seqeralabs/RustQC/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/seqeralabs/RustQC/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
+  <a href="https://github.com/seqeralabs/RustQC/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-GPLv3+-blue" alt="License"></a>
   <a href="https://rewrites.bio"><img src="https://rewrites.bio/badges/rewrites-bio.svg" alt="rewrites.bio - Follows best practice principles for rewriting bioinformatics tools with AI"></a>
 </p>
 
@@ -88,4 +88,4 @@ RustQC was developed with substantial assistance from AI coding agents (primaril
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+This project is licensed under the GNU General Public License v3.0 or later. See [LICENSE](LICENSE) for details.
