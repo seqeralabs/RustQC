@@ -35,7 +35,8 @@ All featureCounts output files use the BAM file stem as a prefix and are written
 <FileTree>
 - featurecounts/
   - sample.featureCounts.tsv Per-gene read counts
-  - sample.featureCounts.tsv.summary Assignment summary statistics
+  - sample.featureCounts.tsv.summary Gene-level assignment summary
+  - sample.featureCounts.biotype.tsv.summary Biotype-level assignment summary
   - `sample.biotype_counts.tsv` Per-biotype read counts
   - `sample.biotype_counts_mqc.tsv` MultiQC biotype bargraph
   - `sample.biotype_counts_rrna_mqc.tsv` MultiQC rRNA percentage
@@ -72,20 +73,28 @@ This file is directly compatible with downstream tools that accept featureCounts
 
 **File:** `<sample>.featureCounts.tsv.summary`
 
-Assignment summary statistics in featureCounts format, reporting the number of reads in each category:
+Gene-level assignment summary statistics in featureCounts format, matching `featureCounts -g gene_id` behaviour. A read overlapping multiple genes is counted as Ambiguous, regardless of whether those genes share the same biotype.
 
 ```
 Status  sample.bam
 Assigned        22812
 Unassigned_Unmapped     0
 Unassigned_NoFeatures   1227
-Unassigned_Ambiguous    2395
+Unassigned_Ambiguity    2395
 ```
 
-- Assigned: reads successfully assigned to a gene
+- Assigned: reads successfully assigned to exactly one gene
 - Unassigned_Unmapped: unmapped reads
 - Unassigned_NoFeatures: reads not overlapping any gene
-- Unassigned_Ambiguous: reads overlapping multiple genes
+- Unassigned_Ambiguity: reads overlapping multiple genes
+
+### Biotype summary file
+
+**File:** `<sample>.featureCounts.biotype.tsv.summary`
+
+Biotype-level assignment summary, matching `featureCounts -g gene_biotype` behaviour. Reads overlapping multiple genes of the same biotype (e.g. two `protein_coding` genes) are counted as Assigned, not Ambiguous, because they map to a single biotype meta-feature. Only produced when the GTF contains the biotype attribute.
+
+This file has the same format as the gene-level summary but will typically show more Assigned reads and fewer Ambiguous reads, since same-biotype multi-gene overlaps are resolved.
 
 ### Biotype counts
 
@@ -183,6 +192,7 @@ All assignment statistics are identical across both datasets. Gene-level read co
 
 Beyond the standard featureCounts counts file and summary, RustQC also produces:
 
+- Biotype summary (`.featureCounts.biotype.tsv.summary`): biotype-level assignment summary matching `featureCounts -g gene_biotype`
 - Biotype counts (`.biotype_counts.tsv`): per-biotype read count summaries
 - Biotype MultiQC bargraph (`.biotype_counts_mqc.tsv`): ready for MultiQC visualization
 - rRNA percentage (`.biotype_counts_rrna_mqc.tsv`): rRNA fraction for MultiQC general statistics

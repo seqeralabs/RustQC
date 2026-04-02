@@ -1120,12 +1120,7 @@ fn process_single_bam(
 
         if config.featurecounts.summary_file {
             let summary_path = fc_dir.join(format!("{}.featureCounts.tsv.summary", sample_name));
-            rna::featurecounts::output::write_summary_file(
-                &summary_path,
-                &count_result,
-                bam_path,
-                params.biotype_in_gtf,
-            )?;
+            rna::featurecounts::output::write_summary_file(&summary_path, &count_result, bam_path)?;
             let p = summary_path.display().to_string();
             ui.output_detail(&format!("Summary: {p}"));
             written_outputs.push(("featureCounts summary".into(), p));
@@ -1139,6 +1134,19 @@ fn process_single_bam(
                 "Biotype counting: {} biotypes found",
                 biotype_counts.len()
             ));
+
+            if config.featurecounts.biotype_summary_file {
+                let biotype_summary_path =
+                    fc_dir.join(format!("{}.featureCounts.biotype.tsv.summary", sample_name));
+                rna::featurecounts::output::write_biotype_summary_file(
+                    &biotype_summary_path,
+                    &count_result,
+                    bam_path,
+                )?;
+                let p = biotype_summary_path.display().to_string();
+                ui.output_detail(&format!("Biotype summary: {p}"));
+                written_outputs.push(("biotype summary".into(), p));
+            }
 
             if config.featurecounts.biotype_counts {
                 let biotype_path = fc_dir.join(format!("{}.biotype_counts.tsv", sample_name));

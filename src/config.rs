@@ -239,6 +239,7 @@ impl Default for DupradarConfig {
 /// featurecounts:
 ///   counts_file: true
 ///   summary_file: true
+///   biotype_summary_file: true
 ///   biotype_counts: true
 ///   biotype_counts_mqc: true
 ///   biotype_rrna_mqc: true
@@ -252,6 +253,12 @@ pub struct FeatureCountsConfig {
 
     /// Write the featureCounts summary file (.summary).
     pub summary_file: bool,
+
+    /// Write the biotype-level featureCounts summary file.
+    ///
+    /// Uses biotype-level assignment stats (matching `featureCounts -g gene_biotype`),
+    /// where reads overlapping multiple genes of the same biotype are Assigned.
+    pub biotype_summary_file: bool,
 
     /// Write the biotype counts TSV file.
     pub biotype_counts: bool,
@@ -274,6 +281,7 @@ impl Default for FeatureCountsConfig {
         Self {
             counts_file: true,
             summary_file: true,
+            biotype_summary_file: true,
             biotype_counts: true,
             biotype_counts_mqc: true,
             biotype_rrna_mqc: true,
@@ -761,7 +769,7 @@ impl RnaConfig {
     /// Returns true if any biotype output is enabled.
     pub fn any_biotype_output(&self) -> bool {
         let fc = &self.featurecounts;
-        fc.biotype_counts || fc.biotype_counts_mqc || fc.biotype_rrna_mqc
+        fc.biotype_summary_file || fc.biotype_counts || fc.biotype_counts_mqc || fc.biotype_rrna_mqc
     }
 
     /// Returns true if any dupRadar output is enabled.
