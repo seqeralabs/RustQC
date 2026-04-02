@@ -1,5 +1,17 @@
 # RustQC Changelog
 
+## [Version 0.1.1](https://github.com/seqeralabs/RustQC/releases/tag/v0.1.1) - 2026-04-02
+
+### Bug fixes
+
+- Fix featureCounts summary to use gene-level stats; add biotype summary (#66)
+- Fix inner_distance histogram to include overflow bucket in bulk cutoff loop (#67)
+
+### Other changes
+
+- Add crates.io publishing to release workflow (#62)
+- Documentation fixes (#70)
+
 ## [Version 0.1.0](https://github.com/seqeralabs/RustQC/releases/tag/v0.1.0) - 2026-04-01
 
 Initial release of RustQC -- fast quality control tools for sequencing data, written in Rust.
