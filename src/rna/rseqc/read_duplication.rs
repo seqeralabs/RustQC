@@ -221,21 +221,23 @@ mod tests {
         for result in bam.records() {
             let record = result.context("Failed to read BAM record")?;
 
-            if record.is_unmapped() || record.is_quality_check_failed() || record.mapq() < mapq_cut
+            if record.is_unmapped()
+                || record.is_quality_check_failed()
+                || crate::rna::bam_flags::mapping_quality(&record) < mapq_cut
             {
                 continue;
             }
 
             total_processed += 1;
 
-            let seq = record.seq().as_bytes();
+            let seq = record.sequence().as_bytes();
             let seq_upper: Vec<u8> = seq.iter().map(|b| b.to_ascii_uppercase()).collect();
             *seq_dup.entry(seq_upper).or_insert(0) += 1;
 
-            let tid = record.tid();
+            let tid = -1;
             if tid >= 0 && (tid as usize) < target_names.len() {
                 let chrom = &target_names[tid as usize];
-                let pos = record.pos();
+                let pos = crate::rna::bam_flags::pos_0based(&record);
                 let cigar = record.cigar();
                 let key = build_position_key(chrom, pos, &cigar);
                 *pos_dup.entry(key).or_insert(0) += 1;

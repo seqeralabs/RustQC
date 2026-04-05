@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use indexmap::IndexMap;
 use log::debug;
+use noodles_sam::alignment::record::cigar::op::Kind;
 
 use crate::gtf::Gene;
 
@@ -23,34 +24,40 @@ use crate::gtf::Gene;
 ///
 /// # Arguments
 /// * `start_pos` - Alignment start position (0-based, from BAM record).
-/// * `cigar` - CIGAR operations from the BAM record.
+/// * `cigar_ops` - CIGAR operations from the BAM record.
 ///
 /// # Returns
 /// Vector of `(intron_start, intron_end)` tuples (0-based coordinates).
-pub fn fetch_introns(start_pos: u64, cigar: &[rust_htslib::bam::record::Cigar]) -> Vec<(u64, u64)> {
-    use rust_htslib::bam::record::Cigar::*;
-
+pub fn fetch_introns(
+    start_pos: u64,
+    cigar_ops: &dyn noodles_sam::alignment::record::Cigar,
+) -> std::io::Result<Vec<(u64, u64)>> {
     let mut pos = start_pos;
     let mut introns = Vec::new();
 
-    for op in cigar {
-        match op {
-            Match(len) => pos += *len as u64, // M: advance position
-            Ins(_) => {}                      // I: no position change
-            Del(len) => pos += *len as u64,   // D: advance position
-            RefSkip(len) => {
+    for op_result in cigar_ops.iter() {
+        let op = op_result?;
+        match op.kind() {
+            Kind::Match | Kind::SequenceMatch | Kind::SequenceMismatch => {
+                pos += op.len() as u64;
+            }
+            Kind::Insertion | Kind::SoftClip => {}
+            Kind::Deletion => {
+                pos += op.len() as u64;
+            }
+            Kind::Skip => {
                 // N: intron!
                 let intron_start = pos;
-                let intron_end = pos + *len as u64;
+                let intron_end = pos + op.len() as u64;
                 introns.push((intron_start, intron_end));
                 pos = intron_end;
             }
-            SoftClip(_) => {} // S: no position change (unlike fetch_exon)
-            HardClip(_) | Pad(_) | Equal(_) | Diff(_) => {} // ignored entirely
+            Kind::HardClip => {}
+            Kind::Pad => {} // Padding - no position change
         }
     }
 
-    introns
+    Ok(introns)
 }
 
 // ===================================================================
@@ -202,20 +209,32 @@ mod tests {
 
     #[test]
     fn test_fetch_introns_simple() {
-        use rust_htslib::bam::record::Cigar::*;
+        use noodles_sam::alignment::{record::cigar::op::Kind, record_buf::Cigar};
         // 50M500N50M — one intron at position 100+50=150 to 150+500=650
-        let cigar = vec![Match(50), RefSkip(500), Match(50)];
-        let introns = fetch_introns(100, &cigar);
+        let ops = vec![
+            sam::alignment::record::cigar::Op::new(Kind::Match, 50),
+            sam::alignment::record::cigar::Op::new(Kind::Skip, 500),
+            sam::alignment::record::cigar::Op::new(Kind::Match, 50),
+        ];
+        let cigar = Cigar::from(ops);
+        let introns = fetch_introns(100, &cigar).unwrap();
         assert_eq!(introns.len(), 1);
         assert_eq!(introns[0], (150, 650));
     }
 
     #[test]
     fn test_fetch_introns_multiple() {
-        use rust_htslib::bam::record::Cigar::*;
+        use noodles_sam::alignment::{record::cigar::op::Kind, record_buf::Cigar};
         // 10M500N20M300N10M — two introns
-        let cigar = vec![Match(10), RefSkip(500), Match(20), RefSkip(300), Match(10)];
-        let introns = fetch_introns(100, &cigar);
+        let ops = vec![
+            sam::alignment::record::cigar::Op::new(Kind::Match, 10),
+            sam::alignment::record::cigar::Op::new(Kind::Skip, 500),
+            sam::alignment::record::cigar::Op::new(Kind::Match, 20),
+            sam::alignment::record::cigar::Op::new(Kind::Skip, 300),
+            sam::alignment::record::cigar::Op::new(Kind::Match, 10),
+        ];
+        let cigar = Cigar::from(ops);
+        let introns = fetch_introns(100, &cigar).unwrap();
         assert_eq!(introns.len(), 2);
         assert_eq!(introns[0], (110, 610));
         assert_eq!(introns[1], (630, 930));
@@ -223,28 +242,42 @@ mod tests {
 
     #[test]
     fn test_fetch_introns_with_deletions() {
-        use rust_htslib::bam::record::Cigar::*;
+        use noodles_sam::alignment::{record::cigar::op::Kind, record_buf::Cigar};
         // 10M5D10M500N10M
-        let cigar = vec![Match(10), Del(5), Match(10), RefSkip(500), Match(10)];
-        let introns = fetch_introns(100, &cigar);
+        let ops = vec![
+            sam::alignment::record::cigar::Op::new(Kind::Match, 10),
+            sam::alignment::record::cigar::Op::new(Kind::Deletion, 5),
+            sam::alignment::record::cigar::Op::new(Kind::Match, 10),
+            sam::alignment::record::cigar::Op::new(Kind::Skip, 500),
+            sam::alignment::record::cigar::Op::new(Kind::Match, 10),
+        ];
+        let cigar = Cigar::from(ops);
+        let introns = fetch_introns(100, &cigar).unwrap();
         assert_eq!(introns.len(), 1);
         assert_eq!(introns[0], (125, 625)); // 100+10+5+10=125
     }
 
     #[test]
     fn test_fetch_introns_no_introns() {
-        use rust_htslib::bam::record::Cigar::*;
-        let cigar = vec![Match(100)];
-        let introns = fetch_introns(100, &cigar);
+        use noodles_sam::alignment::{record::cigar::op::Kind, record_buf::Cigar};
+        let ops = vec![sam::alignment::record::cigar::Op::new(Kind::Match, 100)];
+        let cigar = Cigar::from(ops);
+        let introns = fetch_introns(100, &cigar).unwrap();
         assert!(introns.is_empty());
     }
 
     #[test]
     fn test_fetch_introns_soft_clip_no_advance() {
-        use rust_htslib::bam::record::Cigar::*;
+        use noodles_sam::alignment::{record::cigar::op::Kind, record_buf::Cigar};
         // 5S50M500N50M — soft clip should NOT advance position
-        let cigar = vec![SoftClip(5), Match(50), RefSkip(500), Match(50)];
-        let introns = fetch_introns(100, &cigar);
+        let ops = vec![
+            sam::alignment::record::cigar::Op::new(Kind::SoftClip, 5),
+            sam::alignment::record::cigar::Op::new(Kind::Match, 50),
+            sam::alignment::record::cigar::Op::new(Kind::Skip, 500),
+            sam::alignment::record::cigar::Op::new(Kind::Match, 50),
+        ];
+        let cigar = Cigar::from(ops);
+        let introns = fetch_introns(100, &cigar).unwrap();
         assert_eq!(introns.len(), 1);
         assert_eq!(introns[0], (150, 650));
     }

@@ -27,7 +27,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use ui::{format_count, format_duration, format_pct, Ui, Verbosity};
 
-use rust_htslib::bam::Read as BamRead;
+use noodles_bam::io::reader::Builder as BamReaderBuilder;
 
 use rna::rseqc::accumulators::{RseqcAccumulators, RseqcAnnotations, RseqcConfig};
 
@@ -255,14 +255,13 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
 
     // Validate all input alignment files before expensive GTF parsing
     for bam_path in &args.input {
-        let mut reader = rust_htslib::bam::Reader::from_path(bam_path)
-            .with_context(|| format!("Cannot open alignment file '{}'", bam_path))?;
-        if let Some(ref reference) = args.reference {
-            reader
-                .set_reference(reference)
-                .with_context(|| format!("Cannot set reference for CRAM file '{}'", bam_path))?;
-        }
-        let _header = reader.header().clone();
+        
+        let mut reader = BamReaderBuilder::default()
+            .build_from_path(bam_path)
+            .with_context(|| format!("Cannot read alignment file '{}'", bam_path))?;
+        let _header = reader
+            .read_header()
+            .with_context(|| format!("Cannot read header from '{}'", bam_path))?;
         // Reader dropped — just validating the file is openable
     }
 
@@ -1406,15 +1405,16 @@ fn process_single_bam(
     });
     // Extract BAM header info (reference names + lengths) for samtools-compatible outputs
     let bam_header_refs = {
-        let reader = rust_htslib::bam::Reader::from_path(bam_path)
-            .with_context(|| format!("Failed to open BAM for header: {}", bam_path))?;
-        let header = reader.header();
-        (0..header.target_count())
-            .map(|tid| {
-                let name = String::from_utf8_lossy(header.tid2name(tid)).to_string();
-                let len = header.target_len(tid).unwrap_or(0);
-                (name, len)
-            })
+        let mut reader = BamReaderBuilder::default()
+            .build_from_path(bam_path)
+            .with_context(|| format!("Failed to read BAM header: {}", bam_path))?;
+        let header = reader
+            .read_header()
+            .with_context(|| format!("Failed to parse BAM header: {}", bam_path))?;
+        let ref_seqs = header.reference_sequences();
+        ref_seqs
+            .iter()
+            .map(|(name, ref_seq)| (name.to_string(), ref_seq.length().get() as u64))
             .collect::<Vec<(String, u64)>>()
     };
     let rseqc_outputs = write_rseqc_outputs(

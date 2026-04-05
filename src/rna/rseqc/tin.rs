@@ -4,7 +4,8 @@
 //! uniformity across sampled exonic positions. Reimplementation of
 //! RSeQC's `tin.py` tool.
 
-use rust_htslib::bam;
+use noodles_bam as bam;
+use noodles_sam::alignment::record::cigar::op::Kind;
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasher, Hasher};
 use std::io::Write;
@@ -410,10 +411,13 @@ impl TinAccum {
     ///   (pysam pileup default flag_filter also excludes BAM_FDUP)
     /// - Neither function filters by MAPQ or supplementary flags
     pub fn process_read(&mut self, record: &bam::Record, chrom_upper: &str, index: &TinIndex) {
-        let flags = record.flags();
+        let _flags = record.flags();
 
         // Skip unmapped, QC-fail, secondary only (matching upstream tin.py)
-        if flags & 0x4 != 0 || flags & 0x200 != 0 || flags & 0x100 != 0 {
+        if record.flags().bits() & 0x4 != 0
+            || record.flags().bits() & 0x200 != 0
+            || record.flags().bits() & 0x100 != 0
+        {
             return;
         }
 
@@ -482,7 +486,7 @@ impl TinAccum {
         // duplicate-flagged reads from coverage columns. However, the upstream
         // check_min_reads() uses fetch() which does NOT filter duplicates, so
         // duplicates are allowed above for the unique_starts tracking.
-        if flags & 0x400 != 0 {
+        if record.flags().bits() & 0x400 != 0 {
             return;
         }
 
@@ -633,21 +637,26 @@ fn compute_tin(coverage: &[u32], n_total_positions: usize) -> f64 {
 /// Fill `buf` with aligned blocks from the CIGAR, reusing the existing
 /// Vec capacity to avoid per-read heap allocation.
 fn fill_aligned_blocks(record: &bam::Record, buf: &mut Vec<(u64, u64)>) {
-    use rust_htslib::bam::record::Cigar;
-
     buf.clear();
-    let mut pos = record.pos() as u64;
+    let mut pos = record
+        .alignment_start()
+        .transpose()
+        .ok()
+        .flatten()
+        .map(|p| p.get() as u64 - 1)
+        .unwrap_or(0);
 
-    for op in record.cigar().iter() {
-        match op {
-            Cigar::Match(len) | Cigar::Equal(len) | Cigar::Diff(len) => {
-                buf.push((pos, pos + *len as u64));
-                pos += *len as u64;
+    for op in record.cigar().iter().map(|op_result| op_result.unwrap()) {
+        let len = op.len() as u64;
+        match op.kind() {
+            Kind::Match | Kind::SequenceMatch | Kind::SequenceMismatch => {
+                buf.push((pos, pos + len));
+                pos += len;
             }
-            Cigar::Del(len) | Cigar::RefSkip(len) => {
-                pos += *len as u64;
+            Kind::Deletion | Kind::Skip => {
+                pos += len;
             }
-            Cigar::Ins(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) | Cigar::Pad(_) => {}
+            Kind::Insertion | Kind::SoftClip | Kind::HardClip | Kind::Pad => {}
         }
     }
 }

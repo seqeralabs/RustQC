@@ -6,7 +6,9 @@
 
 use anyhow::{bail, Context, Result};
 use log::debug;
-use rust_htslib::bam;
+use noodles_bam as bam;
+use noodles_sam as sam;
+use noodles_sam::alignment::Record;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
@@ -144,27 +146,48 @@ impl PreseqAccum {
     /// * `record` - The BAM record to process.
     pub fn process_read(&mut self, record: &bam::Record) {
         // Filter: primary + mapped only (matches preseq v3.2.0 empirical behavior).
-        if record.tid() < 0 {
-            return;
-        }
-        if record.is_secondary() || record.is_supplementary() {
+        let tid = match record.reference_sequence_id().transpose().ok().flatten() {
+            Some(id) => id as i32,
+            None => return, // unmapped
+        };
+        let flags = record.flags();
+        if flags.is_secondary() || flags.is_supplementary() {
             return;
         }
         self.n_mates_processed += 1;
 
-        let tid = record.tid();
-        let start = record.pos();
-        let end = record.cigar().end_pos();
+        let start = record
+            .alignment_start()
+            .transpose()
+            .ok()
+            .flatten()
+            .map(|p| p.get() as i64 - 1)
+            .unwrap_or(-1);
+        // Compute end position from CIGAR
+        let end = start
+            + record
+                .cigar()
+                .iter()
+                .filter_map(|r| r.ok())
+                .map(|op| match op.kind() {
+                    sam::alignment::record::cigar::op::Kind::Match
+                    | sam::alignment::record::cigar::op::Kind::SequenceMatch
+                    | sam::alignment::record::cigar::op::Kind::SequenceMismatch
+                    | sam::alignment::record::cigar::op::Kind::Deletion
+                    | sam::alignment::record::cigar::op::Kind::Skip => op.len() as i64,
+                    _ => 0,
+                })
+                .sum::<i64>();
 
         let info = MateInfo { tid, start, end };
 
         // Check if this read is part of a pair
-        if record.is_paired() {
+        if flags.is_segmented() {
             // Use a FNV-1a hash of the qname as the mate-buffer key to avoid
             // allocating a Vec<u8> per read. Collisions are negligible for
             // typical BAM qnames; the MateInfo already stores coordinates that
             // would detect a spurious match if needed.
-            let qname_hash = fnv1a_hash_bytes(record.qname());
+            let qname_hash = fnv1a_hash_bytes(&crate::rna::bam_flags::read_name(&record));
 
             if let Some(mate) = self.dangling_mates.remove(&qname_hash) {
                 // Found the mate — try to merge

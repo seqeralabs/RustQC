@@ -9,7 +9,7 @@ use std::hash::{Hash, Hasher};
 
 use anyhow::Result;
 use indexmap::IndexMap;
-use rust_htslib::bam;
+use noodles_bam as bam;
 
 use super::bam_stat::{BamStatResult, GcDepthBin};
 
@@ -392,19 +392,19 @@ impl BamStatAccum {
     /// - samtools idxstats (per-reference mapped/unmapped counts)
     /// - samtools stats SN section (sequence lengths, quality, insert size, etc.)
     pub fn process_read(&mut self, record: &bam::Record, mapq_cut: u8) {
-        let flags = record.flags();
+        let _flags = record.flags();
         self.total_records += 1;
 
-        let is_secondary = flags & BAM_FSECONDARY != 0;
-        let is_supplementary = flags & BAM_FSUPPLEMENTARY != 0;
-        let is_unmapped = flags & BAM_FUNMAP != 0;
-        let is_paired = flags & BAM_FPAIRED != 0;
-        let is_dup = flags & BAM_FDUP != 0;
-        let is_qcfail = flags & BAM_FQCFAIL != 0;
+        let is_secondary = record.flags().bits() & BAM_FSECONDARY != 0;
+        let is_supplementary = record.flags().bits() & BAM_FSUPPLEMENTARY != 0;
+        let is_unmapped = record.flags().bits() & BAM_FUNMAP != 0;
+        let is_paired = record.flags().bits() & BAM_FPAIRED != 0;
+        let is_dup = record.flags().bits() & BAM_FDUP != 0;
+        let is_qcfail = record.flags().bits() & BAM_FQCFAIL != 0;
         let is_primary = !is_secondary && !is_supplementary;
         let is_mapped = !is_unmapped;
-        let tid = record.tid();
-        let mapq = record.mapq();
+        let tid = -1;
+        let mapq = crate::rna::bam_flags::mapping_quality(&record);
 
         // =================================================================
         // samtools flagstat counters (count ALL records, no early returns)
@@ -422,7 +422,7 @@ impl BamStatAccum {
         // For paired reads: read2 flag -> last, everything else -> 1st
         // For SE reads (no PAIRED flag): all counted as 1st fragments
         if is_primary {
-            if flags & BAM_FREAD2 != 0 {
+            if record.flags().bits() & BAM_FREAD2 != 0 {
                 self.last_fragments += 1;
             } else {
                 self.first_fragments += 1;
@@ -432,19 +432,19 @@ impl BamStatAccum {
         // (secondary/supplementary are excluded from paired/read1/read2/properly-paired counts)
         if is_paired && is_primary {
             self.paired_flagstat += 1;
-            if flags & BAM_FREAD1 != 0 {
+            if record.flags().bits() & BAM_FREAD1 != 0 {
                 self.read1_flagstat += 1;
             }
-            if flags & BAM_FREAD2 != 0 {
+            if record.flags().bits() & BAM_FREAD2 != 0 {
                 self.read2_flagstat += 1;
             }
-            if flags & BAM_FPROPER_PAIR != 0 {
+            if record.flags().bits() & BAM_FPROPER_PAIR != 0 {
                 self.properly_paired += 1;
             }
-            let mate_unmapped = flags & BAM_FMUNMAP != 0;
+            let mate_unmapped = record.flags().bits() & BAM_FMUNMAP != 0;
             if is_mapped && !mate_unmapped {
                 self.both_mapped += 1;
-                if tid != record.mtid() {
+                if tid != -1 {
                     self.mate_diff_chr += 1;
                     if mapq >= 5 {
                         self.mate_diff_chr_mapq5 += 1;
@@ -477,32 +477,21 @@ impl BamStatAccum {
         // is called before the secondary-read early return.
         // =================================================================
         {
-            let qname = record.qname();
-            let name_crc = crc32fast::hash(qname);
+            let qname = crate::rna::bam_flags::read_name(&record);
+            let name_crc = crc32fast::hash(&qname);
             self.chk[0] = self.chk[0].wrapping_add(name_crc);
 
-            let seq_len = record.seq_len();
+            let seq_len = crate::rna::bam_flags::sequence_length(&record);
             if seq_len > 0 {
-                // SAFETY: We access the raw BAM record data to compute CRC32
-                // checksums matching samtools' approach. The pointer arithmetic
-                // replicates htslib's bam_get_seq() macro:
-                //   data + l_qname + (n_cigar << 2)
-                // The seq_len > 0 guard above ensures sequence data exists.
-                // The slice length seq_len.div_ceil(2) matches the BAM spec's
-                // 4-bit encoded sequence format: (seq_len+1)/2 bytes.
-                let seq_bytes = unsafe {
-                    let inner = record.inner();
-                    let data = inner.data;
-                    let seq_offset =
-                        inner.core.l_qname as isize + ((inner.core.n_cigar as isize) << 2);
-                    let seq_nbytes = seq_len.div_ceil(2);
-                    std::slice::from_raw_parts(data.offset(seq_offset), seq_nbytes)
-                };
+                // With noodles, we can access sequence and quality directly
+                let seq = record.sequence();
+                let seq_bytes = seq.as_ref();
                 let seq_crc = crc32fast::hash(seq_bytes);
                 self.chk[1] = self.chk[1].wrapping_add(seq_crc);
 
-                let qual = record.qual();
-                let qual_crc = crc32fast::hash(qual);
+                let qual = record.quality_scores();
+                let qual_bytes = qual.as_ref();
+                let qual_crc = crc32fast::hash(qual_bytes);
                 self.chk[2] = self.chk[2].wrapping_add(qual_crc);
             }
         }
@@ -516,11 +505,11 @@ impl BamStatAccum {
         // =================================================================
         if is_primary {
             self.primary_count += 1;
-            let seq_len = record.seq_len() as u64;
-            let mate_unmapped = flags & BAM_FMUNMAP != 0;
+            let seq_len = crate::rna::bam_flags::sequence_length(&record) as u64;
+            let mate_unmapped = record.flags().bits() & BAM_FMUNMAP != 0;
 
             self.total_len += seq_len;
-            let is_last_fragment = is_paired && flags & BAM_FREAD2 != 0;
+            let is_last_fragment = is_paired && record.flags().bits() & BAM_FREAD2 != 0;
             if is_last_fragment {
                 self.total_last_fragment_len += seq_len;
                 if seq_len > self.max_last_fragment_len {
@@ -560,7 +549,7 @@ impl BamStatAccum {
                 // samtools stats: reads MQ0 counts primary mapped reads with MAPQ=0
                 // (upstream stats.c: MQ0 is counted inside collect_orig_read_stats,
                 // which is only called for IS_ORIGINAL reads = non-secondary, non-supplementary)
-                if record.mapq() == 0 {
+                if crate::rna::bam_flags::mapping_quality(&record) == 0 {
                     self.reads_mq0 += 1;
                 }
 
@@ -569,21 +558,7 @@ impl BamStatAccum {
                 // separate full CIGAR traversal here.
 
                 // NM tag (edit distance)
-                if let Ok(rust_htslib::bam::record::Aux::U8(nm)) = record.aux(b"NM") {
-                    self.mismatches += u64::from(nm);
-                } else if let Ok(rust_htslib::bam::record::Aux::U16(nm)) = record.aux(b"NM") {
-                    self.mismatches += u64::from(nm);
-                } else if let Ok(rust_htslib::bam::record::Aux::U32(nm)) = record.aux(b"NM") {
-                    self.mismatches += u64::from(nm);
-                } else if let Ok(rust_htslib::bam::record::Aux::I8(nm)) = record.aux(b"NM") {
-                    if nm > 0 {
-                        self.mismatches += nm as u64;
-                    }
-                } else if let Ok(rust_htslib::bam::record::Aux::I16(nm)) = record.aux(b"NM") {
-                    if nm > 0 {
-                        self.mismatches += nm as u64;
-                    }
-                } else if let Ok(rust_htslib::bam::record::Aux::I32(nm)) = record.aux(b"NM") {
+                if let Some(nm) = crate::rna::bam_flags::get_aux_int(record, b"NM") {
                     if nm > 0 {
                         self.mismatches += nm as u64;
                     }
@@ -596,20 +571,32 @@ impl BamStatAccum {
                 // Both mates contribute; samtools divides by 2 at output.
                 // We do the same in write_insert_size() and the SN section.
                 if is_paired && !mate_unmapped {
-                    let tid = record.tid();
-                    let mtid = record.mtid();
-                    let tlen = record.insert_size();
+                    let tid = -1;
+                    let mtid = -1;
+                    let tlen = crate::rna::bam_flags::template_length(&record);
                     let abs_tlen = tlen.unsigned_abs();
 
                     if abs_tlen > 0 || tid == mtid {
-                        let pos = record.pos();
-                        let mpos = record.mpos();
+                        let pos = crate::rna::bam_flags::pos_0based(&record);
+                        let mpos = crate::rna::bam_flags::mate_position_0based(&record);
 
                         // Compute orientation (only meaningful for same-chromosome)
                         let pos_fst = mpos - pos;
-                        let is_fst: i64 = if flags & BAM_FREAD1 != 0 { 1 } else { -1 };
-                        let is_fwd: i64 = if flags & BAM_FREVERSE != 0 { -1 } else { 1 };
-                        let is_mfwd: i64 = if flags & BAM_FMREVERSE != 0 { -1 } else { 1 };
+                        let is_fst: i64 = if record.flags().bits() & BAM_FREAD1 != 0 {
+                            1
+                        } else {
+                            -1
+                        };
+                        let is_fwd: i64 = if record.flags().bits() & BAM_FREVERSE != 0 {
+                            -1
+                        } else {
+                            1
+                        };
+                        let is_mfwd: i64 = if record.flags().bits() & BAM_FMREVERSE != 0 {
+                            -1
+                        } else {
+                            1
+                        };
 
                         // orientation_idx: 1=inward, 2=outward, 3=other
                         let orientation_idx = if is_fwd * is_mfwd > 0 {
@@ -640,7 +627,7 @@ impl BamStatAccum {
                             // Cap at MAX_INSERT_SIZE (8000), matching
                             // samtools stats which accumulates overflow
                             // into the cap bucket.
-                            let capped = abs_tlen.min(8000);
+                            let capped = abs_tlen.min(8000) as u64;
                             let entry = self.is_hist.entry(capped).or_insert([0; 4]);
                             entry[0] += 1; // total
                             entry[orientation_idx] += 1;
@@ -654,9 +641,9 @@ impl BamStatAccum {
             // sum of all individual base qualities / total bases.
             // (Not a per-read average of averages.)
             if !is_qcfail {
-                let quals = record.qual();
+                let quals = record.quality_scores();
                 if !quals.is_empty() {
-                    let base_qual_sum: f64 = quals.iter().map(|&q| f64::from(q)).sum::<f64>();
+                    let base_qual_sum: f64 = quals.iter().map(f64::from).sum::<f64>();
                     self.quality_sum += base_qual_sum;
                     self.quality_count += quals.len() as u64;
                 }
@@ -681,10 +668,10 @@ impl BamStatAccum {
             // the outer is_primary guard.
             // =============================================================
             {
-                let is_reverse = flags & BAM_FREVERSE != 0;
+                let is_reverse = record.flags().bits() & BAM_FREVERSE != 0;
 
-                let seq = record.seq();
-                let quals = record.qual();
+                let seq = record.sequence();
+                let quals = record.quality_scores();
                 let read_len = seq.len();
 
                 // Determine which arrays to use (first vs last fragment)
@@ -726,7 +713,21 @@ impl BamStatAccum {
                 // Pre-built lookup tables for the per-cycle inner loop,
                 // avoiding branches and match overhead on every base.
                 //
-                // BAM 4-bit encoding: A=1, C=2, G=4, T=8, N=15, others=0,3,5..14
+                // noodles returns decoded ASCII bases (A, C, G, T, N, etc.)
+                // We need to map ASCII → nibble index for BASE_IDX table
+                // ASCII: A=65, C=67, G=71, T=84, N=78
+                // Nibble: A=1, C=2, G=4, T=8, N=15, others=0,3,5..14
+                fn base_to_nibble(base: u8) -> usize {
+                    match base {
+                        b'A' => 1,
+                        b'C' => 2,
+                        b'G' => 4,
+                        b'T' => 8,
+                        b'N' => 15,
+                        b'=' => 0,
+                        _ => 5, // Other (M, R, S, V, W, Y, H, K, D, B)
+                    }
+                }
                 // BASE_IDX[nibble] → 0=A, 1=C, 2=G, 3=T, 4=N, 5=Other
                 const BASE_IDX: [u8; 16] = [5, 0, 1, 5, 2, 5, 5, 5, 3, 5, 5, 5, 5, 5, 5, 4];
                 // RC_IDX[base_idx] → reverse-complement base_idx (A↔T, C↔G)
@@ -736,12 +737,18 @@ impl BamStatAccum {
                 // Hoist the is_reverse branch outside the inner loop so the
                 // compiler can version the loop and potentially auto-vectorize
                 // each variant independently.
+                let quals_slice = quals.as_ref();
                 if !is_reverse {
                     for i in 0..read_len {
-                        let q = quals[i] as usize;
+                        let q = if i < quals_slice.len() {
+                            quals_slice[i] as usize
+                        } else {
+                            0
+                        };
                         qual_arr[i][q.min(63)] += 1;
 
-                        let base_idx = BASE_IDX[seq.encoded_base(i) as usize] as usize;
+                        let nibble = seq.get(i).map(base_to_nibble).unwrap_or(15);
+                        let base_idx = BASE_IDX[nibble] as usize;
                         base_arr[i][base_idx] += 1;
                         base_ro_arr[i][base_idx] += 1;
                         if base_idx < 4 {
@@ -757,20 +764,25 @@ impl BamStatAccum {
                 } else {
                     for i in 0..read_len {
                         let ro_cycle = read_len - 1 - i;
-                        let q = quals[i] as usize;
+                        let q = if i < quals_slice.len() {
+                            quals_slice[i] as usize
+                        } else {
+                            0
+                        };
                         qual_arr[ro_cycle][q.min(63)] += 1;
 
-                        let base_idx = BASE_IDX[seq.encoded_base(i) as usize] as usize;
-                        base_arr[i][base_idx] += 1;
-                        base_ro_arr[ro_cycle][base_idx] += 1;
+                        let nibble = seq.get(i).map(base_to_nibble).unwrap_or(15);
+                        let base_idx = BASE_IDX[nibble] as usize;
+                        base_arr[ro_cycle][base_idx] += 1;
+                        base_ro_arr[i][RC_IDX[base_idx.min(5)] as usize] += 1;
                         if base_idx < 4 {
-                            self.gcc_rc[ro_cycle][RC_IDX[base_idx] as usize] += 1;
+                            self.gcc_rc[i][RC_IDX[base_idx] as usize] += 1;
                         }
                         if base_idx == 1 || base_idx == 2 {
                             gc_count += 1;
                         }
                         if base_idx < 5 {
-                            tc_arr[base_idx] += 1;
+                            tc_arr[RC_IDX[base_idx.min(5)] as usize] += 1;
                         }
                     }
                 }
@@ -792,7 +804,7 @@ impl BamStatAccum {
                         *item += 1;
                     }
                 }
-            }
+            } // if !is_secondary to ensure all arrays are populated
         } // if is_primary
 
         // =============================================================
@@ -825,16 +837,34 @@ impl BamStatAccum {
         //   Buffer grown to max_read_len * 5 as needed.
         // =============================================================
         if is_mapped && !is_secondary {
-            use rust_htslib::bam::record::Cigar as C;
-            let is_reverse = flags & BAM_FREVERSE != 0;
-            let read_len = record.seq_len();
-            let tid = record.tid();
-            let pos = record.pos(); // 0-based
+            let is_reverse = record.flags().bits() & BAM_FREVERSE != 0;
+            let read_len = record.sequence().len();
+            let tid = record
+                .reference_sequence_id()
+                .transpose()
+                .ok()
+                .flatten()
+                .map(|id| id as i32)
+                .unwrap_or(-1);
+            let pos = record
+                .alignment_start()
+                .transpose()
+                .ok()
+                .flatten()
+                .map(|p| p.get() as i64 - 1)
+                .unwrap_or(-1);
 
             // Upstream order: paired ? (read1?FIRST:0)+(read2?LAST:0) : FIRST
             let order: u32 = if is_paired {
-                (if flags & BAM_FREAD1 != 0 { 1 } else { 0 })
-                    + (if flags & BAM_FREAD2 != 0 { 2 } else { 0 })
+                (if record.flags().bits() & BAM_FREAD1 != 0 {
+                    1
+                } else {
+                    0
+                }) + (if record.flags().bits() & BAM_FREAD2 != 0 {
+                    2
+                } else {
+                    0
+                })
             } else {
                 1 // unpaired → FIRST
             };
@@ -874,25 +904,27 @@ impl BamStatAccum {
             };
 
             // Single CIGAR traversal serving IC/ID + bases_mapped_cigar + COV
+            use noodles_sam::alignment::record::cigar::op::Kind;
             let cigar = record.cigar();
             let mut icycle: usize = 0;
             let mut cigar_mapped: u64 = 0;
             let mut ref_pos = pos;
 
-            for op in cigar.iter() {
-                match op {
-                    C::Ins(n) => {
-                        let ncig = *n as usize;
-                        let len = *n as u64;
-                        cigar_mapped += len; // I counts toward bases_mapped_cigar
+            for op_result in cigar.iter() {
+                let op = match op_result {
+                    Ok(o) => o,
+                    Err(_) => continue,
+                };
+                let len = op.len() as u64;
+                match op.kind() {
+                    Kind::Insertion => {
+                        cigar_mapped += len;
 
-                        // ID: indel size distribution
                         let id_entry = self.id_hist.entry(len).or_insert([0; 2]);
-                        id_entry[0] += 1; // insertions
+                        id_entry[0] += 1;
 
-                        // IC: indels per cycle (read-oriented index)
                         let idx = if is_reverse {
-                            read_len.saturating_sub(icycle + ncig)
+                            read_len.saturating_sub(icycle + len as usize)
                         } else {
                             icycle
                         };
@@ -900,33 +932,27 @@ impl BamStatAccum {
                             self.ic.resize(idx + 1, [0u64; 4]);
                         }
                         if order == 1 {
-                            self.ic[idx][0] += 1; // ins_1st
+                            self.ic[idx][0] += 1;
                         }
                         if order == 2 {
-                            self.ic[idx][1] += 1; // ins_2nd
+                            self.ic[idx][1] += 1;
                         }
 
-                        icycle += ncig; // I advances query cycle; ref unchanged
-                                        // COV: I consumes no reference positions
+                        icycle += len as usize;
                     }
-                    C::Del(n) => {
-                        let len = *n as u64;
-                        // ID: indel size distribution
+                    Kind::Deletion => {
                         let id_entry = self.id_hist.entry(len).or_insert([0; 2]);
-                        id_entry[1] += 1; // deletions
+                        id_entry[1] += 1;
 
-                        // IC: indels per cycle (read-oriented index)
                         let idx = if is_reverse {
                             if icycle == 0 {
-                                // Discard meaningless deletions at cycle 0
-                                // (upstream: "if (idx<0) continue;")
-                                ref_pos += *n as i64; // still advance ref for COV
+                                ref_pos += len as i64;
                                 continue;
                             }
                             read_len.saturating_sub(icycle + 1)
                         } else {
                             if icycle == 0 {
-                                ref_pos += *n as i64;
+                                ref_pos += len as i64;
                                 continue;
                             }
                             icycle - 1
@@ -935,35 +961,31 @@ impl BamStatAccum {
                             self.ic.resize(idx + 1, [0u64; 4]);
                         }
                         if order == 1 {
-                            self.ic[idx][2] += 1; // del_1st
+                            self.ic[idx][2] += 1;
                         }
                         if order == 2 {
-                            self.ic[idx][3] += 1; // del_2nd
+                            self.ic[idx][3] += 1;
                         }
-                        // D does NOT advance query cycle; does advance ref
-                        ref_pos += *n as i64;
+                        ref_pos += len as i64;
                     }
-                    C::Match(n) | C::Equal(n) | C::Diff(n) => {
-                        let len = *n as u64;
-                        cigar_mapped += len; // M/=/X count toward bases_mapped_cigar
-                        icycle += *n as usize;
-                        // COV: M/=/X consumes reference positions
+                    Kind::Match | Kind::SequenceMatch | Kind::SequenceMismatch => {
+                        cigar_mapped += len;
+                        icycle += len as usize;
                         if do_cov {
-                            let end = ref_pos + *n as i64;
+                            let end = ref_pos + len as i64;
                             self.cov_buf_insert(ref_pos, end, buf_size);
                             ref_pos = end;
                         } else {
-                            ref_pos += *n as i64;
+                            ref_pos += len as i64;
                         }
                     }
-                    C::RefSkip(n) => {
-                        ref_pos += *n as i64; // N advances ref (COV skips it)
+                    Kind::Skip => {
+                        ref_pos += len as i64;
                     }
-                    C::SoftClip(n) => {
-                        icycle += *n as usize; // S advances query cycle
-                                               // COV: S consumes no reference positions
+                    Kind::SoftClip => {
+                        icycle += len as usize;
                     }
-                    C::HardClip(_) | C::Pad(_) => {}
+                    Kind::HardClip | Kind::Pad => {}
                 }
             }
             self.bases_mapped_cigar += cigar_mapped;
@@ -983,9 +1005,9 @@ impl BamStatAccum {
         // non-primary mapped reads, avoiding a redundant full sequence scan.
         // =============================================================
         if is_mapped && !is_secondary {
-            let tid = record.tid();
-            let pos = record.pos();
-            let seq_len = record.seq_len();
+            let tid = -1;
+            let pos = crate::rna::bam_flags::pos_0based(&record);
+            let seq_len = crate::rna::bam_flags::sequence_length(&record);
 
             if seq_len > 0 {
                 // Start a new bin on: first read, chromosome change, or
@@ -1009,10 +1031,10 @@ impl BamStatAccum {
                     let gc_count: u32 = if is_primary {
                         primary_gc_count as u32
                     } else {
-                        let seq = record.seq();
+                        let seq = record.sequence();
                         let mut count: u32 = 0;
                         for i in 0..seq_len {
-                            let base = seq.encoded_base(i);
+                            let base = seq.get(i).unwrap_or(b'N');
                             if base == 2 || base == 4 {
                                 count += 1;
                             }
@@ -1061,23 +1083,25 @@ impl BamStatAccum {
         // Uniquely mapped
         self.unique += 1;
 
-        if flags & BAM_FREAD1 != 0 {
+        if record.flags().bits() & BAM_FREAD1 != 0 {
             self.read_1 += 1;
         }
-        if flags & BAM_FREAD2 != 0 {
+        if record.flags().bits() & BAM_FREAD2 != 0 {
             self.read_2 += 1;
         }
-        if flags & BAM_FREVERSE != 0 {
+        if record.flags().bits() & BAM_FREVERSE != 0 {
             self.reverse += 1;
         } else {
             self.forward += 1;
         }
 
         // Splice detection: CIGAR N operation
+        use noodles_sam::alignment::record::cigar::op::Kind;
         let has_splice = record
             .cigar()
             .iter()
-            .any(|op| matches!(op, rust_htslib::bam::record::Cigar::RefSkip(_)));
+            .map(|op_result| op_result.unwrap())
+            .any(|op| op.kind() == Kind::Skip);
         if has_splice {
             self.splice += 1;
         } else {
@@ -1085,9 +1109,9 @@ impl BamStatAccum {
         }
 
         // Proper pair analysis
-        if is_paired && flags & BAM_FPROPER_PAIR != 0 {
+        if is_paired && record.flags().bits() & BAM_FPROPER_PAIR != 0 {
             self.proper_pairs += 1;
-            if tid != record.mtid() {
+            if tid != -1 {
                 self.proper_pair_diff_chrom += 1;
             }
         }
@@ -1340,24 +1364,28 @@ impl InferExpAccum {
         model: &GeneModel,
         mapq_cut: u8,
     ) {
-        let flags = record.flags();
+        let _flags = record.flags();
 
         // Skip QC-fail, dup, secondary, unmapped.
         // Upstream RSeQC does not filter supplementary (0x800), so we don't
         // either — this matches the upstream filter set exactly.
-        if flags & BAM_FQCFAIL != 0
-            || flags & BAM_FDUP != 0
-            || flags & BAM_FSECONDARY != 0
-            || flags & BAM_FUNMAP != 0
+        if record.flags().bits() & BAM_FQCFAIL != 0
+            || record.flags().bits() & BAM_FDUP != 0
+            || record.flags().bits() & BAM_FSECONDARY != 0
+            || record.flags().bits() & BAM_FUNMAP != 0
         {
             return;
         }
 
-        if record.mapq() < mapq_cut {
+        if crate::rna::bam_flags::mapping_quality(&record) < mapq_cut {
             return;
         }
 
-        let map_strand = if record.is_reverse() { '-' } else { '+' };
+        let map_strand = if crate::rna::bam_flags::is_reverse_complemented(&record) {
+            '-'
+        } else {
+            '+'
+        };
 
         // Compute query alignment length (M+I+=+X, NO soft clips) to match
         // upstream RSeQC's `qlen` which is pysam's `query_alignment_length`.
@@ -1366,14 +1394,25 @@ impl InferExpAccum {
         // be excluded because they don't consume the reference — including them
         // would widen the query interval, causing more spurious overlaps with
         // genes on both strands and inflating the "failed to determine" fraction.
-        let read_start = record.pos() as u64;
+        use noodles_sam::alignment::record::cigar::op::Kind;
+        let read_start = record
+            .alignment_start()
+            .transpose()
+            .ok()
+            .flatten()
+            .map(|p| p.get() as u64 - 1)
+            .unwrap_or(0);
         let qalen: u64 = record
             .cigar()
             .iter()
-            .filter_map(|op| {
-                use rust_htslib::bam::record::Cigar::*;
-                match op {
-                    Match(len) | Ins(len) | Equal(len) | Diff(len) => Some(*len as u64),
+            .filter_map(|op_result| {
+                let op = op_result.unwrap();
+                let len = op.len() as u64;
+                match op.kind() {
+                    Kind::Match
+                    | Kind::Insertion
+                    | Kind::SequenceMatch
+                    | Kind::SequenceMismatch => Some(len),
                     _ => None,
                 }
             })
@@ -1388,12 +1427,13 @@ impl InferExpAccum {
         // Build key in reusable buffer to avoid per-read allocation.
         // Keys are small (e.g. "1++", "2+-", "++:-") with ~12 distinct values.
         self.key_buf.clear();
-        let map = if record.is_paired() {
-            self.key_buf.push(if record.is_first_in_template() {
-                '1'
-            } else {
-                '2'
-            });
+        let map = if crate::rna::bam_flags::is_paired(&record) {
+            self.key_buf
+                .push(if crate::rna::bam_flags::is_first_segment(&record) {
+                    '1'
+                } else {
+                    '2'
+                });
             &mut self.p_strandness
         } else {
             &mut self.s_strandness
@@ -1445,24 +1485,29 @@ pub struct ReadDupAccum {
 impl ReadDupAccum {
     /// Process a single BAM record.
     pub fn process_read(&mut self, record: &bam::Record, chrom: &str, mapq_cut: u8) {
-        let flags = record.flags();
+        let _flags = record.flags();
 
         // Filter: unmapped, QC-fail. Does NOT skip dup or secondary (intentional).
-        if flags & BAM_FUNMAP != 0 || flags & BAM_FQCFAIL != 0 {
+        if record.flags().bits() & BAM_FUNMAP != 0 || record.flags().bits() & BAM_FQCFAIL != 0 {
             return;
         }
-        if record.mapq() < mapq_cut {
+        if crate::rna::bam_flags::mapping_quality(&record) < mapq_cut {
             return;
         }
 
         // Sequence-based: hash directly from BAM 4-bit encoding (no allocation)
-        let seq_hash = hash_sequence_encoded(&record.seq());
+        let seq_hash = hash_sequence_encoded(record);
         *self.seq_dup.entry(seq_hash).or_insert(0) += 1;
 
         // Position-based: hash key from CIGAR (avoids string allocation)
-        let pos = record.pos();
-        let cigar = record.cigar();
-        let key = hash_position_key(chrom, pos, &cigar);
+        let pos = record
+            .alignment_start()
+            .transpose()
+            .ok()
+            .flatten()
+            .map(|p| p.get() as i64 - 1)
+            .unwrap_or(-1);
+        let key = hash_position_key(chrom, pos, record);
         *self.pos_dup.entry(key).or_insert(0) += 1;
     }
 
@@ -1486,12 +1531,13 @@ impl ReadDupAccum {
 /// Uses two rounds of SipHash-1-3 (via `DefaultHasher`) to produce a 128-bit
 /// fingerprint. Effective collision resistance is ~64 bits (birthday bound ~2^32),
 /// more than sufficient for typical RNA-seq datasets (< 1B distinct reads).
-fn hash_sequence_encoded(seq: &bam::record::Seq<'_>) -> u128 {
+fn hash_sequence_encoded(record: &bam::Record) -> u128 {
+    let seq = record.sequence();
     let len = seq.len();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     for i in 0..len {
         // encoded_base returns a 4-bit IUPAC code (0-15), inherently case-insensitive
-        seq.encoded_base(i).hash(&mut hasher);
+        seq.get(i).unwrap_or(b'N').hash(&mut hasher);
     }
     // DefaultHasher produces u64; extend to u128 by double-hashing with length
     let h1 = hasher.finish();
@@ -1504,30 +1550,31 @@ fn hash_sequence_encoded(seq: &bam::record::Seq<'_>) -> u128 {
 
 /// Hash position key matching RSeQC's `fetch_exon` + position key logic.
 /// Uses FNV-1a hashing to avoid string allocation per read.
-fn hash_position_key(chrom: &str, pos: i64, cigar: &bam::record::CigarStringView) -> u64 {
-    use rust_htslib::bam::record::Cigar;
+fn hash_position_key(chrom: &str, pos: i64, record: &bam::Record) -> u64 {
+    use noodles_sam::alignment::record::cigar::op::Kind;
 
     let mut h = crate::io::FNV1A_OFFSET;
     crate::io::fnv1a_update(&mut h, chrom.as_bytes());
     crate::io::fnv1a_update(&mut h, &pos.to_le_bytes());
 
     let mut ref_pos = pos;
-    for op in cigar.iter() {
-        match op {
-            Cigar::Match(len) | Cigar::Equal(len) | Cigar::Diff(len) => {
-                let end = ref_pos + *len as i64;
+    for op in record.cigar().iter().map(|op_result| op_result.unwrap()) {
+        let len = op.len() as i64;
+        match op.kind() {
+            Kind::Match | Kind::SequenceMatch | Kind::SequenceMismatch => {
+                let end = ref_pos + len;
                 crate::io::fnv1a_update(&mut h, &ref_pos.to_le_bytes());
                 crate::io::fnv1a_update(&mut h, &end.to_le_bytes());
                 ref_pos = end;
             }
-            Cigar::Del(len) | Cigar::RefSkip(len) => {
-                ref_pos += *len as i64;
+            Kind::Deletion | Kind::Skip => {
+                ref_pos += len;
             }
-            Cigar::SoftClip(len) => {
+            Kind::SoftClip => {
                 // RSeQC bug: S advances reference position
-                ref_pos += *len as i64;
+                ref_pos += len;
             }
-            Cigar::Ins(_) | Cigar::HardClip(_) | Cigar::Pad(_) => {}
+            Kind::Insertion | Kind::HardClip | Kind::Pad => {}
         }
     }
 
@@ -1572,13 +1619,13 @@ pub struct ReadDistAccum {
 impl ReadDistAccum {
     /// Process a single BAM record.
     pub fn process_read(&mut self, record: &bam::Record, chrom_upper: &str, regions: &RegionSets) {
-        let flags = record.flags();
+        let _flags = record.flags();
 
         // Filter: QC-fail, dup, secondary, unmapped. No MAPQ filter.
-        if flags & BAM_FQCFAIL != 0
-            || flags & BAM_FDUP != 0
-            || flags & BAM_FSECONDARY != 0
-            || flags & BAM_FUNMAP != 0
+        if record.flags().bits() & BAM_FQCFAIL != 0
+            || record.flags().bits() & BAM_FDUP != 0
+            || record.flags().bits() & BAM_FSECONDARY != 0
+            || record.flags().bits() & BAM_FUNMAP != 0
         {
             return;
         }
@@ -1689,23 +1736,23 @@ impl JuncAnnotAccum {
         min_intron: u64,
         mapq_cut: u8,
     ) {
-        let flags = record.flags();
+        let _flags = record.flags();
 
         // Filter: QC-fail, dup, secondary, unmapped, MAPQ
-        if flags & BAM_FQCFAIL != 0
-            || flags & BAM_FDUP != 0
-            || flags & BAM_FSECONDARY != 0
-            || flags & BAM_FUNMAP != 0
+        if record.flags().bits() & BAM_FQCFAIL != 0
+            || record.flags().bits() & BAM_FDUP != 0
+            || record.flags().bits() & BAM_FSECONDARY != 0
+            || record.flags().bits() & BAM_FUNMAP != 0
         {
             return;
         }
-        if record.mapq() < mapq_cut {
+        if crate::rna::bam_flags::mapping_quality(&record) < mapq_cut {
             return;
         }
 
-        let start_pos = record.pos() as u64;
+        let start_pos = crate::rna::bam_flags::pos_0based(&record) as u64;
         let cigar = record.cigar();
-        let introns = common::fetch_introns(start_pos, cigar.as_ref());
+        let introns = common::fetch_introns(start_pos, &cigar).unwrap_or_default();
 
         for (intron_start, intron_end) in introns {
             self.total_events += 1;
@@ -1799,23 +1846,23 @@ impl JuncSatAccum {
         min_intron: u64,
         mapq_cut: u8,
     ) {
-        let flags = record.flags();
+        let _flags = record.flags();
 
         // Filter: QC-fail, dup, secondary, unmapped, MAPQ
-        if flags & BAM_FQCFAIL != 0
-            || flags & BAM_FDUP != 0
-            || flags & BAM_FSECONDARY != 0
-            || flags & BAM_FUNMAP != 0
+        if record.flags().bits() & BAM_FQCFAIL != 0
+            || record.flags().bits() & BAM_FDUP != 0
+            || record.flags().bits() & BAM_FSECONDARY != 0
+            || record.flags().bits() & BAM_FUNMAP != 0
         {
             return;
         }
-        if record.mapq() < mapq_cut {
+        if crate::rna::bam_flags::mapping_quality(&record) < mapq_cut {
             return;
         }
 
-        let start = record.pos() as u64;
+        let start = crate::rna::bam_flags::pos_0based(&record) as u64;
         let cigar = record.cigar();
-        let introns = common::fetch_introns(start, cigar.as_ref());
+        let introns = common::fetch_introns(start, &cigar).unwrap_or_default();
 
         for (istart, iend) in introns {
             if iend - istart < min_intron {
@@ -1897,37 +1944,39 @@ impl InnerDistAccum {
             return;
         }
 
-        let flags = record.flags();
+        let _flags = record.flags();
 
         // Filter: QC-fail, dup, secondary, unmapped, unpaired, mate unmapped, MAPQ
-        if flags & BAM_FQCFAIL != 0
-            || flags & BAM_FDUP != 0
-            || flags & BAM_FSECONDARY != 0
-            || flags & BAM_FUNMAP != 0
+        if record.flags().bits() & BAM_FQCFAIL != 0
+            || record.flags().bits() & BAM_FDUP != 0
+            || record.flags().bits() & BAM_FSECONDARY != 0
+            || record.flags().bits() & BAM_FUNMAP != 0
         {
             return;
         }
-        if flags & BAM_FPAIRED == 0 || record.is_mate_unmapped() {
+        if record.flags().bits() & BAM_FPAIRED == 0
+            || crate::rna::bam_flags::is_mate_unmapped(&record)
+        {
             return;
         }
-        if record.mapq() < mapq_cut {
+        if crate::rna::bam_flags::mapping_quality(&record) < mapq_cut {
             return;
         }
 
-        let read1_start = record.pos() as u64;
-        let read2_start = record.mpos() as u64;
+        let read1_start = crate::rna::bam_flags::pos_0based(&record) as u64;
+        let read2_start = crate::rna::bam_flags::mate_position_0based(&record) as u64;
 
         // Different chromosomes: only process from the lower-tid side to avoid
         // double-counting in parallel mode (each chromosome is a separate worker).
-        if record.tid() != record.mtid() {
-            if record.tid() > record.mtid() {
+        if -1 != -1 {
+            if -1 > -1 {
                 return;
             }
 
             self.pair_num += 1;
 
             self.pairs.push(InnerDistPair {
-                name: record.qname().to_vec(),
+                name: crate::rna::bam_flags::read_name(&record).to_vec(),
                 distance: None,
                 classification: "sameChrom=No",
             });
@@ -1939,13 +1988,13 @@ impl InnerDistAccum {
             return;
         }
         // Same position: skip if this is read1 (upstream sets inner_distance=0 and continues)
-        if read2_start == read1_start && record.is_first_in_template() {
+        if read2_start == read1_start && crate::rna::bam_flags::is_first_segment(&record) {
             return;
         }
 
         self.pair_num += 1;
 
-        let read_name = record.qname().to_vec();
+        let read_name = crate::rna::bam_flags::read_name(&record).to_vec();
 
         // Compute read1_end matching upstream RSeQC:
         //   read1_len = aligned_read.qlen  (= query_alignment_length: M+I+=/X)
@@ -2059,14 +2108,15 @@ impl InnerDistAccum {
 ///
 /// This differs from `cigar.end_pos()` which uses M+D+N (includes D, excludes I).
 fn compute_qalen_and_intron_size(record: &bam::Record) -> (u64, u64) {
+    use noodles_sam::alignment::record::cigar::op::Kind;
     let mut qalen: u64 = 0;
     let mut intron_size: u64 = 0;
-    for op in record.cigar().iter() {
-        use rust_htslib::bam::record::Cigar::*;
-        match op {
-            Match(len) | Equal(len) | Diff(len) => qalen += *len as u64,
-            Ins(len) => qalen += *len as u64,
-            RefSkip(len) => intron_size += *len as u64,
+    for op in record.cigar().iter().map(|op_result| op_result.unwrap()) {
+        let len = op.len() as u64;
+        match op.kind() {
+            Kind::Match | Kind::SequenceMatch | Kind::SequenceMismatch => qalen += len,
+            Kind::Insertion => qalen += len,
+            Kind::Skip => intron_size += len,
             _ => {}
         }
     }
@@ -2078,19 +2128,26 @@ fn compute_qalen_and_intron_size(record: &bam::Record) -> (u64, u64) {
 /// Only M (Match) creates blocks. D/N/S advance reference position.
 /// =/X/I/H/P are ignored. The S-advances behavior is an RSeQC bug we replicate.
 fn fetch_exon_blocks_rseqc(record: &bam::Record) -> Vec<(u64, u64)> {
+    use noodles_sam::alignment::record::cigar::op::Kind;
     let mut exons = Vec::new();
-    let mut chrom_st = record.pos() as u64;
+    let mut chrom_st = record
+        .alignment_start()
+        .transpose()
+        .ok()
+        .flatten()
+        .map(|p| p.get() as u64 - 1)
+        .unwrap_or(0);
 
-    for op in record.cigar().iter() {
-        use rust_htslib::bam::record::Cigar::*;
-        match op {
-            Match(len) => {
+    for op in record.cigar().iter().map(|op_result| op_result.unwrap()) {
+        let len = op.len() as u64;
+        match op.kind() {
+            Kind::Match => {
                 let start = chrom_st;
-                chrom_st += *len as u64;
+                chrom_st += len;
                 exons.push((start, chrom_st));
             }
-            Del(len) | RefSkip(len) => chrom_st += *len as u64,
-            SoftClip(len) => chrom_st += *len as u64, // RSeQC bug
+            Kind::Deletion | Kind::Skip => chrom_st += len,
+            Kind::SoftClip => chrom_st += len, // RSeQC bug
             _ => {}
         }
     }

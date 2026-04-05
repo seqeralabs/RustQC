@@ -21,8 +21,11 @@ path = "src/main.rs"
 # CLI argument parsing
 clap = { version = "4", features = ["derive"] }
 
-# BAM file reading
-rust-htslib = { version = "1", features = ["static"] }
+# BAM file reading (noodles - pure Rust implementation)
+noodles-bam = "0.88"
+noodles-sam = "0.84"
+noodles-core = "0.19"
+noodles-csi = "0.55"
 
 # Plotting
 plotters = { version = "0.3", features = ["fontconfig-dlopen"] }

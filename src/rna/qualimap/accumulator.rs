@@ -10,8 +10,8 @@
 use std::collections::{HashMap, HashSet};
 
 use coitrees::IntervalTree;
-use rust_htslib::bam;
-use rust_htslib::bam::record::Cigar;
+use noodles_bam as bam;
+use noodles_sam::alignment::record::cigar::op::Kind;
 
 use crate::cli::Strandedness;
 
@@ -237,12 +237,12 @@ impl QualimapAccum {
         log::trace!(
             "QM process_read chrom={} flags={} pos={}",
             chrom,
-            flags,
-            record.pos()
+            flags.bits(),
+            crate::rna::bam_flags::pos_0based(&record)
         );
 
         // Skip unmapped
-        if flags & BAM_FUNMAP != 0 {
+        if record.flags().bits() & BAM_FUNMAP != 0 {
             self.counters.not_aligned += 1;
             return;
         }
@@ -256,7 +256,7 @@ impl QualimapAccum {
         }
 
         // Track secondary vs primary
-        let is_secondary = flags & BAM_FSECONDARY != 0;
+        let is_secondary = record.flags().bits() & BAM_FSECONDARY != 0;
         if is_secondary {
             self.counters.secondary_alignments += 1;
             // Qualimap skipSecondary=true by default in RNA-Seq mode.
@@ -270,24 +270,24 @@ impl QualimapAccum {
         // Qualimap: leftProperInPair counts first-of-pair, rightProperInPair counts
         // second-of-pair — despite the name, they don't check the proper-pair flag.
         // bothProperInPair counts reads that ARE proper pair (used for numberOfMappedPairs).
-        if flags & BAM_FPAIRED != 0 {
-            if flags & BAM_FREAD1 != 0 {
+        if record.flags().bits() & BAM_FPAIRED != 0 {
+            if record.flags().bits() & BAM_FREAD1 != 0 {
                 self.counters.left_proper_in_pair += 1;
             }
-            if flags & BAM_FREAD2 != 0 {
+            if record.flags().bits() & BAM_FREAD2 != 0 {
                 self.counters.right_proper_in_pair += 1;
             }
-            if flags & BAM_FPROPER_PAIR != 0 {
+            if record.flags().bits() & BAM_FPROPER_PAIR != 0 {
                 self.counters.both_proper_in_pair += 1;
             }
         }
 
         // Skip supplementary and QC-fail (these never contribute)
-        if flags & BAM_FSUPPLEMENTARY != 0 {
+        if record.flags().bits() & BAM_FSUPPLEMENTARY != 0 {
             self.counters.supplementary += 1;
             return;
         }
-        if flags & BAM_FQCFAIL != 0 {
+        if record.flags().bits() & BAM_FQCFAIL != 0 {
             return;
         }
 
@@ -345,15 +345,15 @@ impl QualimapAccum {
         let cached_hits = cache_block_hits(&m_blocks, chrom, index);
 
         // Determine enclosing genes using cached results (with strand filtering)
-        let is_reverse = flags & BAM_FREVERSE != 0;
+        let is_reverse = record.flags().bits() & BAM_FREVERSE != 0;
         // SE reads lack BAM_FREAD1 (0x40), but should be treated as "first of
         // pair" for strand flip logic, matching Qualimap's getReadIntervals():
         //   boolean firstOfPair = true;
         //   if (pairedRead) { firstOfPair = read.getFirstOfPairFlag(); ... }
         //   else { if (protocol == STRAND_SPECIFIC_REVERSE) strand = !strand; }
         // See: bitbucket.org/kokonech/qualimap ComputeCountsTask.java
-        let is_first_of_pair = if flags & BAM_FPAIRED != 0 {
-            flags & BAM_FREAD1 != 0
+        let is_first_of_pair = if record.flags().bits() & BAM_FPAIRED != 0 {
+            record.flags().bits() & BAM_FREAD1 != 0
         } else {
             true
         };
@@ -364,7 +364,8 @@ impl QualimapAccum {
         // Qualimap adds coverage per M-block to each enclosing gene, without
         // strand filtering. This is separate from gene assignment counting.
         // For SE reads: add coverage now. For PE: deferred to reconcile_pair().
-        if flags & BAM_FPAIRED == 0 || flags & BAM_FPROPER_PAIR == 0 {
+        if record.flags().bits() & BAM_FPAIRED == 0 || record.flags().bits() & BAM_FPROPER_PAIR == 0
+        {
             self.add_per_block_coverage_cached(&m_blocks, &cached_hits, index);
         }
 
@@ -378,7 +379,8 @@ impl QualimapAccum {
         };
 
         // PE path: check BAM flags directly (no library-level paired flag needed)
-        if flags & BAM_FPAIRED != 0 && flags & BAM_FPROPER_PAIR != 0 {
+        if record.flags().bits() & BAM_FPAIRED != 0 && record.flags().bits() & BAM_FPROPER_PAIR != 0
+        {
             // PE proper pair: buffer and combine with mate (Qualimap name-sorts
             // and processes both mates' intervals together as a fragment).
             self.process_pe_read(record, data, chrom, index);
@@ -740,15 +742,15 @@ fn extract_m_blocks_and_junctions(
     record: &bam::Record,
 ) -> (Vec<(i32, i32)>, usize, Vec<JunctionMotif>, Vec<(i32, i32)>) {
     let cigar = record.cigar();
-    let seq = record.seq();
+    let seq = record.sequence();
     let seq_len = seq.len();
 
     let mut blocks = Vec::new();
     let mut motifs = Vec::new();
     let mut junction_ref_positions = Vec::new();
     let mut n_op_count: usize = 0;
-    let mut ref_pos = record.pos() as i32; // 0-based
-    let alignment_start_1based = record.pos() as i32 + 1;
+    let mut ref_pos = crate::rna::bam_flags::pos_0based(&record) as i32; // 0-based
+    let alignment_start_1based = crate::rna::bam_flags::pos_0based(&record) as i32 + 1;
     // seq_pos tracks query position for junction motif extraction and
     // junction position calculation (Qualimap's posInRead).
     // ref_pos for extract_m_blocks uses its own tracking with the Qualimap
@@ -758,22 +760,26 @@ fn extract_m_blocks_and_junctions(
     // Junction motif extraction uses a separate ref tracking (standard).
     // We run both in one pass by tracking seq_pos alongside ref_pos.
 
-    for op in cigar.iter() {
-        match op {
+    for op_result in cigar.iter() {
+        let op = match op_result {
+            Ok(o) => o,
+            Err(_) => continue,
+        };
+        let len = op.len() as i32;
+        match op.kind() {
             // Qualimap only creates alignment blocks for M (match/mismatch),
             // not for = (sequence match) or X (sequence mismatch).
-            Cigar::Match(len) => {
-                let len = *len as i32;
+            Kind::Match => {
                 blocks.push((ref_pos, ref_pos + len));
                 ref_pos += len;
                 seq_pos += len as usize;
             }
             // Qualimap bug: EQ and X advance offset but don't create blocks.
-            Cigar::Equal(len) | Cigar::Diff(len) => {
-                ref_pos += *len as i32;
-                seq_pos += *len as usize;
+            Kind::SequenceMatch | Kind::SequenceMismatch => {
+                ref_pos += len;
+                seq_pos += len as usize;
             }
-            Cigar::RefSkip(len) => {
+            Kind::Skip => {
                 // Junction motif extraction (N-operations).
                 // Qualimap increments numReadsWithJunction for every N-op,
                 // regardless of whether the motif can be extracted.
@@ -783,7 +789,7 @@ fn extract_m_blocks_and_junctions(
                 // Matches Qualimap Java: posInRef1 = alignmentStart + posInRead,
                 // posInRef2 = posInRef1 + clippedLength.
                 let pos_ref1 = alignment_start_1based + seq_pos as i32;
-                let pos_ref2 = pos_ref1 + *len as i32;
+                let pos_ref2 = pos_ref1 + len;
                 junction_ref_positions.push((pos_ref1, pos_ref2));
 
                 // Extract donor motif: 2bp at end of preceding exon in read
@@ -791,32 +797,33 @@ fn extract_m_blocks_and_junctions(
                 // Guard matches Qualimap: posInRead - 2 > 0, i.e. posInRead >= 3.
                 // This requires at least 3 query bases before the junction.
                 if seq_pos > 2 && seq_pos + 1 < seq_len {
-                    let donor = [seq.encoded_base(seq_pos - 2), seq.encoded_base(seq_pos - 1)];
-                    let acceptor = [seq.encoded_base(seq_pos), seq.encoded_base(seq_pos + 1)];
+                    // In noodles 0.88, Sequence::get() returns decoded ASCII bases
+                    let donor = [
+                        seq.get(seq_pos - 2).unwrap_or(b'N'),
+                        seq.get(seq_pos - 1).unwrap_or(b'N'),
+                    ];
+                    let acceptor = [
+                        seq.get(seq_pos).unwrap_or(b'N'),
+                        seq.get(seq_pos + 1).unwrap_or(b'N'),
+                    ];
 
-                    let donor_ascii = [decode_base(donor[0]), decode_base(donor[1])];
-                    let acceptor_ascii = [decode_base(acceptor[0]), decode_base(acceptor[1])];
-
-                    motifs.push(JunctionMotif {
-                        donor: donor_ascii,
-                        acceptor: acceptor_ascii,
-                    });
+                    motifs.push(JunctionMotif { donor, acceptor });
                 }
 
-                ref_pos += *len as i32;
+                ref_pos += len;
                 // N does not advance query (seq_pos unchanged)
             }
             // Qualimap bug: insertions and soft-clips advance the reference
             // position even though they only consume query bases.
-            Cigar::Ins(len) | Cigar::SoftClip(len) => {
-                ref_pos += *len as i32;
-                seq_pos += *len as usize;
+            Kind::Insertion | Kind::SoftClip => {
+                ref_pos += len;
+                seq_pos += len as usize;
             }
-            Cigar::Del(len) => {
-                ref_pos += *len as i32;
+            Kind::Deletion => {
+                ref_pos += len;
                 // D does not advance query
             }
-            Cigar::HardClip(_) | Cigar::Pad(_) => {}
+            Kind::HardClip | Kind::Pad => {}
         }
     }
 
@@ -991,11 +998,11 @@ fn find_enclosing_genes(
 ///
 /// Uses FNV-1a hash of qname + r1-centric ordering of positions.
 fn make_mate_key(record: &bam::Record) -> MateKey {
-    let qname_hash = hash_qname(record.qname());
-    let tid = record.tid();
-    let pos = record.pos();
-    let mate_tid = record.mtid();
-    let mate_pos = record.mpos();
+    let qname_hash = hash_qname(&crate::rna::bam_flags::read_name(&record));
+    let tid = -1;
+    let pos = crate::rna::bam_flags::pos_0based(&record);
+    let mate_tid = -1;
+    let mate_pos = crate::rna::bam_flags::mate_position_0based(&record);
 
     // Always store with read1 position first for consistent lookup
     if tid < mate_tid || (tid == mate_tid && pos <= mate_pos) {
