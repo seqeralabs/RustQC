@@ -7,8 +7,7 @@
 use anyhow::{bail, Context, Result};
 use log::debug;
 use noodles_bam as bam;
-use noodles_sam as sam;
-use noodles_sam::alignment::Record;
+use noodles_sam::alignment::record::cigar::op::Kind;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
@@ -170,11 +169,11 @@ impl PreseqAccum {
                 .iter()
                 .filter_map(|r| r.ok())
                 .map(|op| match op.kind() {
-                    sam::alignment::record::cigar::op::Kind::Match
-                    | sam::alignment::record::cigar::op::Kind::SequenceMatch
-                    | sam::alignment::record::cigar::op::Kind::SequenceMismatch
-                    | sam::alignment::record::cigar::op::Kind::Deletion
-                    | sam::alignment::record::cigar::op::Kind::Skip => op.len() as i64,
+                    Kind::Match
+                    | Kind::SequenceMatch
+                    | Kind::SequenceMismatch
+                    | Kind::Deletion
+                    | Kind::Skip => op.len() as i64,
                     _ => 0,
                 })
                 .sum::<i64>();

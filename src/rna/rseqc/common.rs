@@ -209,12 +209,13 @@ mod tests {
 
     #[test]
     fn test_fetch_introns_simple() {
-        use noodles_sam::alignment::{record::cigar::op::Kind, record_buf::Cigar};
+        use noodles_sam::alignment::record::cigar::{op::Kind, Op};
+        use noodles_sam::alignment::record_buf::Cigar;
         // 50M500N50M — one intron at position 100+50=150 to 150+500=650
         let ops = vec![
-            sam::alignment::record::cigar::Op::new(Kind::Match, 50),
-            sam::alignment::record::cigar::Op::new(Kind::Skip, 500),
-            sam::alignment::record::cigar::Op::new(Kind::Match, 50),
+            Op::new(Kind::Match, 50),
+            Op::new(Kind::Skip, 500),
+            Op::new(Kind::Match, 50),
         ];
         let cigar = Cigar::from(ops);
         let introns = fetch_introns(100, &cigar).unwrap();
@@ -224,14 +225,15 @@ mod tests {
 
     #[test]
     fn test_fetch_introns_multiple() {
-        use noodles_sam::alignment::{record::cigar::op::Kind, record_buf::Cigar};
+        use noodles_sam::alignment::record::cigar::{op::Kind, Op};
+        use noodles_sam::alignment::record_buf::Cigar;
         // 10M500N20M300N10M — two introns
         let ops = vec![
-            sam::alignment::record::cigar::Op::new(Kind::Match, 10),
-            sam::alignment::record::cigar::Op::new(Kind::Skip, 500),
-            sam::alignment::record::cigar::Op::new(Kind::Match, 20),
-            sam::alignment::record::cigar::Op::new(Kind::Skip, 300),
-            sam::alignment::record::cigar::Op::new(Kind::Match, 10),
+            Op::new(Kind::Match, 10),
+            Op::new(Kind::Skip, 500),
+            Op::new(Kind::Match, 20),
+            Op::new(Kind::Skip, 300),
+            Op::new(Kind::Match, 10),
         ];
         let cigar = Cigar::from(ops);
         let introns = fetch_introns(100, &cigar).unwrap();
@@ -242,14 +244,15 @@ mod tests {
 
     #[test]
     fn test_fetch_introns_with_deletions() {
-        use noodles_sam::alignment::{record::cigar::op::Kind, record_buf::Cigar};
+        use noodles_sam::alignment::record::cigar::{op::Kind, Op};
+        use noodles_sam::alignment::record_buf::Cigar;
         // 10M5D10M500N10M
         let ops = vec![
-            sam::alignment::record::cigar::Op::new(Kind::Match, 10),
-            sam::alignment::record::cigar::Op::new(Kind::Deletion, 5),
-            sam::alignment::record::cigar::Op::new(Kind::Match, 10),
-            sam::alignment::record::cigar::Op::new(Kind::Skip, 500),
-            sam::alignment::record::cigar::Op::new(Kind::Match, 10),
+            Op::new(Kind::Match, 10),
+            Op::new(Kind::Deletion, 5),
+            Op::new(Kind::Match, 10),
+            Op::new(Kind::Skip, 500),
+            Op::new(Kind::Match, 10),
         ];
         let cigar = Cigar::from(ops);
         let introns = fetch_introns(100, &cigar).unwrap();
@@ -259,8 +262,9 @@ mod tests {
 
     #[test]
     fn test_fetch_introns_no_introns() {
-        use noodles_sam::alignment::{record::cigar::op::Kind, record_buf::Cigar};
-        let ops = vec![sam::alignment::record::cigar::Op::new(Kind::Match, 100)];
+        use noodles_sam::alignment::record::cigar::{op::Kind, Op};
+        use noodles_sam::alignment::record_buf::Cigar;
+        let ops = vec![Op::new(Kind::Match, 100)];
         let cigar = Cigar::from(ops);
         let introns = fetch_introns(100, &cigar).unwrap();
         assert!(introns.is_empty());
@@ -268,13 +272,14 @@ mod tests {
 
     #[test]
     fn test_fetch_introns_soft_clip_no_advance() {
-        use noodles_sam::alignment::{record::cigar::op::Kind, record_buf::Cigar};
+        use noodles_sam::alignment::record::cigar::{op::Kind, Op};
+        use noodles_sam::alignment::record_buf::Cigar;
         // 5S50M500N50M — soft clip should NOT advance position
         let ops = vec![
-            sam::alignment::record::cigar::Op::new(Kind::SoftClip, 5),
-            sam::alignment::record::cigar::Op::new(Kind::Match, 50),
-            sam::alignment::record::cigar::Op::new(Kind::Skip, 500),
-            sam::alignment::record::cigar::Op::new(Kind::Match, 50),
+            Op::new(Kind::SoftClip, 5),
+            Op::new(Kind::Match, 50),
+            Op::new(Kind::Skip, 500),
+            Op::new(Kind::Match, 50),
         ];
         let cigar = Cigar::from(ops);
         let introns = fetch_introns(100, &cigar).unwrap();

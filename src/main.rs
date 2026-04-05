@@ -255,14 +255,30 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
 
     // Validate all input alignment files before expensive GTF parsing
     for bam_path in &args.input {
-        
-        let mut reader = BamReaderBuilder::default()
-            .build_from_path(bam_path)
-            .with_context(|| format!("Cannot read alignment file '{}'", bam_path))?;
-        let _header = reader
-            .read_header()
-            .with_context(|| format!("Cannot read header from '{}'", bam_path))?;
-        // Reader dropped — just validating the file is openable
+        // Detect file type from extension (BAM vs SAM)
+        let is_sam = bam_path.to_lowercase().ends_with(".sam");
+
+        if is_sam {
+            // SAM files are plain text, not BGZF-compressed
+            use noodles_sam::alignment::io::Read as SamRead;
+            use std::fs::File;
+            use std::io::BufReader;
+
+            let file = File::open(bam_path)
+                .with_context(|| format!("Cannot open SAM file '{}'", bam_path))?;
+            let mut reader = noodles_sam::io::Reader::new(BufReader::new(file));
+            let _header = reader
+                .read_header()
+                .with_context(|| format!("Cannot read SAM header from '{}'", bam_path))?;
+        } else {
+            // BAM files are BGZF-compressed
+            let mut reader = BamReaderBuilder::default()
+                .build_from_path(bam_path)
+                .with_context(|| format!("Cannot read alignment file '{}'", bam_path))?;
+            let _header = reader
+                .read_header()
+                .with_context(|| format!("Cannot read BAM header from '{}'", bam_path))?;
+        }
     }
 
     let start = Instant::now();
@@ -1404,18 +1420,36 @@ fn process_single_bam(
         RseqcAccumulators::empty()
     });
     // Extract BAM header info (reference names + lengths) for samtools-compatible outputs
+    // For SAM files, use SAM reader instead of BAM
     let bam_header_refs = {
-        let mut reader = BamReaderBuilder::default()
-            .build_from_path(bam_path)
-            .with_context(|| format!("Failed to read BAM header: {}", bam_path))?;
-        let header = reader
-            .read_header()
-            .with_context(|| format!("Failed to parse BAM header: {}", bam_path))?;
-        let ref_seqs = header.reference_sequences();
-        ref_seqs
-            .iter()
-            .map(|(name, ref_seq)| (name.to_string(), ref_seq.length().get() as u64))
-            .collect::<Vec<(String, u64)>>()
+        let is_sam = bam_path.to_lowercase().ends_with(".sam");
+        if is_sam {
+            use std::fs::File;
+            use std::io::BufReader;
+            let file = File::open(bam_path)
+                .with_context(|| format!("Cannot open SAM file '{}'", bam_path))?;
+            let mut reader = noodles_sam::io::Reader::new(BufReader::new(file));
+            let header = reader
+                .read_header()
+                .with_context(|| format!("Cannot read SAM header from '{}'", bam_path))?;
+            let ref_seqs = header.reference_sequences();
+            ref_seqs
+                .iter()
+                .map(|(name, ref_seq)| (name.to_string(), ref_seq.length().get() as u64))
+                .collect::<Vec<(String, u64)>>()
+        } else {
+            let mut reader = BamReaderBuilder::default()
+                .build_from_path(bam_path)
+                .with_context(|| format!("Failed to read BAM header: {}", bam_path))?;
+            let header = reader
+                .read_header()
+                .with_context(|| format!("Failed to parse BAM header: {}", bam_path))?;
+            let ref_seqs = header.reference_sequences();
+            ref_seqs
+                .iter()
+                .map(|(name, ref_seq)| (name.to_string(), ref_seq.length().get() as u64))
+                .collect::<Vec<(String, u64)>>()
+        }
     };
     let rseqc_outputs = write_rseqc_outputs(
         bam_path,

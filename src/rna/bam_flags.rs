@@ -64,16 +64,17 @@ pub fn get_aux_int(record: &bam::Record, tag_bytes: &[u8]) -> Option<i64> {
     let tag_arr = [tag_bytes[0], tag_bytes[1]];
     let tag = Tag::try_from(tag_arr).ok()?;
     let data = record.data();
-    let field = data.get(&tag)?;
-
-    // In noodles 0.88, field.value() returns Result<Value, Error>
-    // We need to extract the value from the result
+    let result = data.get(&tag)?;
+    let field = result.ok()?;
+    use noodles_sam::alignment::record::data::field::Value;
     match field {
-        _ => {
-            // For now, return None - we need to properly extract typed values
-            // TODO: Implement proper value extraction for noodles 0.88
-            None
-        }
+        Value::Int8(n) => Some(n as i64),
+        Value::Int16(n) => Some(n as i64),
+        Value::Int32(n) => Some(n as i64),
+        Value::UInt8(n) => Some(n as u64 as i64),
+        Value::UInt16(n) => Some(n as u64 as i64),
+        Value::UInt32(n) => Some(n as u64 as i64),
+        _ => None,
     }
 }
 
