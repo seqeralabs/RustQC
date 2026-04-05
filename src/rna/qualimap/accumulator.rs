@@ -831,6 +831,7 @@ fn extract_m_blocks_and_junctions(
 }
 
 /// Decode a 4-bit encoded base to ASCII uppercase.
+#[cfg(test)]
 fn decode_base(encoded: u8) -> u8 {
     match encoded {
         1 => b'A',

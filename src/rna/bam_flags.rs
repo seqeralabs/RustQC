@@ -37,12 +37,6 @@ pub fn flags(record: &bam::Record) -> u16 {
     record.flags().bits()
 }
 
-/// Check if record is secondary alignment.
-#[inline]
-pub fn is_secondary(record: &bam::Record) -> bool {
-    record.flags().is_secondary()
-}
-
 /// Check if record is supplementary alignment.
 #[inline]
 pub fn is_supplementary(record: &bam::Record) -> bool {
@@ -145,26 +139,4 @@ pub fn is_reverse_complemented(record: &bam::Record) -> bool {
 #[inline]
 pub fn is_first_segment(record: &bam::Record) -> bool {
     record.flags().is_first_segment()
-}
-
-/// Check if record is quality check failed.
-#[inline]
-pub fn is_quality_check_failed(record: &bam::Record) -> bool {
-    record.flags().is_qc_fail()
-}
-
-/// Get reference sequence name (replaces tid).
-/// Returns None for unmapped reads or when not available.
-#[inline]
-pub fn reference_sequence_name<'a>(_record: &'a bam::Record) -> Option<&'a str> {
-    // TODO: noodles 0.88 API changed - need to find correct method
-    None
-}
-
-/// Get mate reference sequence name (replaces mtid).
-/// Returns None for unmapped mates or when not available.
-#[inline]
-pub fn mate_reference_sequence_name<'a>(_record: &'a bam::Record) -> Option<&'a str> {
-    // TODO: noodles 0.88 API changed - need to find correct method
-    None
 }

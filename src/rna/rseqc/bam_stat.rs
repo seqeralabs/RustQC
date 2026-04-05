@@ -327,18 +327,21 @@ pub fn write_bam_stat(result: &BamStatResult, output_path: &Path) -> Result<()> 
 #[cfg(test)]
 mod tests {
     use crate::rna::rseqc::accumulators::BamStatAccum;
-    use rust_htslib::bam::{self, Read as BamRead};
+    use noodles_bam as bam;
 
     #[test]
     fn test_bam_stat_small() {
-        // Uses the tiny test BAM from test data via the accumulator path
-        let mut reader =
-            bam::Reader::from_path("tests/data/test.bam").expect("Failed to open test.bam");
-        let mut accum = BamStatAccum::default();
-        let mut record = bam::Record::new();
+        use std::fs::File;
+        use std::io::BufReader;
 
-        while let Some(res) = reader.read(&mut record) {
-            res.expect("Error reading BAM record");
+        let file = File::open("tests/data/test.bam").expect("Failed to open test.bam");
+        let mut reader = bam::io::Reader::new(BufReader::new(file));
+        let _header = reader.read_header().expect("Failed to read header");
+
+        let mut accum = BamStatAccum::default();
+
+        for result in reader.records() {
+            let record = result.expect("Error reading BAM record");
             accum.process_read(&record, 30);
         }
 

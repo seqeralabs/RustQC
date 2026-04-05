@@ -61,28 +61,29 @@ pub fn write_idxstats(
 mod tests {
     use super::*;
     use crate::rna::rseqc::accumulators::BamStatAccum;
-    use rust_htslib::bam::{self, Read as BamRead};
+    use noodles_bam as bam;
     use std::io::Read;
+
     #[test]
     fn test_idxstats_format() {
-        let mut reader =
-            bam::Reader::from_path("tests/data/test.bam").expect("Failed to open test.bam");
+        use std::fs::File;
+        use std::io::BufReader;
+
+        let file = File::open("tests/data/test.bam").expect("Failed to open test.bam");
+        let mut reader = bam::io::Reader::new(BufReader::new(file));
+        let header = reader.read_header().expect("Failed to read header");
 
         // Extract header reference info
-        let header = reader.header().clone();
-        let header_refs: Vec<(String, u64)> = (0..header.target_count())
-            .map(|tid| {
-                let name = String::from_utf8_lossy(header.tid2name(tid)).to_string();
-                let len = header.target_len(tid).unwrap_or(0);
-                (name, len)
-            })
+        let header_refs: Vec<(String, u64)> = header
+            .reference_sequences()
+            .iter()
+            .map(|(name, ref_seq)| (name.to_string(), ref_seq.length().get() as u64))
             .collect();
 
         let mut accum = BamStatAccum::default();
-        let mut record = bam::Record::new();
 
-        while let Some(res) = reader.read(&mut record) {
-            res.expect("Error reading BAM record");
+        for result in reader.records() {
+            let record = result.expect("Error reading BAM record");
             accum.process_read(&record, 30);
         }
 

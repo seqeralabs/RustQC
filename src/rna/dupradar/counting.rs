@@ -23,7 +23,6 @@ use noodles_bam as bam;
 use noodles_bam::io::indexed_reader::Builder as IndexedReaderBuilder;
 use noodles_bam::io::reader::Builder as BamReaderBuilder;
 use noodles_core::Region;
-use noodles_sam::alignment::Record;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -102,10 +101,7 @@ const KNOWN_DUP_MARKERS: &[&str] = &[
     "sentieon dedup",
 ];
 
-/// Extracts the value of a specific tag from a SAM header line.
-///
-/// For example, given the line `@PG\tID:MarkDuplicates\tPN:MarkDuplicates` and
-/// the tag `"ID"`, returns `Some("MarkDuplicates")`.
+#[cfg(test)]
 fn extract_header_tag<'a>(line: &'a str, tag: &str) -> Option<&'a str> {
     let prefix = format!("{}:", tag);
     line.split('\t')
@@ -113,13 +109,7 @@ fn extract_header_tag<'a>(line: &'a str, tag: &str) -> Option<&'a str> {
         .map(|field| &field[prefix.len()..])
 }
 
-/// Checks whether a SAM header text contains evidence of a duplicate-marking tool.
-///
-/// Only the `ID:` and `PN:` fields of `@PG` lines are inspected to avoid false
-/// positives from command-line arguments or unrelated tools that happen to share
-/// a name (e.g., `picard SortSam`).
-///
-/// Returns `true` if a known duplicate-marking tool is found.
+#[cfg(test)]
 fn header_has_dup_marker(header_text: &str) -> bool {
     for line in header_text.lines() {
         // Only inspect @PG (program) header lines
@@ -1281,10 +1271,9 @@ pub fn count_reads(
 
         let header = if is_sam {
             // SAM files are plain text
-            use noodles_sam::alignment::io::Read as SamRead;
             use std::io::BufReader;
-            let mut reader = noodles_sam::io::Reader::new(BufReader::new(file));
-            reader
+            let mut sam_reader = noodles_sam::io::Reader::new(BufReader::new(file));
+            sam_reader
                 .read_header()
                 .with_context(|| format!("Failed to read SAM header: {}", bam_path))?
         } else {

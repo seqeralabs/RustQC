@@ -260,7 +260,6 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
 
         if is_sam {
             // SAM files are plain text, not BGZF-compressed
-            use noodles_sam::alignment::io::Read as SamRead;
             use std::fs::File;
             use std::io::BufReader;
 

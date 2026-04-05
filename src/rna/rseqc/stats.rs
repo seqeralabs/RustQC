@@ -1007,17 +1007,22 @@ fn write_gc_depth(
 mod tests {
     use super::*;
     use crate::rna::rseqc::accumulators::BamStatAccum;
-    use rust_htslib::bam::{self, Read as BamRead};
+    use noodles_bam as bam;
     use std::io::Read;
+
     #[test]
     fn test_stats_sn_format() {
-        let mut reader =
-            bam::Reader::from_path("tests/data/test.bam").expect("Failed to open test.bam");
-        let mut accum = BamStatAccum::default();
-        let mut record = bam::Record::new();
+        use std::fs::File;
+        use std::io::BufReader;
 
-        while let Some(res) = reader.read(&mut record) {
-            res.expect("Error reading BAM record");
+        let file = File::open("tests/data/test.bam").expect("Failed to open test.bam");
+        let mut reader = bam::io::Reader::new(BufReader::new(file));
+        let _header = reader.read_header().expect("Failed to read header");
+
+        let mut accum = BamStatAccum::default();
+
+        for result in reader.records() {
+            let record = result.expect("Error reading BAM record");
             accum.process_read(&record, 30);
         }
 
