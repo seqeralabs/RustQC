@@ -313,7 +313,7 @@ fn test_all_output_files_generated() {
         "rseqc/read_duplication/test.pos.DupRate.xls",
         "rseqc/read_duplication/test.seq.DupRate.xls",
         "rseqc/read_distribution/test.read_distribution.txt",
-        "rseqc/junction_annotation/test.junction_annotation.txt",
+        "rseqc/junction_annotation/test.junction_annotation.log",
         "rseqc/junction_saturation/test.junctionSaturation_summary.txt",
         "rseqc/inner_distance/test.inner_distance.txt",
     ];
@@ -700,7 +700,7 @@ fn test_flat_output_no_subdirectories() {
         "test.pos.DupRate.xls",
         "test.seq.DupRate.xls",
         "test.read_distribution.txt",
-        "test.junction_annotation.txt",
+        "test.junction_annotation.log",
         "test.junctionSaturation_summary.txt",
         "test.inner_distance.txt",
     ];

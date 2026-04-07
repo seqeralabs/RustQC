@@ -1676,7 +1676,7 @@ fn write_rseqc_outputs(
         rna::rseqc::plots::junction_annotation_plot(&results, &prefix, sample_name)?;
 
         let summary_path =
-            rseqc_junc_annot_dir.join(format!("{}.junction_annotation.txt", sample_name));
+            rseqc_junc_annot_dir.join(format!("{}.junction_annotation.log", sample_name));
         rna::rseqc::junction_annotation::write_summary(&results, &summary_path, params.gtf_path)?;
 
         // Only print the detailed junction summary in verbose mode
