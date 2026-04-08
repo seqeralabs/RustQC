@@ -98,12 +98,8 @@ fn unique_test_dir(label: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!(
-        "rustqc-{}-{}-{}",
-        label,
-        std::process::id(),
-        nonce
-    ));
+    let dir =
+        std::env::temp_dir().join(format!("rustqc-{}-{}-{}", label, std::process::id(), nonce));
     fs::create_dir_all(&dir).unwrap();
     dir
 }

@@ -76,37 +76,6 @@ impl GeneIdInterner {
 // Duplicate-marking validation
 // ===================================================================
 
-/// Number of mapped reads to examine before concluding that duplicates are not
-/// marked. If no reads with the duplicate flag (0x400) are seen after this many
-/// mapped reads, processing is aborted with an error.
-const DUP_CHECK_THRESHOLD: u64 = 1_000_000;
-
-fn dup_check_threshold() -> u64 {
-    std::env::var("RUSTQC_DUP_CHECK_THRESHOLD")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|&value| value > 0)
-        .unwrap_or(DUP_CHECK_THRESHOLD)
-}
-
-/// Checks whether the duplicate-flag sample threshold has been reached without
-/// finding any duplicates. Returns an error if so, `Ok(())` otherwise.
-///
-/// Called from both the parallel and single-threaded read-processing loops to
-/// bail early rather than processing an entire (potentially huge) file.
-fn check_dup_threshold(
-    total_dup: u64,
-    total_mapped: u64,
-    skip_dup_check: bool,
-    bam_path: &str,
-) -> Result<()> {
-    let threshold = dup_check_threshold();
-    if !skip_dup_check && total_dup == 0 && total_mapped >= threshold {
-        return Err(no_duplicates_error(threshold, bam_path));
-    }
-    Ok(())
-}
-
 /// Build the error message shown when no duplicate-flagged reads are found.
 fn no_duplicates_error(mapped_count: u64, bam_path: &str) -> anyhow::Error {
     anyhow::anyhow!(
@@ -1012,7 +981,6 @@ fn process_chromosome_batch(
     qualimap_index: Option<&crate::rna::qualimap::QualimapIndex>,
     gene_to_biotype: &[u16],
     num_biotypes: usize,
-    skip_dup_check: bool,
     progress: Option<&ProgressBar>,
 ) -> Result<(ChromResult, Option<RseqcAccumulators>)> {
     let mut result = ChromResult::new(num_genes, num_biotypes);
@@ -1127,18 +1095,6 @@ fn process_chromosome_batch(
                 &mut biotype_hits_buf,
                 &mut mate_buffer,
             );
-
-            // Only check once we've hit the threshold and haven't seen any
-            // duplicates yet. After the first dup, total_dup > 0 makes this
-            // a no-op, so skip the function call entirely.
-            if result.total_dup == 0 {
-                check_dup_threshold(
-                    result.total_dup,
-                    result.total_mapped,
-                    skip_dup_check,
-                    bam_path,
-                )?;
-            }
         }
     }
 
@@ -1180,7 +1136,7 @@ fn partition_chromosomes(lengths: &[u64], num_workers: usize) -> Vec<Vec<u32>> {
 /// * `paired` - Whether the library is paired-end
 /// * `threads` - Number of threads for alignment processing
 /// * `reference` - Optional path to reference FASTA (required for CRAM files)
-/// * `skip_dup_check` - If true, skip the BAM header check for duplicate-marking tools
+/// * `skip_dup_check` - If true, skip duplicate-flag validation
 #[allow(clippy::too_many_arguments)]
 pub fn count_reads(
     bam_path: &str,
@@ -1346,7 +1302,6 @@ pub fn count_reads(
                         qualimap_index,
                         &gene_to_biotype,
                         num_biotypes,
-                        skip_dup_check,
                         progress,
                     )
                 })
@@ -1483,15 +1438,6 @@ pub fn count_reads(
                 &mut biotype_hits_buf,
                 &mut mate_buffer,
             );
-
-            if result.total_dup == 0 {
-                check_dup_threshold(
-                    result.total_dup,
-                    result.total_mapped,
-                    skip_dup_check,
-                    bam_path,
-                )?;
-            }
         }
 
         result.unmatched_mates = mate_buffer;
@@ -1690,9 +1636,9 @@ pub fn count_reads(
         merged.total_fragments
     );
 
-    // Verify that at least some reads were flagged as duplicates.
-    // This catches files with fewer than DUP_CHECK_THRESHOLD mapped reads
-    // where the early check didn't trigger.
+    // Verify that at least some reads were flagged as duplicates across the
+    // full input. This must be based on the merged result so that duplicate
+    // detection remains correct in both single-threaded and parallel modes.
     if merged.total_dup == 0 && merged.total_mapped > 0 && !skip_dup_check {
         return Err(no_duplicates_error(merged.total_mapped, bam_path));
     }
