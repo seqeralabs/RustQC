@@ -750,19 +750,19 @@ impl Config {
 /// Mapping keys in `overlay` are merged recursively into `base`; all other
 /// value types (scalars, sequences, nulls) in `overlay` replace the
 /// corresponding value in `base`.
-fn deep_merge(base: &mut Value, overlay: &Value) {
+fn deep_merge(base: &mut Value, overlay: Value) {
     match (base, overlay) {
         (Value::Mapping(base_map), Value::Mapping(overlay_map)) => {
             for (key, overlay_val) in overlay_map {
-                if let Some(base_val) = base_map.get_mut(key) {
+                if let Some(base_val) = base_map.get_mut(&key) {
                     deep_merge(base_val, overlay_val);
                 } else {
-                    base_map.insert(key.clone(), overlay_val.clone());
+                    base_map.insert(key, overlay_val);
                 }
             }
         }
         (base, overlay) => {
-            *base = overlay.clone();
+            *base = overlay;
         }
     }
 }
@@ -786,7 +786,7 @@ pub fn collect_config_paths(cli_config: Option<&str>) -> Vec<(PathBuf, &'static 
         let p = Path::new(dir).join("rustqc").join("rustqc.yml");
         if p.is_file() {
             paths.push((p, "system"));
-            break; // only first match in XDG_CONFIG_DIRS
+            break; // XDG spec: first match in the directory list wins
         }
     }
 
@@ -835,7 +835,7 @@ pub fn load_merged_config(
             .with_context(|| format!("Failed to read config file: {}", path.display()))?;
         let layer: Value = serde_yaml_ng::from_str(&contents)
             .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
-        deep_merge(&mut merged, &layer);
+        deep_merge(&mut merged, layer);
     }
 
     let config: Config = serde_yaml_ng::from_value(merged)
@@ -1169,7 +1169,7 @@ preseq:
     fn test_deep_merge_leaf_override() {
         let mut base: Value = serde_yaml_ng::from_str("a: 1\nb: 2").unwrap();
         let overlay: Value = serde_yaml_ng::from_str("b: 99").unwrap();
-        deep_merge(&mut base, &overlay);
+        deep_merge(&mut base, overlay);
         let result: std::collections::HashMap<String, i64> =
             serde_yaml_ng::from_value(base).unwrap();
         assert_eq!(result["a"], 1);
@@ -1184,7 +1184,7 @@ preseq:
         .unwrap();
         let overlay: Value =
             serde_yaml_ng::from_str("rna:\n  preseq:\n    seed: 42").unwrap();
-        deep_merge(&mut base, &overlay);
+        deep_merge(&mut base, overlay);
         let config: Config = serde_yaml_ng::from_value(base).unwrap();
         assert_eq!(config.rna.preseq.seed, 42);
         assert_eq!(config.rna.preseq.n_bootstraps, 200);
@@ -1197,7 +1197,7 @@ preseq:
             serde_yaml_ng::from_str("items:\n  - a\n  - b").unwrap();
         let overlay: Value =
             serde_yaml_ng::from_str("items:\n  - x").unwrap();
-        deep_merge(&mut base, &overlay);
+        deep_merge(&mut base, overlay);
         let m = base.as_mapping().unwrap();
         let items = m
             .get(&Value::String("items".into()))
@@ -1212,7 +1212,7 @@ preseq:
     fn test_deep_merge_empty_overlay() {
         let mut base: Value = serde_yaml_ng::from_str("a: 1\nb: 2").unwrap();
         let overlay = Value::Mapping(serde_yaml_ng::Mapping::new());
-        deep_merge(&mut base, &overlay);
+        deep_merge(&mut base, overlay);
         let result: std::collections::HashMap<String, i64> =
             serde_yaml_ng::from_value(base).unwrap();
         assert_eq!(result["a"], 1);
@@ -1223,7 +1223,7 @@ preseq:
     fn test_deep_merge_adds_new_keys() {
         let mut base: Value = serde_yaml_ng::from_str("a: 1").unwrap();
         let overlay: Value = serde_yaml_ng::from_str("b: 2").unwrap();
-        deep_merge(&mut base, &overlay);
+        deep_merge(&mut base, overlay);
         let result: std::collections::HashMap<String, i64> =
             serde_yaml_ng::from_value(base).unwrap();
         assert_eq!(result["a"], 1);
@@ -1241,8 +1241,8 @@ preseq:
                 .unwrap();
         let layer3: Value =
             serde_yaml_ng::from_str("rna:\n  preseq:\n    seed: 3").unwrap();
-        deep_merge(&mut base, &layer2);
-        deep_merge(&mut base, &layer3);
+        deep_merge(&mut base, layer2);
+        deep_merge(&mut base, layer3);
         let config: Config = serde_yaml_ng::from_value(base).unwrap();
         assert_eq!(config.rna.preseq.seed, 3);
         assert_eq!(config.rna.preseq.n_bootstraps, 200);
@@ -1251,20 +1251,36 @@ preseq:
 
     #[test]
     fn test_collect_config_paths_explicit_only() {
-        // When no XDG dirs or env vars match, only -c should appear
+        // Temporarily clear RUSTQC_CONFIG so it doesn't interfere
+        let saved = std::env::var("RUSTQC_CONFIG").ok();
+        std::env::remove_var("RUSTQC_CONFIG");
+
         let paths = collect_config_paths(Some("/tmp/nonexistent.yml"));
-        assert_eq!(paths.len(), 1);
-        assert_eq!(paths[0].0, PathBuf::from("/tmp/nonexistent.yml"));
-        assert_eq!(paths[0].1, "-c flag");
+        // The -c flag should always be last
+        assert!(paths.last().unwrap().0 == PathBuf::from("/tmp/nonexistent.yml"));
+        assert_eq!(paths.last().unwrap().1, "-c flag");
+
+        // Restore
+        if let Some(val) = saved {
+            std::env::set_var("RUSTQC_CONFIG", val);
+        }
     }
 
     #[test]
     fn test_collect_config_paths_none() {
-        // With no config sources, should return empty
-        // (XDG dirs unlikely to contain rustqc config in test env)
+        // Temporarily clear RUSTQC_CONFIG so it doesn't interfere
+        let saved = std::env::var("RUSTQC_CONFIG").ok();
+        std::env::remove_var("RUSTQC_CONFIG");
+
         let paths = collect_config_paths(None);
-        // We can't assert exact count since XDG dirs may exist,
-        // but we can verify the function doesn't panic
-        assert!(paths.len() <= 3);
+        // Without explicit config, only auto-discovered XDG paths appear
+        for (_path, source) in &paths {
+            assert!(*source == "system" || *source == "user");
+        }
+
+        // Restore
+        if let Some(val) = saved {
+            std::env::set_var("RUSTQC_CONFIG", val);
+        }
     }
 }
