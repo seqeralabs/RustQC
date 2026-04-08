@@ -96,6 +96,7 @@ const KNOWN_DUP_MARKERS: &[&str] = &[
     "gencore",
     "gatk markduplicates",
     "sentieon dedup",
+    "redux",
 ];
 
 /// Extracts the value of a specific tag from a SAM header line.
@@ -140,14 +141,18 @@ fn header_has_dup_marker(header_text: &str) -> bool {
         // Heuristic: Parabricks writes a @PG line with all fields set to
         // "unknown" (ID, PN, VN, CL). No legitimate tool does this, so treat
         // it as evidence of Parabricks duplicate marking.
-        let vn = extract_header_tag(line, "VN").unwrap_or("");
-        let cl = extract_header_tag(line, "CL").unwrap_or("");
-        if id == "unknown" && pn == "unknown" && vn == "unknown" && cl == "unknown" {
-            debug!(
-                "Found Parabricks-style all-unknown @PG header (treating as dup marker): {}",
-                line
-            );
-            return true;
+        // Note: case-sensitive match — Parabricks literally emits "unknown",
+        // unlike KNOWN_DUP_MARKERS which are checked case-insensitively.
+        if id == "unknown" && pn == "unknown" {
+            let vn = extract_header_tag(line, "VN").unwrap_or("");
+            let cl = extract_header_tag(line, "CL").unwrap_or("");
+            if vn == "unknown" && cl == "unknown" {
+                debug!(
+                    "Found Parabricks-style all-unknown @PG header (treating as dup marker): {}",
+                    line
+                );
+                return true;
+            }
         }
     }
     false
@@ -1984,6 +1989,7 @@ mod tests {
 
     #[test]
     fn test_dup_check_parabricks_all_unknown() {
+        // Regression test for https://github.com/seqeralabs/RustQC/issues/71
         // Parabricks rna_fq2bam writes all-unknown @PG metadata when duplicate
         // marking is enabled. This realistic header comes from benchmarking run
         // 32NfRlDnEMNGxl. The PP:unknown in the samtools line links back to the
@@ -2001,6 +2007,7 @@ mod tests {
 
     #[test]
     fn test_dup_check_parabricks_standalone_unknown() {
+        // https://github.com/seqeralabs/RustQC/issues/71
         // Minimal case: just the all-unknown line by itself
         let header = "@PG\tID:unknown\tPN:unknown\tVN:unknown\tCL:unknown";
         assert!(
@@ -2011,12 +2018,23 @@ mod tests {
 
     #[test]
     fn test_dup_check_partial_unknown_no_false_positive() {
+        // https://github.com/seqeralabs/RustQC/issues/71 — guard against false positives.
         // A line with only some fields set to "unknown" should NOT match the
         // Parabricks heuristic (nor any known marker).
         let header = "@PG\tID:unknown\tPN:mytool\tVN:1.0\tCL:unknown";
         assert!(
             !header_has_dup_marker(header),
             "Partially-unknown @PG line should not trigger the Parabricks heuristic"
+        );
+    }
+
+    #[test]
+    fn test_dup_check_redux() {
+        // HMF Redux (hartwigmedical/hmftools) duplicate-marking tool
+        let header = "@PG\tID:redux\tPN:redux\tVN:1.0";
+        assert!(
+            header_has_dup_marker(header),
+            "HMF Redux should be detected as a dup marker"
         );
     }
 
