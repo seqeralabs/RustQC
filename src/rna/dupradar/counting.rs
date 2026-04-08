@@ -136,6 +136,19 @@ fn header_has_dup_marker(header_text: &str) -> bool {
             debug!("Found duplicate-marking tool in @PG header: {}", line);
             return true;
         }
+
+        // Heuristic: Parabricks writes a @PG line with all fields set to
+        // "unknown" (ID, PN, VN, CL). No legitimate tool does this, so treat
+        // it as evidence of Parabricks duplicate marking.
+        let vn = extract_header_tag(line, "VN").unwrap_or("");
+        let cl = extract_header_tag(line, "CL").unwrap_or("");
+        if id == "unknown" && pn == "unknown" && vn == "unknown" && cl == "unknown" {
+            debug!(
+                "Found Parabricks-style all-unknown @PG header (treating as dup marker): {}",
+                line
+            );
+            return true;
+        }
     }
     false
 }
@@ -1967,6 +1980,44 @@ mod tests {
     fn test_dup_check_dup_marker_only_in_cl_no_match() {
         let header_text = "@PG\tID:STAR\tPN:STAR\tVN:2.7.10a\tCL:STAR --readFilesIn sample.fastq --outSAMtype BAM SortedByCoordinate\n";
         assert!(!header_has_dup_marker(header_text));
+    }
+
+    #[test]
+    fn test_dup_check_parabricks_all_unknown() {
+        // Parabricks rna_fq2bam writes all-unknown @PG metadata when duplicate
+        // marking is enabled. This realistic header comes from benchmarking run
+        // 32NfRlDnEMNGxl. The PP:unknown in the samtools line links back to the
+        // ID:unknown Parabricks entry.
+        let header = "@HD\tVN:1.6\tSO:coordinate\n\
+                       @PG\tID:STAR\tPN:STAR\tVN:2.7.2a\tCL:0 --runThreadN 4\n\
+                       @PG\tID:unknown\tPN:unknown\tVN:unknown\tCL:unknown\n\
+                       @PG\tID:samtools\tPN:samtools\tPP:unknown\tVN:1.22.1\tCL:samtools cat GM12878_REP1.bam\n\
+                       @PG\tID:samtools.1\tPN:samtools\tPP:samtools\tVN:1.22.1\tCL:samtools sort";
+        assert!(
+            header_has_dup_marker(header),
+            "Parabricks all-unknown @PG line should be detected as a dup marker"
+        );
+    }
+
+    #[test]
+    fn test_dup_check_parabricks_standalone_unknown() {
+        // Minimal case: just the all-unknown line by itself
+        let header = "@PG\tID:unknown\tPN:unknown\tVN:unknown\tCL:unknown";
+        assert!(
+            header_has_dup_marker(header),
+            "Standalone all-unknown @PG line should be detected as a dup marker"
+        );
+    }
+
+    #[test]
+    fn test_dup_check_partial_unknown_no_false_positive() {
+        // A line with only some fields set to "unknown" should NOT match the
+        // Parabricks heuristic (nor any known marker).
+        let header = "@PG\tID:unknown\tPN:mytool\tVN:1.0\tCL:unknown";
+        assert!(
+            !header_has_dup_marker(header),
+            "Partially-unknown @PG line should not trigger the Parabricks heuristic"
+        );
     }
 
     // --- Per-read featureCounts classification tests ---
