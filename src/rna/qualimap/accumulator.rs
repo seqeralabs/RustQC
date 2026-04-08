@@ -238,7 +238,7 @@ impl QualimapAccum {
             "QM process_read chrom={} flags={} pos={}",
             chrom,
             flags.bits(),
-            crate::rna::bam_flags::pos_0based(&record)
+            crate::rna::bam_flags::pos_0based(record)
         );
 
         // Skip unmapped
@@ -749,8 +749,8 @@ fn extract_m_blocks_and_junctions(
     let mut motifs = Vec::new();
     let mut junction_ref_positions = Vec::new();
     let mut n_op_count: usize = 0;
-    let mut ref_pos = crate::rna::bam_flags::pos_0based(&record) as i32; // 0-based
-    let alignment_start_1based = crate::rna::bam_flags::pos_0based(&record) as i32 + 1;
+    let mut ref_pos = crate::rna::bam_flags::pos_0based(record) as i32; // 0-based
+    let alignment_start_1based = crate::rna::bam_flags::pos_0based(record) as i32 + 1;
     // seq_pos tracks query position for junction motif extraction and
     // junction position calculation (Qualimap's posInRead).
     // ref_pos for extract_m_blocks uses its own tracking with the Qualimap
@@ -999,11 +999,11 @@ fn find_enclosing_genes(
 ///
 /// Uses FNV-1a hash of qname + r1-centric ordering of positions.
 fn make_mate_key(record: &bam::Record) -> MateKey {
-    let qname_hash = hash_qname(&crate::rna::bam_flags::read_name(&record));
+    let qname_hash = hash_qname(&crate::rna::bam_flags::read_name(record));
     let tid = -1;
-    let pos = crate::rna::bam_flags::pos_0based(&record);
+    let pos = crate::rna::bam_flags::pos_0based(record);
     let mate_tid = -1;
-    let mate_pos = crate::rna::bam_flags::mate_position_0based(&record);
+    let mate_pos = crate::rna::bam_flags::mate_position_0based(record);
 
     // Always store with read1 position first for consistent lookup
     if tid < mate_tid || (tid == mate_tid && pos <= mate_pos) {

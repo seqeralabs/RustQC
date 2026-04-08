@@ -186,7 +186,7 @@ impl PreseqAccum {
             // allocating a Vec<u8> per read. Collisions are negligible for
             // typical BAM qnames; the MateInfo already stores coordinates that
             // would detect a spurious match if needed.
-            let qname_hash = fnv1a_hash_bytes(&crate::rna::bam_flags::read_name(&record));
+            let qname_hash = fnv1a_hash_bytes(&crate::rna::bam_flags::read_name(record));
 
             if let Some(mate) = self.dangling_mates.remove(&qname_hash) {
                 // Found the mate — try to merge

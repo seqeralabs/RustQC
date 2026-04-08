@@ -271,7 +271,7 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
                 .with_context(|| format!("Cannot read SAM header from '{}'", bam_path))?;
         } else {
             // BAM files are BGZF-compressed
-            let mut reader = BamReaderBuilder::default()
+            let mut reader = BamReaderBuilder
                 .build_from_path(bam_path)
                 .with_context(|| format!("Cannot read alignment file '{}'", bam_path))?;
             let _header = reader
@@ -1437,7 +1437,7 @@ fn process_single_bam(
                 .map(|(name, ref_seq)| (name.to_string(), ref_seq.length().get() as u64))
                 .collect::<Vec<(String, u64)>>()
         } else {
-            let mut reader = BamReaderBuilder::default()
+            let mut reader = BamReaderBuilder
                 .build_from_path(bam_path)
                 .with_context(|| format!("Failed to read BAM header: {}", bam_path))?;
             let header = reader

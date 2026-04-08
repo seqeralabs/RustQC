@@ -404,7 +404,7 @@ impl BamStatAccum {
         let is_primary = !is_secondary && !is_supplementary;
         let is_mapped = !is_unmapped;
         let tid = -1;
-        let mapq = crate::rna::bam_flags::mapping_quality(&record);
+        let mapq = crate::rna::bam_flags::mapping_quality(record);
 
         // =================================================================
         // samtools flagstat counters (count ALL records, no early returns)
@@ -477,11 +477,11 @@ impl BamStatAccum {
         // is called before the secondary-read early return.
         // =================================================================
         {
-            let qname = crate::rna::bam_flags::read_name(&record);
+            let qname = crate::rna::bam_flags::read_name(record);
             let name_crc = crc32fast::hash(&qname);
             self.chk[0] = self.chk[0].wrapping_add(name_crc);
 
-            let seq_len = crate::rna::bam_flags::sequence_length(&record);
+            let seq_len = crate::rna::bam_flags::sequence_length(record);
             if seq_len > 0 {
                 // With noodles, we can access sequence and quality directly
                 let seq = record.sequence();
@@ -505,7 +505,7 @@ impl BamStatAccum {
         // =================================================================
         if is_primary {
             self.primary_count += 1;
-            let seq_len = crate::rna::bam_flags::sequence_length(&record) as u64;
+            let seq_len = crate::rna::bam_flags::sequence_length(record) as u64;
             let mate_unmapped = record.flags().bits() & BAM_FMUNMAP != 0;
 
             self.total_len += seq_len;
@@ -549,7 +549,7 @@ impl BamStatAccum {
                 // samtools stats: reads MQ0 counts primary mapped reads with MAPQ=0
                 // (upstream stats.c: MQ0 is counted inside collect_orig_read_stats,
                 // which is only called for IS_ORIGINAL reads = non-secondary, non-supplementary)
-                if crate::rna::bam_flags::mapping_quality(&record) == 0 {
+                if crate::rna::bam_flags::mapping_quality(record) == 0 {
                     self.reads_mq0 += 1;
                 }
 
@@ -573,12 +573,12 @@ impl BamStatAccum {
                 if is_paired && !mate_unmapped {
                     let tid = -1;
                     let mtid = -1;
-                    let tlen = crate::rna::bam_flags::template_length(&record);
+                    let tlen = crate::rna::bam_flags::template_length(record);
                     let abs_tlen = tlen.unsigned_abs();
 
                     if abs_tlen > 0 || tid == mtid {
-                        let pos = crate::rna::bam_flags::pos_0based(&record);
-                        let mpos = crate::rna::bam_flags::mate_position_0based(&record);
+                        let pos = crate::rna::bam_flags::pos_0based(record);
+                        let mpos = crate::rna::bam_flags::mate_position_0based(record);
 
                         // Compute orientation (only meaningful for same-chromosome)
                         let pos_fst = mpos - pos;
@@ -795,11 +795,15 @@ impl BamStatAccum {
                 // bases out of read_len total, increment bins gc_idx_min..gc_idx_max.
                 if read_len > 0 {
                     let ngc: usize = 200;
-                    let gc_idx_min = gc_count as usize * (ngc - 1) / read_len;
-                    let mut gc_idx_max = (gc_count as usize + 1) * (ngc - 1) / read_len;
-                    if gc_idx_max >= ngc {
-                        gc_idx_max = ngc - 1;
-                    }
+                    let gc_idx_min = (gc_count as usize)
+                        .checked_mul(ngc - 1)
+                        .and_then(|p| p.checked_div(read_len))
+                        .unwrap_or(0);
+                    let gc_idx_max = ((gc_count as usize + 1)
+                        .checked_mul(ngc - 1)
+                        .and_then(|p| p.checked_div(read_len)))
+                    .map(|v| v.min(ngc - 1))
+                    .unwrap_or(ngc - 1);
                     for item in gc_arr.iter_mut().take(gc_idx_max).skip(gc_idx_min) {
                         *item += 1;
                     }
@@ -1006,8 +1010,8 @@ impl BamStatAccum {
         // =============================================================
         if is_mapped && !is_secondary {
             let tid = -1;
-            let pos = crate::rna::bam_flags::pos_0based(&record);
-            let seq_len = crate::rna::bam_flags::sequence_length(&record);
+            let pos = crate::rna::bam_flags::pos_0based(record);
+            let seq_len = crate::rna::bam_flags::sequence_length(record);
 
             if seq_len > 0 {
                 // Start a new bin on: first read, chromosome change, or
@@ -1377,11 +1381,11 @@ impl InferExpAccum {
             return;
         }
 
-        if crate::rna::bam_flags::mapping_quality(&record) < mapq_cut {
+        if crate::rna::bam_flags::mapping_quality(record) < mapq_cut {
             return;
         }
 
-        let map_strand = if crate::rna::bam_flags::is_reverse_complemented(&record) {
+        let map_strand = if crate::rna::bam_flags::is_reverse_complemented(record) {
             '-'
         } else {
             '+'
@@ -1427,9 +1431,9 @@ impl InferExpAccum {
         // Build key in reusable buffer to avoid per-read allocation.
         // Keys are small (e.g. "1++", "2+-", "++:-") with ~12 distinct values.
         self.key_buf.clear();
-        let map = if crate::rna::bam_flags::is_paired(&record) {
+        let map = if crate::rna::bam_flags::is_paired(record) {
             self.key_buf
-                .push(if crate::rna::bam_flags::is_first_segment(&record) {
+                .push(if crate::rna::bam_flags::is_first_segment(record) {
                     '1'
                 } else {
                     '2'
@@ -1491,7 +1495,7 @@ impl ReadDupAccum {
         if record.flags().bits() & BAM_FUNMAP != 0 || record.flags().bits() & BAM_FQCFAIL != 0 {
             return;
         }
-        if crate::rna::bam_flags::mapping_quality(&record) < mapq_cut {
+        if crate::rna::bam_flags::mapping_quality(record) < mapq_cut {
             return;
         }
 
@@ -1746,11 +1750,11 @@ impl JuncAnnotAccum {
         {
             return;
         }
-        if crate::rna::bam_flags::mapping_quality(&record) < mapq_cut {
+        if crate::rna::bam_flags::mapping_quality(record) < mapq_cut {
             return;
         }
 
-        let start_pos = crate::rna::bam_flags::pos_0based(&record) as u64;
+        let start_pos = crate::rna::bam_flags::pos_0based(record) as u64;
         let cigar = record.cigar();
         let introns = common::fetch_introns(start_pos, &cigar).unwrap_or_default();
 
@@ -1856,11 +1860,11 @@ impl JuncSatAccum {
         {
             return;
         }
-        if crate::rna::bam_flags::mapping_quality(&record) < mapq_cut {
+        if crate::rna::bam_flags::mapping_quality(record) < mapq_cut {
             return;
         }
 
-        let start = crate::rna::bam_flags::pos_0based(&record) as u64;
+        let start = crate::rna::bam_flags::pos_0based(record) as u64;
         let cigar = record.cigar();
         let introns = common::fetch_introns(start, &cigar).unwrap_or_default();
 
@@ -1955,28 +1959,32 @@ impl InnerDistAccum {
             return;
         }
         if record.flags().bits() & BAM_FPAIRED == 0
-            || crate::rna::bam_flags::is_mate_unmapped(&record)
+            || crate::rna::bam_flags::is_mate_unmapped(record)
         {
             return;
         }
-        if crate::rna::bam_flags::mapping_quality(&record) < mapq_cut {
+        if crate::rna::bam_flags::mapping_quality(record) < mapq_cut {
             return;
         }
 
-        let read1_start = crate::rna::bam_flags::pos_0based(&record) as u64;
-        let read2_start = crate::rna::bam_flags::mate_position_0based(&record) as u64;
+        // Get tid and mate_tid for cross-chromosome pair handling
+        let tid = crate::rna::bam_flags::tid(record);
+        let mate_tid = crate::rna::bam_flags::mate_tid(record);
+
+        let read1_start = crate::rna::bam_flags::pos_0based(record) as u64;
+        let read2_start = crate::rna::bam_flags::mate_position_0based(record) as u64;
 
         // Different chromosomes: only process from the lower-tid side to avoid
         // double-counting in parallel mode (each chromosome is a separate worker).
-        if -1 != -1 {
-            if -1 > -1 {
+        if tid != mate_tid {
+            if tid > mate_tid {
                 return;
             }
 
             self.pair_num += 1;
 
             self.pairs.push(InnerDistPair {
-                name: crate::rna::bam_flags::read_name(&record).to_vec(),
+                name: crate::rna::bam_flags::read_name(record).to_vec(),
                 distance: None,
                 classification: "sameChrom=No",
             });
@@ -1988,13 +1996,13 @@ impl InnerDistAccum {
             return;
         }
         // Same position: skip if this is read1 (upstream sets inner_distance=0 and continues)
-        if read2_start == read1_start && crate::rna::bam_flags::is_first_segment(&record) {
+        if read2_start == read1_start && crate::rna::bam_flags::is_first_segment(record) {
             return;
         }
 
         self.pair_num += 1;
 
-        let read_name = crate::rna::bam_flags::read_name(&record).to_vec();
+        let read_name = crate::rna::bam_flags::read_name(record).to_vec();
 
         // Compute read1_end matching upstream RSeQC:
         //   read1_len = aligned_read.qlen  (= query_alignment_length: M+I+=/X)

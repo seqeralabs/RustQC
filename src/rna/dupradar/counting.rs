@@ -966,10 +966,10 @@ fn process_counting_record(
     }
 
     // --- Paired-end counting: buffer mates and combine ---
-    let qname_hash = hash_qname(&crate::rna::bam_flags::read_name(&record));
-    let own_pos = crate::rna::bam_flags::pos_0based(&record);
+    let qname_hash = hash_qname(&crate::rna::bam_flags::read_name(record));
+    let own_pos = crate::rna::bam_flags::pos_0based(record);
     let own_tid = -1;
-    let mate_pos_val = crate::rna::bam_flags::mate_position_0based(&record);
+    let mate_pos_val = crate::rna::bam_flags::mate_position_0based(record);
     let mate_tid = -1;
 
     let hi_tag: i32 = crate::rna::bam_flags::get_aux_int(record, b"HI").map_or(-1, |v| v as i32);
@@ -1302,11 +1302,8 @@ pub fn count_reads(
 
     // Check if an alignment index is available for parallel processing
     // (BAM uses .bai/.csi, CRAM uses .crai; SAM has no index format)
-    let use_parallel = threads > 1 && !is_sam && {
-        BamReaderBuilder::default()
-            .build_from_path(bam_path)
-            .is_ok()
-    };
+    let use_parallel =
+        threads > 1 && !is_sam && { BamReaderBuilder.build_from_path(bam_path).is_ok() };
     if threads > 1 && !use_parallel {
         warn!(
             "Alignment index not found for {}; falling back to single-threaded processing. \
@@ -1384,7 +1381,11 @@ pub fn count_reads(
         // threads are distributed evenly; when threads == num_workers every
         // worker still gets 1 dedicated decompression thread.
         let htslib_threads = if num_workers > 0 {
-            ((threads.saturating_sub(num_workers)) / num_workers).max(1)
+            threads
+                .saturating_sub(num_workers)
+                .checked_div(num_workers)
+                .unwrap_or(0)
+                .max(1)
         } else {
             0
         };

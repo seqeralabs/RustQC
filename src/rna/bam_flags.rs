@@ -56,7 +56,7 @@ pub fn get_aux_int(record: &bam::Record, tag_bytes: &[u8]) -> Option<i64> {
         return None;
     }
     let tag_arr = [tag_bytes[0], tag_bytes[1]];
-    let tag = Tag::try_from(tag_arr).ok()?;
+    let tag = Tag::from(tag_arr);
     let data = record.data();
     let result = data.get(&tag)?;
     let field = result.ok()?;
@@ -127,6 +127,30 @@ pub fn sequence_length(record: &bam::Record) -> usize {
 #[inline]
 pub fn is_mate_unmapped(record: &bam::Record) -> bool {
     record.flags().is_mate_unmapped()
+}
+
+/// Get reference sequence id (tid) as i32, or -1 if unavailable.
+#[inline]
+pub fn tid(record: &bam::Record) -> i32 {
+    record
+        .reference_sequence_id()
+        .transpose()
+        .ok()
+        .flatten()
+        .map(|id| id as i32)
+        .unwrap_or(-1)
+}
+
+/// Get mate reference sequence id (mate tid) as i32, or -1 if unavailable.
+#[inline]
+pub fn mate_tid(record: &bam::Record) -> i32 {
+    record
+        .mate_reference_sequence_id()
+        .transpose()
+        .ok()
+        .flatten()
+        .map(|id| id as i32)
+        .unwrap_or(-1)
 }
 
 /// Check if record is reverse complemented.

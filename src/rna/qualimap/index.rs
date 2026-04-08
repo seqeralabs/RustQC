@@ -322,7 +322,7 @@ impl QualimapIndex {
                 // work (interval tree, intron gaps) is done.
                 let coverage_exons = if tx.strand == '-' {
                     let mut desc = exons_0based.clone();
-                    desc.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+                    desc.sort_unstable_by_key(|b| std::cmp::Reverse(b.0));
                     desc
                 } else {
                     exons_0based
