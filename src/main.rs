@@ -292,6 +292,8 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         );
     }
 
+    let cpu_target = cpu::binary_target();
+    let cpu_features = cpu::detected_features();
     let cpu_info = cpu::cpu_info_line();
     ui.header(
         env!("CARGO_PKG_VERSION"),
@@ -656,11 +658,8 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         let run_summary = summary::RunSummary {
             version: env!("CARGO_PKG_VERSION").to_string(),
             commit: env!("GIT_SHORT_HASH").to_string(),
-            binary_target: cpu::binary_target().to_string(),
-            cpu_features: cpu::detected_features()
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
+            binary_target: cpu_target.to_string(),
+            cpu_features: cpu_features.iter().map(|s| s.to_string()).collect(),
             timestamp_start: start_time.clone(),
             timestamp_end: end_time.clone(),
             runtime_seconds: elapsed.as_secs_f64(),

@@ -43,27 +43,12 @@ pub fn binary_target() -> &'static str {
 ///
 /// Used in the header line: `Binary: x86-64-v3 (AVX2)`.
 pub fn binary_target_label() -> &'static str {
-    #[cfg(target_arch = "x86_64")]
-    {
-        if cfg!(target_feature = "avx512f") {
-            "AVX-512"
-        } else if cfg!(target_feature = "avx2") {
-            "AVX2"
-        } else {
-            "baseline"
-        }
-    }
-    #[cfg(target_arch = "aarch64")]
-    {
-        if cfg!(target_feature = "sve") {
-            "SVE"
-        } else {
-            "NEON"
-        }
-    }
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-    {
-        "baseline"
+    match binary_target() {
+        "x86-64-v4" => "AVX-512",
+        "x86-64-v3" => "AVX2",
+        "aarch64-neoverse-v1" => "SVE",
+        "aarch64" => "NEON",
+        _ => "baseline",
     }
 }
 
@@ -169,32 +154,27 @@ pub fn upgrade_hint() -> Option<String> {
 /// a friendly error instead of a SIGILL crash.
 pub fn check_cpu_compat() -> Result<()> {
     #[cfg(target_arch = "x86_64")]
-    {
-        if cfg!(target_feature = "avx512f") && !is_x86_feature_detected!("avx512f") {
-            bail!(
-                "This RustQC binary was compiled for x86-64-v4 (AVX-512) but your CPU \
-                 does not support AVX-512.\nPlease use the x86-64-v3 or baseline build instead.\n\
-                 See: https://github.com/seqeralabs/rustqc#installation"
-            );
-        }
-        if cfg!(target_feature = "avx2") && !is_x86_feature_detected!("avx2") {
-            bail!(
-                "This RustQC binary was compiled for x86-64-v3 (AVX2) but your CPU \
-                 does not support AVX2.\nPlease use the baseline build instead.\n\
-                 See: https://github.com/seqeralabs/rustqc#installation"
-            );
-        }
+    match binary_target() {
+        "x86-64-v4" if !is_x86_feature_detected!("avx512f") => bail!(
+            "This RustQC binary was compiled for x86-64-v4 (AVX-512) but your CPU \
+             does not support AVX-512.\nPlease use the x86-64-v3 or baseline build instead.\n\
+             See: https://github.com/seqeralabs/rustqc#installation"
+        ),
+        "x86-64-v3" if !is_x86_feature_detected!("avx2") => bail!(
+            "This RustQC binary was compiled for x86-64-v3 (AVX2) but your CPU \
+             does not support AVX2.\nPlease use the baseline build instead.\n\
+             See: https://github.com/seqeralabs/rustqc#installation"
+        ),
+        _ => {}
     }
 
     #[cfg(target_arch = "aarch64")]
-    {
-        if cfg!(target_feature = "sve") && !std::arch::is_aarch64_feature_detected!("sve") {
-            bail!(
-                "This RustQC binary was compiled for aarch64-neoverse-v1 (SVE) but your CPU \
-                 does not support SVE.\nPlease use the baseline aarch64 build instead.\n\
-                 See: https://github.com/seqeralabs/rustqc#installation"
-            );
-        }
+    if binary_target() == "aarch64-neoverse-v1" && !std::arch::is_aarch64_feature_detected!("sve") {
+        bail!(
+            "This RustQC binary was compiled for aarch64-neoverse-v1 (SVE) but your CPU \
+             does not support SVE.\nPlease use the baseline aarch64 build instead.\n\
+             See: https://github.com/seqeralabs/rustqc#installation"
+        );
     }
 
     Ok(())
