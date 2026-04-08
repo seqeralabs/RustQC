@@ -81,6 +81,14 @@ impl GeneIdInterner {
 /// mapped reads, processing is aborted with an error.
 const DUP_CHECK_THRESHOLD: u64 = 1_000_000;
 
+fn dup_check_threshold() -> u64 {
+    std::env::var("RUSTQC_DUP_CHECK_THRESHOLD")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|&value| value > 0)
+        .unwrap_or(DUP_CHECK_THRESHOLD)
+}
+
 /// Checks whether the duplicate-flag sample threshold has been reached without
 /// finding any duplicates. Returns an error if so, `Ok(())` otherwise.
 ///
@@ -92,8 +100,9 @@ fn check_dup_threshold(
     skip_dup_check: bool,
     bam_path: &str,
 ) -> Result<()> {
-    if !skip_dup_check && total_dup == 0 && total_mapped >= DUP_CHECK_THRESHOLD {
-        return Err(no_duplicates_error(DUP_CHECK_THRESHOLD, bam_path));
+    let threshold = dup_check_threshold();
+    if !skip_dup_check && total_dup == 0 && total_mapped >= threshold {
+        return Err(no_duplicates_error(threshold, bam_path));
     }
     Ok(())
 }

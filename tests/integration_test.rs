@@ -5,7 +5,12 @@
 
 use std::fs;
 use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use rust_htslib::bam;
+use rust_htslib::bam::header::HeaderRecord;
 
 /// Helper: get the path to the rustqc binary.
 ///
@@ -54,6 +59,134 @@ fn run_rustqc_impl(outdir: &str, input: &str, skip_dup_check: bool) -> std::proc
         .args(&args)
         .output()
         .expect("Failed to execute rustqc")
+}
+
+/// Helper: run rustqc rna with custom arguments and environment.
+fn run_rustqc_custom(
+    outdir: &Path,
+    input: &Path,
+    gtf: &Path,
+    threads: usize,
+    skip_dup_check: bool,
+    extra_env: &[(&str, &str)],
+) -> std::process::Output {
+    let binary = rustqc_binary();
+    let mut args = vec![
+        "rna".to_string(),
+        input.display().to_string(),
+        "--gtf".to_string(),
+        gtf.display().to_string(),
+        "--outdir".to_string(),
+        outdir.display().to_string(),
+        "--threads".to_string(),
+        threads.to_string(),
+    ];
+    if skip_dup_check {
+        args.push("--skip-dup-check".to_string());
+    }
+
+    let mut cmd = Command::new(&binary);
+    cmd.args(&args);
+    for (key, value) in extra_env {
+        cmd.env(key, value);
+    }
+    cmd.output().expect("Failed to execute rustqc")
+}
+
+fn unique_test_dir(label: &str) -> PathBuf {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!(
+        "rustqc-{}-{}-{}",
+        label,
+        std::process::id(),
+        nonce
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn write_test_gtf(path: &Path, chroms: &[&str]) {
+    let mut gtf = String::new();
+    for (i, chrom) in chroms.iter().enumerate() {
+        let gene_id = format!("GENE_{}", i + 1);
+        gtf.push_str(&format!(
+            "{chrom}\ttest\tgene\t1\t100\t.\t+\t.\tgene_id \"{gene_id}\"; gene_name \"{gene_id}\";\n"
+        ));
+        gtf.push_str(&format!(
+            "{chrom}\ttest\texon\t1\t100\t.\t+\t.\tgene_id \"{gene_id}\"; gene_name \"{gene_id}\"; exon_number \"1\";\n"
+        ));
+    }
+    fs::write(path, gtf).unwrap();
+}
+
+fn write_bam_fixture(path: &Path, chroms: &[(&str, u64)], sam_lines: &[&str]) {
+    let mut header = bam::Header::new();
+    header.push_record(
+        HeaderRecord::new(b"HD")
+            .push_tag(b"VN", "1.6")
+            .push_tag(b"SO", "coordinate"),
+    );
+    for (chrom, len) in chroms {
+        header.push_record(
+            HeaderRecord::new(b"SQ")
+                .push_tag(b"SN", *chrom)
+                .push_tag(b"LN", *len as i64),
+        );
+    }
+
+    let header_view = bam::HeaderView::from_header(&header);
+    let mut writer = bam::Writer::from_path(path, &header, bam::Format::Bam).unwrap();
+    for line in sam_lines {
+        let record = bam::Record::from_sam(&header_view, line.as_bytes()).unwrap();
+        writer.write(&record).unwrap();
+    }
+    drop(writer);
+
+    let bai_path = PathBuf::from(format!("{}.bai", path.display()));
+    bam::index::build(path, Some(&bai_path), bam::index::Type::Bai, 1).unwrap();
+}
+
+fn build_late_duplicate_fixture(root: &Path) -> (PathBuf, PathBuf, PathBuf) {
+    let bam_path = root.join("late-dup.bam");
+    let gtf_path = root.join("late-dup.gtf");
+    let outdir = root.join("out");
+    fs::create_dir_all(&outdir).unwrap();
+
+    write_test_gtf(&gtf_path, &["chrLate"]);
+    write_bam_fixture(
+        &bam_path,
+        &[("chrLate", 1000)],
+        &[
+            "late1\t0\tchrLate\t1\t60\t4M\t*\t0\t0\tACGT\tIIII",
+            "late2\t0\tchrLate\t10\t60\t4M\t*\t0\t0\tTGCA\tIIII",
+            "late3\t1024\tchrLate\t20\t60\t4M\t*\t0\t0\tGATC\tIIII",
+        ],
+    );
+
+    (bam_path, gtf_path, outdir)
+}
+
+fn build_parallel_duplicate_fixture(root: &Path) -> (PathBuf, PathBuf, PathBuf) {
+    let bam_path = root.join("parallel-dup.bam");
+    let gtf_path = root.join("parallel-dup.gtf");
+    let outdir = root.join("out");
+    fs::create_dir_all(&outdir).unwrap();
+
+    write_test_gtf(&gtf_path, &["chrDup", "chrNoDup"]);
+    write_bam_fixture(
+        &bam_path,
+        &[("chrDup", 1000), ("chrNoDup", 1000)],
+        &[
+            "dup1\t1024\tchrDup\t1\t60\t4M\t*\t0\t0\tACGT\tIIII",
+            "nodup1\t0\tchrNoDup\t1\t60\t4M\t*\t0\t0\tTGCA\tIIII",
+            "nodup2\t0\tchrNoDup\t10\t60\t4M\t*\t0\t0\tGATC\tIIII",
+        ],
+    );
+
+    (bam_path, gtf_path, outdir)
 }
 
 /// Convenience: run with a custom input and --skip-dup-check.
@@ -844,4 +977,56 @@ fn test_dup_check_fails_for_sam_without_duplicates() {
 
     // Cleanup
     let _ = fs::remove_dir_all(outdir);
+}
+
+/// A valid BAM should still pass if duplicate-flagged reads appear later than
+/// the early-check threshold. The full file contains duplicates, so the
+/// validation must consider the complete input rather than a prefix.
+#[test]
+fn test_dup_check_allows_late_duplicate_flags() {
+    let root = unique_test_dir("late-dup");
+    let (bam_path, gtf_path, outdir) = build_late_duplicate_fixture(&root);
+
+    let output = run_rustqc_custom(
+        &outdir,
+        &bam_path,
+        &gtf_path,
+        1,
+        false,
+        &[("RUSTQC_DUP_CHECK_THRESHOLD", "2")],
+    );
+
+    assert!(
+        output.status.success(),
+        "rustqc should succeed when duplicate-flagged reads appear later in the file:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+/// Parallel duplicate validation must use the global duplicate count, not a
+/// per-worker count. One chromosome batch here has duplicate flags and the
+/// other does not; the BAM should still be accepted.
+#[test]
+fn test_dup_check_parallel_uses_global_duplicate_state() {
+    let root = unique_test_dir("parallel-dup");
+    let (bam_path, gtf_path, outdir) = build_parallel_duplicate_fixture(&root);
+
+    let output = run_rustqc_custom(
+        &outdir,
+        &bam_path,
+        &gtf_path,
+        2,
+        false,
+        &[("RUSTQC_DUP_CHECK_THRESHOLD", "2")],
+    );
+
+    assert!(
+        output.status.success(),
+        "rustqc should succeed in parallel mode when duplicates exist globally:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let _ = fs::remove_dir_all(root);
 }
