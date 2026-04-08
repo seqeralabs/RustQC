@@ -17,22 +17,15 @@ Pre-built binaries are available from the [GitHub Releases page](https://github.
     sudo mv ./rustqc /usr/local/bin/
     rustqc --version
     ```
-  </TabItem>
-  <TabItem label="Linux x86_64 (AVX2)" icon="linux">
-    ```bash
-    curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-linux-x86_64-v3.tar.gz | tar xz --strip-components=1
-    chmod +x ./rustqc
-    sudo mv ./rustqc /usr/local/bin/
-    rustqc --version
-    ```
-  </TabItem>
-  <TabItem label="Linux x86_64 (AVX-512)" icon="linux">
-    ```bash
-    curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-linux-x86_64-v4.tar.gz | tar xz --strip-components=1
-    chmod +x ./rustqc
-    sudo mv ./rustqc /usr/local/bin/
-    rustqc --version
-    ```
+
+    SIMD-optimized builds are also available for faster performance on modern CPUs. Replace the download URL above with one of:
+
+    - **AVX2 (x86-64-v3)** — recommended for most modern servers (Haswell/Zen 1+, 2013+):
+      `rustqc-linux-x86_64-v3.tar.gz`
+    - **AVX-512 (x86-64-v4)** — fastest, requires Skylake-X/Zen 4+ (2017+):
+      `rustqc-linux-x86_64-v4.tar.gz`
+
+    Run `rustqc --version` to see which features your CPU supports and whether a faster build is available.
   </TabItem>
   <TabItem label="Linux aarch64" icon="linux">
     ```bash
@@ -41,14 +34,11 @@ Pre-built binaries are available from the [GitHub Releases page](https://github.
     sudo mv ./rustqc /usr/local/bin/
     rustqc --version
     ```
-  </TabItem>
-  <TabItem label="Linux aarch64 (SVE)" icon="linux">
-    ```bash
-    curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-linux-aarch64-neoverse-v1.tar.gz | tar xz --strip-components=1
-    chmod +x ./rustqc
-    sudo mv ./rustqc /usr/local/bin/
-    rustqc --version
-    ```
+
+    An SVE-optimized build is also available for AWS Graviton 3+, Google Axion, and NVIDIA Grace instances. Replace the download URL above with:
+
+    - **SVE (neoverse-v1)** — 256-bit vectors vs NEON's 128-bit baseline:
+      `rustqc-linux-aarch64-neoverse-v1.tar.gz`
   </TabItem>
   <TabItem label="macOS Apple Silicon" icon="apple">
     ```bash
@@ -57,14 +47,11 @@ Pre-built binaries are available from the [GitHub Releases page](https://github.
     sudo mv ./rustqc /usr/local/bin/
     rustqc --version
     ```
-  </TabItem>
-  <TabItem label="macOS Apple Silicon (M1)" icon="apple">
-    ```bash
-    curl -fsSL https://github.com/seqeralabs/RustQC/releases/latest/download/rustqc-macos-aarch64-apple-m1.tar.gz | tar xz --strip-components=1
-    chmod +x ./rustqc
-    sudo mv ./rustqc /usr/local/bin/
-    rustqc --version
-    ```
+
+    An M1-optimized build with better scheduling for Apple Silicon is also available. Replace the download URL above with:
+
+    - **Apple M1** — optimized for M-series chips (M1/M2/M3/M4, backward compatible):
+      `rustqc-macos-aarch64-apple-m1.tar.gz`
   </TabItem>
   <TabItem label="macOS Intel" icon="apple">
     ```bash
@@ -75,16 +62,6 @@ Pre-built binaries are available from the [GitHub Releases page](https://github.
     ```
   </TabItem>
 </Tabs>
-
-:::tip[SIMD-optimized builds]
-In addition to the baseline builds, RustQC provides optimized binaries that leverage SIMD instructions for better performance:
-
-- **x86_64**: Baseline (works everywhere) &rarr; **AVX2 / x86-64-v3** (Haswell/Zen 1+, recommended for most modern servers) &rarr; **AVX-512 / x86-64-v4** (Skylake-X/Zen 4+, fastest)
-- **aarch64 Linux**: Baseline (NEON, works everywhere) &rarr; **SVE / neoverse-v1** (AWS Graviton 3+, Google Axion, NVIDIA Grace)
-- **macOS**: Baseline (all Apple Silicon) &rarr; **Apple M1** (optimized scheduling for M-series chips)
-
-Run `rustqc --version` to see which features your CPU supports and whether a faster build is available.
-:::
 
 ## Docker
 
