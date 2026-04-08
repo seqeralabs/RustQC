@@ -14,6 +14,22 @@ This page documents how much each individual tool contributes to the total
 runtime, how disabling tools affects performance, and how to tune thread
 counts for your hardware.
 
+## SIMD-optimized binaries
+
+Pre-built binaries are available with SIMD optimizations that enable the compiler to auto-vectorize hot code paths (BAM decompression, counting loops, hash computation). These can provide meaningful speedups over the baseline builds without any code changes or building from source.
+
+**x86_64 Linux:**
+- **AVX2 (x86-64-v3)**: Requires Haswell/Zen 1+ (2013+). Recommended for most modern servers.
+- **AVX-512 (x86-64-v4)**: Requires Skylake-X/Zen 4+ (2017+). Fastest option for supported CPUs.
+
+**aarch64 Linux:**
+- **SVE (neoverse-v1)**: Requires Graviton 3+, Google Axion, or NVIDIA Grace. SVE provides 256-bit vectors vs NEON's 128-bit baseline.
+
+**macOS:**
+- **Apple M1**: Optimized scheduling for Apple Silicon M-series chips.
+
+Run `rustqc --version` to see which features your CPU supports and whether a faster build is available. See the [Installation](/getting-started/installation/) page for download instructions.
+
 ## Recommendations
 
 - **Leave all tools enabled** unless you have a specific reason not to.

@@ -87,8 +87,8 @@ impl Ui {
     // Header & config
     // ========================================================================
 
-    /// Print the startup banner.
-    pub fn header(&self, version: &str, commit: &str, build: &str) {
+    /// Print the startup banner, optionally including a CPU info line.
+    pub fn header(&self, version: &str, commit: &str, build: &str, cpu_info: Option<&str>) {
         if self.is_quiet() {
             return;
         }
@@ -99,6 +99,9 @@ impl Ui {
             self.style_dim
                 .apply_to(format!("({commit}, built {build})")),
         );
+        if let Some(info) = cpu_info {
+            eprintln!("  {}", self.style_dim.apply_to(info));
+        }
         eprintln!();
     }
 

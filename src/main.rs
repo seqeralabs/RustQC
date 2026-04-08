@@ -11,6 +11,7 @@
 
 mod cli;
 mod config;
+mod cpu;
 mod gtf;
 mod io;
 mod rna;
@@ -67,6 +68,10 @@ fn format_utc_now() -> String {
 }
 
 fn main() -> Result<()> {
+    // Guard against running a SIMD-optimized binary on incompatible hardware.
+    // Must run before any auto-vectorized code to prevent SIGILL.
+    cpu::check_cpu_compat()?;
+
     let cli = cli::parse_args();
 
     // Determine verbosity from CLI flags
@@ -287,10 +292,12 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         );
     }
 
+    let cpu_info = cpu::cpu_info_line();
     ui.header(
         env!("CARGO_PKG_VERSION"),
         env!("GIT_SHORT_HASH"),
         env!("BUILD_TIMESTAMP"),
+        Some(&cpu_info),
     );
 
     // Resolve effective stranded/paired early for display (config loaded above)
@@ -649,6 +656,11 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         let run_summary = summary::RunSummary {
             version: env!("CARGO_PKG_VERSION").to_string(),
             commit: env!("GIT_SHORT_HASH").to_string(),
+            binary_target: cpu::binary_target().to_string(),
+            cpu_features: cpu::detected_features()
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
             timestamp_start: start_time.clone(),
             timestamp_end: end_time.clone(),
             runtime_seconds: elapsed.as_secs_f64(),

@@ -56,25 +56,49 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux x86_64
+          # Linux x86_64 (baseline)
           - name: linux-x86_64
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
 
-          # Linux aarch64 (native arm64 runner)
+          # Linux x86_64 with AVX2 (x86-64-v3)
+          - name: linux-x86_64-v3
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            rustflags: "-C target-cpu=x86-64-v3"
+
+          # Linux x86_64 with AVX-512 (x86-64-v4)
+          - name: linux-x86_64-v4
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            rustflags: "-C target-cpu=x86-64-v4"
+
+          # Linux aarch64 (native arm64 runner, baseline)
           - name: linux-aarch64
             os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
+
+          # Linux aarch64 with SVE (Graviton 3+, Axion, Grace)
+          - name: linux-aarch64-neoverse-v1
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            rustflags: "-C target-cpu=neoverse-v1"
 
           # macOS x86_64 (cross-compiled on Apple Silicon runner)
           - name: macos-x86_64
             os: macos-latest
             target: x86_64-apple-darwin
 
-          # macOS aarch64 (Apple Silicon)
+          # macOS aarch64 (Apple Silicon, baseline)
           - name: macos-aarch64
             os: macos-latest
             target: aarch64-apple-darwin
+
+          # macOS aarch64 (Apple M1 optimized)
+          - name: macos-aarch64-apple-m1
+            os: macos-latest
+            target: aarch64-apple-darwin
+            rustflags: "-C target-cpu=apple-m1"
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6.0.2
@@ -99,6 +123,8 @@ jobs:
 
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags || '' }}
 
       - name: Package
         id: package
@@ -190,6 +216,74 @@ jobs:
           retention-days: 1
 
   # ------------------------------------------------------------------
+  # 3a. Build SIMD-optimized Docker images (single-arch each)
+  # ------------------------------------------------------------------
+  docker-build-simd:
+    name: Docker ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: amd64-avx2
+            runner: ubuntu-latest
+            platform: linux/amd64
+            cpu_target: x86-64-v3
+            tag_suffix: avx2
+          - name: amd64-avx512
+            runner: ubuntu-latest
+            platform: linux/amd64
+            cpu_target: x86-64-v4
+            tag_suffix: avx512
+          - name: arm64-sve
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            cpu_target: neoverse-v1
+            tag_suffix: sve
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6.0.2
+
+      - name: Lowercase image name
+        run: echo "IMAGE_NAME=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # ratchet:docker/setup-buildx-action@v4.0.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # ratchet:docker/login-action@v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get short commit hash
+        id: git-hash
+        run: echo "short_hash=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # ratchet:docker/metadata-action@v6.0.0
+        with:
+          images: ghcr.io/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}-${{ matrix.tag_suffix }},enable=${{ startsWith(github.ref, 'refs/tags/') }}
+            type=raw,value=latest-${{ matrix.tag_suffix }},enable=${{ startsWith(github.ref, 'refs/tags/') }}
+            type=raw,value=dev-${{ matrix.tag_suffix }},enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # ratchet:docker/build-push-action@v7.0.0
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            GIT_SHORT_HASH=${{ steps.git-hash.outputs.short_hash }}
+            CPU_TARGET=${{ matrix.cpu_target }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,scope=${{ matrix.name }},mode=max
+
+  # ------------------------------------------------------------------
   # 3b. Merge per-platform images into a multi-arch manifest
   # ------------------------------------------------------------------
   docker-merge:
@@ -265,7 +359,7 @@ jobs:
   publish-release:
     name: Publish release
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [create-release, build-binaries, docker-merge, publish-crate]
+    needs: [create-release, build-binaries, docker-merge, docker-build-simd, publish-crate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6.0.2

@@ -10,7 +10,7 @@
 //!
 //! A GTF gene annotation file is required for all analyses.
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use serde::Deserialize;
 
 /// Library strandedness protocol.
@@ -311,8 +311,25 @@ pub struct RnaArgs {
 }
 
 /// Parse command-line arguments and return the Cli struct.
+///
+/// Sets a `long_version` that includes the git commit, build timestamp,
+/// and CPU info line, shown when the user runs `rustqc --version`.
 pub fn parse_args() -> Cli {
-    Cli::parse()
+    use clap::FromArgMatches;
+
+    let long_version: &'static str = Box::leak(
+        format!(
+            "{} ({}, built {})\n{}",
+            env!("CARGO_PKG_VERSION"),
+            env!("GIT_SHORT_HASH"),
+            env!("BUILD_TIMESTAMP"),
+            crate::cpu::cpu_info_line(),
+        )
+        .into_boxed_str(),
+    );
+    let cmd = Cli::command().long_version(long_version);
+    let matches = cmd.get_matches();
+    Cli::from_arg_matches(&matches).expect("clap arg matching failed")
 }
 
 #[cfg(test)]

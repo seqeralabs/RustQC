@@ -13,12 +13,19 @@ env:
 
 jobs:
   test:
-    name: Test (${{ matrix.os }})
+    name: Test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+          - name: linux-x86_64-v3
+            os: ubuntu-latest
+            rustflags: "-C target-cpu=x86-64-v3"
+          - name: macos-aarch64
+            os: macos-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6.0.2
 
@@ -40,9 +47,13 @@ jobs:
 
       - name: Build
         run: cargo build --release
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags || '' }}
 
       - name: Test
         run: cargo test --release
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags || '' }}
 
   fmt:
     name: Formatting

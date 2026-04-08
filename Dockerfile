@@ -14,13 +14,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 ARG GIT_SHORT_HASH=unknown
+ARG CPU_TARGET=""
 
 WORKDIR /build
 COPY Cargo.toml Cargo.lock build.rs ./
 COPY cpp/ cpp/
 COPY src/ src/
 
-RUN GIT_SHORT_HASH="${GIT_SHORT_HASH}" cargo build --release && strip target/release/rustqc
+RUN RUSTFLAGS="${CPU_TARGET:+-C target-cpu=$CPU_TARGET}" \
+    GIT_SHORT_HASH="${GIT_SHORT_HASH}" \
+    cargo build --release && strip target/release/rustqc
 
 # ---- Runtime stage ----
 FROM debian:bookworm-slim

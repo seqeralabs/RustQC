@@ -12,6 +12,10 @@ pub struct RunSummary {
     pub version: String,
     /// Short git commit hash.
     pub commit: String,
+    /// Binary microarchitecture target (e.g. "x86-64-v3", "aarch64-neoverse-v1").
+    pub binary_target: String,
+    /// CPU features detected at runtime (e.g. ["AVX2", "SSE4.2", "POPCNT"]).
+    pub cpu_features: Vec<String>,
     /// UTC timestamp when the run started.
     pub timestamp_start: String,
     /// UTC timestamp when the run finished.
