@@ -5,7 +5,12 @@
 
 use std::fs;
 use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use rust_htslib::bam;
+use rust_htslib::bam::header::HeaderRecord;
 
 /// Helper: get the path to the rustqc binary.
 ///
@@ -34,21 +39,155 @@ fn run_rustqc(outdir: &str) -> std::process::Output {
     run_rustqc_with_input(outdir, "tests/data/test.bam")
 }
 
-/// Helper: run rustqc rna with a specified input file and return the output
-fn run_rustqc_with_input(outdir: &str, input: &str) -> std::process::Output {
+/// Helper: run rustqc rna with a specified input file and return the output.
+/// When `skip_dup_check` is true (the default for most tests), passes
+/// `--skip-dup-check` so the test doesn't depend on duplicate flags.
+fn run_rustqc_impl(outdir: &str, input: &str, skip_dup_check: bool) -> std::process::Output {
     let binary = rustqc_binary();
+    let mut args = vec![
+        "rna",
+        input,
+        "--gtf",
+        "tests/data/test.gtf",
+        "--outdir",
+        outdir,
+    ];
+    if skip_dup_check {
+        args.push("--skip-dup-check");
+    }
     Command::new(&binary)
-        .args([
-            "rna",
-            input,
-            "--gtf",
-            "tests/data/test.gtf",
-            "--outdir",
-            outdir,
-            "--skip-dup-check",
-        ])
+        .args(&args)
         .output()
         .expect("Failed to execute rustqc")
+}
+
+/// Helper: run rustqc rna with custom arguments and environment.
+fn run_rustqc_custom(
+    outdir: &Path,
+    input: &Path,
+    gtf: &Path,
+    threads: usize,
+    skip_dup_check: bool,
+    extra_env: &[(&str, &str)],
+) -> std::process::Output {
+    let binary = rustqc_binary();
+    let mut args = vec![
+        "rna".to_string(),
+        input.display().to_string(),
+        "--gtf".to_string(),
+        gtf.display().to_string(),
+        "--outdir".to_string(),
+        outdir.display().to_string(),
+        "--threads".to_string(),
+        threads.to_string(),
+    ];
+    if skip_dup_check {
+        args.push("--skip-dup-check".to_string());
+    }
+
+    let mut cmd = Command::new(&binary);
+    cmd.args(&args);
+    for (key, value) in extra_env {
+        cmd.env(key, value);
+    }
+    cmd.output().expect("Failed to execute rustqc")
+}
+
+fn unique_test_dir(label: &str) -> PathBuf {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir =
+        std::env::temp_dir().join(format!("rustqc-{}-{}-{}", label, std::process::id(), nonce));
+    fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn write_test_gtf(path: &Path, chroms: &[&str]) {
+    let mut gtf = String::new();
+    for (i, chrom) in chroms.iter().enumerate() {
+        let gene_id = format!("GENE_{}", i + 1);
+        gtf.push_str(&format!(
+            "{chrom}\ttest\tgene\t1\t100\t.\t+\t.\tgene_id \"{gene_id}\"; gene_name \"{gene_id}\";\n"
+        ));
+        gtf.push_str(&format!(
+            "{chrom}\ttest\texon\t1\t100\t.\t+\t.\tgene_id \"{gene_id}\"; gene_name \"{gene_id}\"; exon_number \"1\";\n"
+        ));
+    }
+    fs::write(path, gtf).unwrap();
+}
+
+fn write_bam_fixture(path: &Path, chroms: &[(&str, u64)], sam_lines: &[&str]) {
+    let mut header = bam::Header::new();
+    header.push_record(
+        HeaderRecord::new(b"HD")
+            .push_tag(b"VN", "1.6")
+            .push_tag(b"SO", "coordinate"),
+    );
+    for (chrom, len) in chroms {
+        header.push_record(
+            HeaderRecord::new(b"SQ")
+                .push_tag(b"SN", *chrom)
+                .push_tag(b"LN", *len as i64),
+        );
+    }
+
+    let header_view = bam::HeaderView::from_header(&header);
+    let mut writer = bam::Writer::from_path(path, &header, bam::Format::Bam).unwrap();
+    for line in sam_lines {
+        let record = bam::Record::from_sam(&header_view, line.as_bytes()).unwrap();
+        writer.write(&record).unwrap();
+    }
+    drop(writer);
+
+    let bai_path = PathBuf::from(format!("{}.bai", path.display()));
+    bam::index::build(path, Some(&bai_path), bam::index::Type::Bai, 1).unwrap();
+}
+
+fn build_late_duplicate_fixture(root: &Path) -> (PathBuf, PathBuf, PathBuf) {
+    let bam_path = root.join("late-dup.bam");
+    let gtf_path = root.join("late-dup.gtf");
+    let outdir = root.join("out");
+    fs::create_dir_all(&outdir).unwrap();
+
+    write_test_gtf(&gtf_path, &["chrLate"]);
+    write_bam_fixture(
+        &bam_path,
+        &[("chrLate", 1000)],
+        &[
+            "late1\t0\tchrLate\t1\t60\t4M\t*\t0\t0\tACGT\tIIII",
+            "late2\t0\tchrLate\t10\t60\t4M\t*\t0\t0\tTGCA\tIIII",
+            "late3\t1024\tchrLate\t20\t60\t4M\t*\t0\t0\tGATC\tIIII",
+        ],
+    );
+
+    (bam_path, gtf_path, outdir)
+}
+
+fn build_parallel_duplicate_fixture(root: &Path) -> (PathBuf, PathBuf, PathBuf) {
+    let bam_path = root.join("parallel-dup.bam");
+    let gtf_path = root.join("parallel-dup.gtf");
+    let outdir = root.join("out");
+    fs::create_dir_all(&outdir).unwrap();
+
+    write_test_gtf(&gtf_path, &["chrDup", "chrNoDup"]);
+    write_bam_fixture(
+        &bam_path,
+        &[("chrDup", 1000), ("chrNoDup", 1000)],
+        &[
+            "dup1\t1024\tchrDup\t1\t60\t4M\t*\t0\t0\tACGT\tIIII",
+            "nodup1\t0\tchrNoDup\t1\t60\t4M\t*\t0\t0\tTGCA\tIIII",
+            "nodup2\t0\tchrNoDup\t10\t60\t4M\t*\t0\t0\tGATC\tIIII",
+        ],
+    );
+
+    (bam_path, gtf_path, outdir)
+}
+
+/// Convenience: run with a custom input and --skip-dup-check.
+fn run_rustqc_with_input(outdir: &str, input: &str) -> std::process::Output {
+    run_rustqc_impl(outdir, input, true)
 }
 
 /// Helper: run rustqc rna with --flat-output flag (all files in outdir, no subdirectories)
@@ -727,4 +866,163 @@ fn test_flat_output_no_subdirectories() {
 
     // Cleanup
     let _ = fs::remove_dir_all(outdir);
+}
+
+// ===================================================================
+// Duplicate-flag detection tests (https://github.com/seqeralabs/RustQC/issues/71)
+//
+// PR #84 replaced the fragile @PG header check with runtime inspection of
+// the actual 0x400 duplicate flag. These tests exercise that logic.
+// ===================================================================
+
+/// Convenience: run WITHOUT --skip-dup-check (the default user experience).
+fn run_rustqc_dup_check(outdir: &str, input: &str) -> std::process::Output {
+    run_rustqc_impl(outdir, input, false)
+}
+
+/// A BAM with duplicates marked (0x400) should succeed without --skip-dup-check.
+/// This is the normal happy path — tools like Picard, samblaster, or Parabricks
+/// set the duplicate flag, and RustQC should accept the file.
+#[test]
+fn test_dup_check_passes_with_marked_duplicates() {
+    let outdir = "tests/output_dup_check_pass";
+    let _ = fs::remove_dir_all(outdir);
+    fs::create_dir_all(outdir).unwrap();
+
+    // test.bam has 137/488 reads with 0x400 set
+    let output = run_rustqc_dup_check(outdir, "tests/data/test.bam");
+    assert!(
+        output.status.success(),
+        "rustqc should succeed when BAM has duplicate-flagged reads:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Cleanup
+    let _ = fs::remove_dir_all(outdir);
+}
+
+/// A BAM with NO duplicates flagged should fail with a clear error message.
+/// test_nodup.bam is test.bam with all 0x400 flags cleared.
+#[test]
+fn test_dup_check_fails_without_marked_duplicates() {
+    let outdir = "tests/output_dup_check_fail";
+    let _ = fs::remove_dir_all(outdir);
+    fs::create_dir_all(outdir).unwrap();
+
+    let output = run_rustqc_dup_check(outdir, "tests/data/test_nodup.bam");
+    assert!(
+        !output.status.success(),
+        "rustqc should fail when BAM has no duplicate-flagged reads"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("No duplicate-flagged reads found"),
+        "Error should mention missing duplicate flags, got:\n{}",
+        stderr
+    );
+    assert!(
+        stderr.contains("--skip-dup-check"),
+        "Error should suggest --skip-dup-check, got:\n{}",
+        stderr
+    );
+
+    // Cleanup
+    let _ = fs::remove_dir_all(outdir);
+}
+
+/// --skip-dup-check should bypass the duplicate flag requirement,
+/// allowing a no-duplicate BAM to be processed successfully.
+#[test]
+fn test_skip_dup_check_bypasses_failure() {
+    let outdir = "tests/output_dup_check_skip";
+    let _ = fs::remove_dir_all(outdir);
+    fs::create_dir_all(outdir).unwrap();
+
+    let output = run_rustqc_with_input(outdir, "tests/data/test_nodup.bam");
+    assert!(
+        output.status.success(),
+        "rustqc --skip-dup-check should succeed even without duplicate flags:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Cleanup
+    let _ = fs::remove_dir_all(outdir);
+}
+
+/// SAM input (single-threaded path) should also detect missing duplicates.
+/// This exercises the non-parallel code path in count_reads().
+#[test]
+fn test_dup_check_fails_for_sam_without_duplicates() {
+    let outdir = "tests/output_dup_check_sam";
+    let _ = fs::remove_dir_all(outdir);
+    fs::create_dir_all(outdir).unwrap();
+
+    let output = run_rustqc_dup_check(outdir, "tests/data/test_nodup.sam");
+    assert!(
+        !output.status.success(),
+        "rustqc should fail for SAM input without duplicate flags"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("No duplicate-flagged reads found"),
+        "Error should mention missing duplicate flags for SAM input, got:\n{}",
+        stderr
+    );
+
+    // Cleanup
+    let _ = fs::remove_dir_all(outdir);
+}
+
+/// A valid BAM should still pass if duplicate-flagged reads appear later than
+/// the early-check threshold. The full file contains duplicates, so the
+/// validation must consider the complete input rather than a prefix.
+#[test]
+fn test_dup_check_allows_late_duplicate_flags() {
+    let root = unique_test_dir("late-dup");
+    let (bam_path, gtf_path, outdir) = build_late_duplicate_fixture(&root);
+
+    let output = run_rustqc_custom(
+        &outdir,
+        &bam_path,
+        &gtf_path,
+        1,
+        false,
+        &[("RUSTQC_DUP_CHECK_THRESHOLD", "2")],
+    );
+
+    assert!(
+        output.status.success(),
+        "rustqc should succeed when duplicate-flagged reads appear later in the file:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+/// Parallel duplicate validation must use the global duplicate count, not a
+/// per-worker count. One chromosome batch here has duplicate flags and the
+/// other does not; the BAM should still be accepted.
+#[test]
+fn test_dup_check_parallel_uses_global_duplicate_state() {
+    let root = unique_test_dir("parallel-dup");
+    let (bam_path, gtf_path, outdir) = build_parallel_duplicate_fixture(&root);
+
+    let output = run_rustqc_custom(
+        &outdir,
+        &bam_path,
+        &gtf_path,
+        2,
+        false,
+        &[("RUSTQC_DUP_CHECK_THRESHOLD", "2")],
+    );
+
+    assert!(
+        output.status.success(),
+        "rustqc should succeed in parallel mode when duplicates exist globally:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let _ = fs::remove_dir_all(root);
 }
