@@ -144,7 +144,7 @@ pub struct RnaArgs {
     #[arg(long, value_name = "ATTR", help_heading = "General")]
     pub biotype_attribute: Option<String>,
 
-    /// Skip duplicate-marking header check
+    /// Skip duplicate-marking check
     #[arg(long, default_value_t = false, help_heading = "General")]
     pub skip_dup_check: bool,
 
