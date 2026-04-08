@@ -121,13 +121,14 @@ pub fn write_citations(path: &Path, config: &RnaConfig, version: &str, commit: &
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::NamedTempFile;
 
     fn read_citations(config: &RnaConfig) -> String {
-        let tmp = NamedTempFile::new().unwrap();
-        let path = tmp.path().to_path_buf();
+        let path =
+            std::env::temp_dir().join(format!("rustqc_test_citations_{}.md", std::process::id()));
         write_citations(&path, config, "0.1.0", "abc1234").unwrap();
-        std::fs::read_to_string(&path).unwrap()
+        let content = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        content
     }
 
     #[test]
