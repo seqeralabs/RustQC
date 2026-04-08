@@ -41,17 +41,17 @@ const RSEQC: Citation = Citation {
 };
 
 const PRESEQ: Citation = Citation {
-    heading: "preseq (v3.2.0)",
-    description: "RustQC reimplements library complexity estimation from preseq.",
+    heading: "Preseq (v3.2.0)",
+    description: "RustQC reimplements library complexity estimation from Preseq.",
     reference: "Daley T, Smith AD. Predicting the molecular complexity of sequencing libraries. *Nature Methods*. 2013;10(4):325-327.",
     url: "https://github.com/smithlabcode/preseq",
     doi: "10.1038/nmeth.2375",
 };
 
 const SAMTOOLS: Citation = Citation {
-    heading: "samtools (v1.22.1)",
-    description: "RustQC produces samtools-compatible flagstat, idxstats, and stats output.",
-    reference: "Danecek P, Bonfield JK, Liddle J, et al. Twelve years of SAMtools and BCFtools. *GigaScience*. 2021;10(2):giab008.",
+    heading: "Samtools (v1.22.1)",
+    description: "RustQC produces Samtools-compatible flagstat, idxstats, and stats output.",
+    reference: "Danecek P, Bonfield JK, Liddle J, et al. Twelve years of Samtools and BCFtools. *GigaScience*. 2021;10(2):giab008.",
     url: "http://www.htslib.org/",
     doi: "10.1093/gigascience/giab008",
 };
@@ -145,8 +145,8 @@ mod tests {
         assert!(content.contains("## dupRadar"));
         assert!(content.contains("## featureCounts"));
         assert!(content.contains("## RSeQC"));
-        assert!(content.contains("## preseq"));
-        assert!(content.contains("## samtools"));
+        assert!(content.contains("## Preseq"));
+        assert!(content.contains("## Samtools"));
         assert!(content.contains("## Qualimap"));
     }
 
@@ -176,12 +176,12 @@ mod tests {
         let content = read_citations(&config);
 
         assert!(!content.contains("## dupRadar"));
-        assert!(!content.contains("## preseq"));
+        assert!(!content.contains("## Preseq"));
         assert!(!content.contains("## Qualimap"));
         // These should still be present (enabled by default)
         assert!(content.contains("## featureCounts"));
         assert!(content.contains("## RSeQC"));
-        assert!(content.contains("## samtools"));
+        assert!(content.contains("## Samtools"));
     }
 
     #[test]
@@ -237,8 +237,8 @@ mod tests {
         assert!(!content.contains("## dupRadar"));
         assert!(!content.contains("## featureCounts"));
         assert!(!content.contains("## RSeQC"));
-        assert!(!content.contains("## preseq"));
-        assert!(!content.contains("## samtools"));
+        assert!(!content.contains("## Preseq"));
+        assert!(!content.contains("## Samtools"));
         assert!(!content.contains("## Qualimap"));
     }
 }
