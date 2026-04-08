@@ -7,8 +7,9 @@
 use crate::cli::Strandedness;
 use anyhow::{Context, Result};
 use serde::Deserialize;
+use serde_yaml_ng::Value;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Top-level configuration structure.
 ///
@@ -726,7 +727,11 @@ impl Default for PreseqConfig {
 // ============================================================================
 
 impl Config {
-    /// Load configuration from a YAML file.
+    /// Load configuration from a single YAML file.
+    ///
+    /// For multi-source loading with XDG discovery and merging, use
+    /// [`load_merged_config`] instead.
+    #[allow(dead_code)]
     pub fn from_file(path: &Path) -> Result<Self> {
         let contents = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read config file: {}", path.display()))?;
@@ -734,6 +739,107 @@ impl Config {
             .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
         Ok(config)
     }
+}
+
+// ============================================================================
+// Config file discovery and merging
+// ============================================================================
+
+/// Recursively merge `overlay` into `base` at the leaf level.
+///
+/// Mapping keys in `overlay` are merged recursively into `base`; all other
+/// value types (scalars, sequences, nulls) in `overlay` replace the
+/// corresponding value in `base`.
+fn deep_merge(base: &mut Value, overlay: Value) {
+    match (base, overlay) {
+        (Value::Mapping(base_map), Value::Mapping(overlay_map)) => {
+            for (key, overlay_val) in overlay_map {
+                if let Some(base_val) = base_map.get_mut(&key) {
+                    deep_merge(base_val, overlay_val);
+                } else {
+                    base_map.insert(key, overlay_val);
+                }
+            }
+        }
+        (base, overlay) => {
+            *base = overlay;
+        }
+    }
+}
+
+/// Collect config file paths in merge order (lowest priority first).
+///
+/// Search order:
+/// 1. XDG system config: first match in `$XDG_CONFIG_DIRS` (fallback `/etc/xdg/`)
+/// 2. XDG user config: `$XDG_CONFIG_HOME/rustqc/rustqc.yml` (fallback `~/.config/`)
+/// 3. `RUSTQC_CONFIG` environment variable
+/// 4. Explicit `-c` / `--config` CLI flag (highest file-level priority)
+///
+/// Returns `(path, source_label)` pairs for UI logging.
+pub fn collect_config_paths(cli_config: Option<&str>) -> Vec<(PathBuf, &'static str)> {
+    let mut paths = Vec::new();
+
+    // 1. XDG system config (lowest priority)
+    let xdg_dirs = std::env::var("XDG_CONFIG_DIRS").unwrap_or_else(|_| "/etc/xdg".to_string());
+    for dir in xdg_dirs.split(':').filter(|s| !s.is_empty()) {
+        let p = Path::new(dir).join("rustqc").join("rustqc.yml");
+        if p.is_file() {
+            paths.push((p, "system"));
+            break; // XDG spec: first match in the directory list wins
+        }
+    }
+
+    // 2. XDG user config
+    if let Some(config_home) = dirs::config_dir() {
+        let p = config_home.join("rustqc").join("rustqc.yml");
+        if p.is_file() {
+            paths.push((p, "user"));
+        }
+    }
+
+    // 3. RUSTQC_CONFIG env var
+    if let Ok(env_path) = std::env::var("RUSTQC_CONFIG") {
+        if !env_path.is_empty() {
+            paths.push((PathBuf::from(env_path), "RUSTQC_CONFIG"));
+        }
+    }
+
+    // 4. Explicit -c flag (highest priority)
+    if let Some(cli_path) = cli_config {
+        paths.push((PathBuf::from(cli_path), "-c flag"));
+    }
+
+    paths
+}
+
+/// Load and deep-merge all discovered config files, returning the final [`Config`].
+///
+/// Files are merged in priority order (lowest first): each subsequent file
+/// overrides only the leaf fields it explicitly sets, preserving sibling
+/// fields from lower-priority files.
+///
+/// Returns the merged config together with the list of files that were loaded
+/// (for diagnostic logging).
+pub fn load_merged_config(
+    cli_config: Option<&str>,
+) -> Result<(Config, Vec<(PathBuf, &'static str)>)> {
+    let paths = collect_config_paths(cli_config);
+    if paths.is_empty() {
+        return Ok((Config::default(), vec![]));
+    }
+
+    let mut merged = Value::Mapping(serde_yaml_ng::Mapping::new());
+    for (path, _source) in &paths {
+        let contents = std::fs::read_to_string(path)
+            .with_context(|| format!("Failed to read config file: {}", path.display()))?;
+        let layer: Value = serde_yaml_ng::from_str(&contents)
+            .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
+        deep_merge(&mut merged, layer);
+    }
+
+    let config: Config =
+        serde_yaml_ng::from_value(merged).context("Failed to deserialize merged configuration")?;
+    Ok((config, paths))
 }
 
 impl RnaConfig {
@@ -1071,5 +1177,121 @@ preseq:
         assert_eq!(config.preseq.confidence_level, 0.99);
         assert_eq!(config.preseq.max_terms, 50);
         assert!(config.preseq.defects);
+    }
+
+    // --- Tests for deep_merge ---
+
+    #[test]
+    fn test_deep_merge_leaf_override() {
+        let mut base: Value = serde_yaml_ng::from_str("a: 1\nb: 2").unwrap();
+        let overlay: Value = serde_yaml_ng::from_str("b: 99").unwrap();
+        deep_merge(&mut base, overlay);
+        let result: std::collections::HashMap<String, i64> =
+            serde_yaml_ng::from_value(base).unwrap();
+        assert_eq!(result["a"], 1);
+        assert_eq!(result["b"], 99);
+    }
+
+    #[test]
+    fn test_deep_merge_nested_preserves_siblings() {
+        let mut base: Value = serde_yaml_ng::from_str(
+            "rna:\n  preseq:\n    seed: 1\n    n_bootstraps: 200\n  tin:\n    enabled: false",
+        )
+        .unwrap();
+        let overlay: Value = serde_yaml_ng::from_str("rna:\n  preseq:\n    seed: 42").unwrap();
+        deep_merge(&mut base, overlay);
+        let config: Config = serde_yaml_ng::from_value(base).unwrap();
+        assert_eq!(config.rna.preseq.seed, 42);
+        assert_eq!(config.rna.preseq.n_bootstraps, 200);
+        assert!(!config.rna.tin.enabled);
+    }
+
+    #[test]
+    fn test_deep_merge_sequence_replaces() {
+        let mut base: Value = serde_yaml_ng::from_str("items:\n  - a\n  - b").unwrap();
+        let overlay: Value = serde_yaml_ng::from_str("items:\n  - x").unwrap();
+        deep_merge(&mut base, overlay);
+        let m = base.as_mapping().unwrap();
+        let items = m
+            .get(&Value::String("items".into()))
+            .unwrap()
+            .as_sequence()
+            .unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].as_str().unwrap(), "x");
+    }
+
+    #[test]
+    fn test_deep_merge_empty_overlay() {
+        let mut base: Value = serde_yaml_ng::from_str("a: 1\nb: 2").unwrap();
+        let overlay = Value::Mapping(serde_yaml_ng::Mapping::new());
+        deep_merge(&mut base, overlay);
+        let result: std::collections::HashMap<String, i64> =
+            serde_yaml_ng::from_value(base).unwrap();
+        assert_eq!(result["a"], 1);
+        assert_eq!(result["b"], 2);
+    }
+
+    #[test]
+    fn test_deep_merge_adds_new_keys() {
+        let mut base: Value = serde_yaml_ng::from_str("a: 1").unwrap();
+        let overlay: Value = serde_yaml_ng::from_str("b: 2").unwrap();
+        deep_merge(&mut base, overlay);
+        let result: std::collections::HashMap<String, i64> =
+            serde_yaml_ng::from_value(base).unwrap();
+        assert_eq!(result["a"], 1);
+        assert_eq!(result["b"], 2);
+    }
+
+    #[test]
+    fn test_deep_merge_three_layers() {
+        let mut base: Value = serde_yaml_ng::from_str(
+            "rna:\n  preseq:\n    seed: 1\n    n_bootstraps: 100\n    max_terms: 50",
+        )
+        .unwrap();
+        let layer2: Value =
+            serde_yaml_ng::from_str("rna:\n  preseq:\n    seed: 2\n    n_bootstraps: 200").unwrap();
+        let layer3: Value = serde_yaml_ng::from_str("rna:\n  preseq:\n    seed: 3").unwrap();
+        deep_merge(&mut base, layer2);
+        deep_merge(&mut base, layer3);
+        let config: Config = serde_yaml_ng::from_value(base).unwrap();
+        assert_eq!(config.rna.preseq.seed, 3);
+        assert_eq!(config.rna.preseq.n_bootstraps, 200);
+        assert_eq!(config.rna.preseq.max_terms, 50);
+    }
+
+    #[test]
+    fn test_collect_config_paths_explicit_only() {
+        // Temporarily clear RUSTQC_CONFIG so it doesn't interfere
+        let saved = std::env::var("RUSTQC_CONFIG").ok();
+        std::env::remove_var("RUSTQC_CONFIG");
+
+        let paths = collect_config_paths(Some("/tmp/nonexistent.yml"));
+        // The -c flag should always be last
+        assert!(paths.last().unwrap().0 == PathBuf::from("/tmp/nonexistent.yml"));
+        assert_eq!(paths.last().unwrap().1, "-c flag");
+
+        // Restore
+        if let Some(val) = saved {
+            std::env::set_var("RUSTQC_CONFIG", val);
+        }
+    }
+
+    #[test]
+    fn test_collect_config_paths_none() {
+        // Temporarily clear RUSTQC_CONFIG so it doesn't interfere
+        let saved = std::env::var("RUSTQC_CONFIG").ok();
+        std::env::remove_var("RUSTQC_CONFIG");
+
+        let paths = collect_config_paths(None);
+        // Without explicit config, only auto-discovered XDG paths appear
+        for (_path, source) in &paths {
+            assert!(*source == "system" || *source == "user");
+        }
+
+        // Restore
+        if let Some(val) = saved {
+            std::env::set_var("RUSTQC_CONFIG", val);
+        }
     }
 }

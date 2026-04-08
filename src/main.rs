@@ -166,20 +166,23 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         args.threads
     );
 
-    // Load configuration file if provided, then extract the `rna` section
-    let mut config = if let Some(ref config_path) = args.config {
-        let cfg = config::Config::from_file(Path::new(config_path))?;
-        ui.detail(&format!("Loaded config from: {}", config_path));
-        if cfg.rna.has_chromosome_mapping() {
+    // Load and merge configuration files from all sources:
+    // XDG system → XDG user → RUSTQC_CONFIG env → explicit -c flag.
+    // Each layer overrides only the leaf fields it sets.
+    let (cfg, config_sources) = config::load_merged_config(args.config.as_deref())?;
+    let mut config = cfg.rna;
+
+    if !config_sources.is_empty() {
+        for (path, source) in &config_sources {
+            ui.detail(&format!("Loaded config: {} ({})", path.display(), source));
+        }
+        if config.has_chromosome_mapping() {
             ui.detail(&format!(
                 "Chromosome name mapping: {} entries",
-                cfg.rna.chromosome_mapping.len()
+                config.chromosome_mapping.len()
             ));
         }
-        cfg.rna
-    } else {
-        config::RnaConfig::default()
-    };
+    }
 
     // Apply CLI overrides to skip flags
     if args.skip_tin {

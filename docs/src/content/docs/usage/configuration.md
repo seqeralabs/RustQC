@@ -24,6 +24,142 @@ and tool-specific parameter overrides where applicable.
 CLI flags take precedence over config file values.
 :::
 
+## Config file discovery
+
+RustQC automatically searches for configuration files in standard locations
+following the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/latest/).
+Multiple config files are loaded and **deep-merged** so that higher-priority
+files only override the specific fields they set, leaving all other settings
+from lower-priority files intact.
+
+### Search order (lowest to highest priority)
+
+| Priority | Source | Path |
+|----------|--------|------|
+| 1 | System config | First match in `$XDG_CONFIG_DIRS` (default `/etc/xdg/`) at `rustqc/rustqc.yml` |
+| 2 | User config | `$XDG_CONFIG_HOME/rustqc/rustqc.yml` (default `~/.config/rustqc/rustqc.yml`) |
+| 3 | `RUSTQC_CONFIG` env var | Path to any YAML file |
+| 4 | `-c` / `--config` flag | Path to any YAML file |
+| 5 | CLI flags / env vars | Override individual settings from any config source |
+
+Use `-v` (verbose mode) to see which config files were loaded:
+
+```bash
+rustqc rna sample.bam --gtf genes.gtf -v
+# Output includes:
+#   Loaded config: /home/user/.config/rustqc/rustqc.yml (user)
+```
+
+### Merge behaviour
+
+When multiple config files are found, they are deep-merged at the leaf level.
+Only the fields explicitly set in a higher-priority file override the
+corresponding fields from lower-priority files — sibling fields are preserved.
+
+For example, given a system config:
+
+```yaml
+# /etc/xdg/rustqc/rustqc.yml
+rna:
+  preseq:
+    seed: 1
+    n_bootstraps: 200
+  tin:
+    enabled: false
+```
+
+And a user config:
+
+```yaml
+# ~/.config/rustqc/rustqc.yml
+rna:
+  preseq:
+    seed: 42
+```
+
+The merged result is:
+
+```yaml
+rna:
+  preseq:
+    seed: 42          # overridden by user config
+    n_bootstraps: 200  # preserved from system config
+  tin:
+    enabled: false     # preserved from system config
+```
+
+## Environment variables
+
+Every CLI flag can also be set via an environment variable using the `RUSTQC_`
+prefix. This is useful for CI pipelines, container environments, or shell
+profiles where you want persistent defaults without a config file.
+
+CLI flags always take precedence over environment variables.
+
+:::tip
+Run `rustqc rna --help` to see the associated environment variable for each flag.
+:::
+
+### Config file path
+
+| Variable | Description |
+|----------|-------------|
+| `RUSTQC_CONFIG` | Path to a YAML config file. Merged between XDG discovery and the `-c` flag. |
+
+### Input / Output
+
+| Variable | CLI flag | Description |
+|----------|----------|-------------|
+| `RUSTQC_GTF` | `--gtf` | GTF gene annotation file |
+| `RUSTQC_REFERENCE` | `--reference` | Reference FASTA (for CRAM) |
+| `RUSTQC_OUTDIR` | `--outdir` | Output directory |
+| `RUSTQC_SAMPLE_NAME` | `--sample-name` | Override sample name |
+| `RUSTQC_FLAT_OUTPUT` | `--flat-output` | Flat output directory (`true`/`false`) |
+| `RUSTQC_JSON_SUMMARY` | `--json-summary` | JSON summary output path |
+
+### Library
+
+| Variable | CLI flag | Description |
+|----------|----------|-------------|
+| `RUSTQC_STRANDED` | `--stranded` | `unstranded`, `forward`, or `reverse` |
+| `RUSTQC_PAIRED` | `--paired` | Paired-end mode (`true`/`false`) |
+
+### General
+
+| Variable | CLI flag | Description |
+|----------|----------|-------------|
+| `RUSTQC_THREADS` | `--threads` | Number of threads |
+| `RUSTQC_MAPQ` | `--mapq` | MAPQ quality cutoff |
+| `RUSTQC_BIOTYPE_ATTRIBUTE` | `--biotype-attribute` | GTF biotype attribute name |
+| `RUSTQC_SKIP_DUP_CHECK` | `--skip-dup-check` | Skip duplicate-marking check |
+| `RUSTQC_QUIET` | `--quiet` | Suppress output |
+| `RUSTQC_VERBOSE` | `--verbose` | Show additional detail |
+
+### Tool parameters
+
+| Variable | CLI flag |
+|----------|----------|
+| `RUSTQC_INFER_EXPERIMENT_SAMPLE_SIZE` | `--infer-experiment-sample-size` |
+| `RUSTQC_MIN_INTRON` | `--min-intron` |
+| `RUSTQC_JUNCTION_SATURATION_SEED` | `--junction-saturation-seed` |
+| `RUSTQC_JUNCTION_SATURATION_MIN_COVERAGE` | `--junction-saturation-min-coverage` |
+| `RUSTQC_JUNCTION_SATURATION_PERCENTILE_FLOOR` | `--junction-saturation-percentile-floor` |
+| `RUSTQC_JUNCTION_SATURATION_PERCENTILE_CEILING` | `--junction-saturation-percentile-ceiling` |
+| `RUSTQC_JUNCTION_SATURATION_PERCENTILE_STEP` | `--junction-saturation-percentile-step` |
+| `RUSTQC_INNER_DISTANCE_SAMPLE_SIZE` | `--inner-distance-sample-size` |
+| `RUSTQC_INNER_DISTANCE_LOWER_BOUND` | `--inner-distance-lower-bound` |
+| `RUSTQC_INNER_DISTANCE_UPPER_BOUND` | `--inner-distance-upper-bound` |
+| `RUSTQC_INNER_DISTANCE_STEP` | `--inner-distance-step` |
+| `RUSTQC_TIN_SEED` | `--tin-seed` |
+| `RUSTQC_SKIP_TIN` | `--skip-tin` |
+| `RUSTQC_SKIP_READ_DUPLICATION` | `--skip-read-duplication` |
+| `RUSTQC_SKIP_PRESEQ` | `--skip-preseq` |
+| `RUSTQC_PRESEQ_SEED` | `--preseq-seed` |
+| `RUSTQC_PRESEQ_MAX_EXTRAP` | `--preseq-max-extrap` |
+| `RUSTQC_PRESEQ_STEP_SIZE` | `--preseq-step-size` |
+| `RUSTQC_PRESEQ_N_BOOTSTRAPS` | `--preseq-n-bootstraps` |
+| `RUSTQC_PRESEQ_SEG_LEN` | `--preseq-seg-len` |
+
 ## Full example
 
 ```yaml
