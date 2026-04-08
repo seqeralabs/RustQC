@@ -92,7 +92,7 @@ pub fn write_citations(path: &Path, config: &RnaConfig, version: &str, commit: &
         w,
         "Please cite both RustQC and the relevant upstream tools listed below.\n"
     )?;
-    writeln!(w, "## RustQC\n")?;
+    writeln!(w, "## RustQC (v{version})\n")?;
     writeln!(w, "- Repository: <https://github.com/seqeralabs/RustQC>\n")?;
 
     if config.any_dupradar_output() {
