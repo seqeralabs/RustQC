@@ -122,9 +122,16 @@ pub fn write_citations(path: &Path, config: &RnaConfig, version: &str, commit: &
 mod tests {
     use super::*;
 
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+
     fn read_citations(config: &RnaConfig) -> String {
-        let path =
-            std::env::temp_dir().join(format!("rustqc_test_citations_{}.md", std::process::id()));
+        let id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "rustqc_test_citations_{}_{id}.md",
+            std::process::id()
+        ));
         write_citations(&path, config, "0.1.0", "abc1234").unwrap();
         let content = std::fs::read_to_string(&path).unwrap();
         let _ = std::fs::remove_file(&path);
