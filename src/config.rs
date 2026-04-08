@@ -783,6 +783,23 @@ impl RnaConfig {
             || dr.multiqc_intercept
             || dr.multiqc_curve
     }
+
+    /// Returns true if any RSeQC tool is enabled.
+    pub fn any_rseqc_output(&self) -> bool {
+        self.bam_stat.enabled
+            || self.infer_experiment.enabled
+            || self.read_duplication.enabled
+            || self.read_distribution.enabled
+            || self.junction_annotation.enabled
+            || self.junction_saturation.enabled
+            || self.inner_distance.enabled
+            || self.tin.enabled
+    }
+
+    /// Returns true if any samtools-compatible output is enabled.
+    pub fn any_samtools_output(&self) -> bool {
+        self.flagstat.enabled || self.idxstats.enabled || self.samtools_stats.enabled
+    }
 }
 
 #[cfg(test)]
