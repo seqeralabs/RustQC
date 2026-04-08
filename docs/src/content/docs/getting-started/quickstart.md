@@ -33,6 +33,10 @@ This means that MultiQC should find them and report them as if they were created
 by the original tool.
 One addition is that RustQC produces SVG versions of all plots.
 
+A `CITATIONS.md` file is written to the output directory with each run,
+listing the upstream tools that were used along with their validated versions
+and publication references. See [Credits & Citation](../about/credits/) for details.
+
 Use `--flat-output` to write all files directly to the output directory without subdirectories.
 
 ## Multiple BAM files
