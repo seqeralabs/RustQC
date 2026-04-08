@@ -19,7 +19,7 @@ path = "src/main.rs"
 
 [dependencies]
 # CLI argument parsing
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 
 # BAM file reading
 rust-htslib = { version = "1", features = ["static"] }
@@ -32,6 +32,7 @@ plotters-svg = "0.3"
 # Configuration
 serde = { version = "1", features = ["derive"] }
 serde_yaml_ng = "0.10"
+dirs = "6"
 
 # Interval trees
 coitrees = "0.4"

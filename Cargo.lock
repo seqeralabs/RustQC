@@ -1485,6 +1485,7 @@ dependencies = [
  "coitrees",
  "console",
  "crc32fast",
+ "dirs",
  "env_logger",
  "flate2",
  "indexmap",
