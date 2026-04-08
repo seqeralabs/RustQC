@@ -728,3 +728,121 @@ fn test_flat_output_no_subdirectories() {
     // Cleanup
     let _ = fs::remove_dir_all(outdir);
 }
+
+// ===================================================================
+// Duplicate-flag detection tests (https://github.com/seqeralabs/RustQC/issues/71)
+//
+// PR #84 replaced the fragile @PG header check with runtime inspection of
+// the actual 0x400 duplicate flag. These tests exercise that logic.
+// ===================================================================
+
+/// Helper: run rustqc rna WITHOUT --skip-dup-check (the default user experience).
+fn run_rustqc_dup_check(outdir: &str, input: &str) -> std::process::Output {
+    let binary = rustqc_binary();
+    Command::new(&binary)
+        .args([
+            "rna",
+            input,
+            "--gtf",
+            "tests/data/test.gtf",
+            "--outdir",
+            outdir,
+        ])
+        .output()
+        .expect("Failed to execute rustqc")
+}
+
+/// A BAM with duplicates marked (0x400) should succeed without --skip-dup-check.
+/// This is the normal happy path — tools like Picard, samblaster, or Parabricks
+/// set the duplicate flag, and RustQC should accept the file.
+#[test]
+fn test_dup_check_passes_with_marked_duplicates() {
+    let outdir = "tests/output_dup_check_pass";
+    let _ = fs::remove_dir_all(outdir);
+    fs::create_dir_all(outdir).unwrap();
+
+    // test.bam has 137/488 reads with 0x400 set
+    let output = run_rustqc_dup_check(outdir, "tests/data/test.bam");
+    assert!(
+        output.status.success(),
+        "rustqc should succeed when BAM has duplicate-flagged reads:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Cleanup
+    let _ = fs::remove_dir_all(outdir);
+}
+
+/// A BAM with NO duplicates flagged should fail with a clear error message.
+/// test_nodup.bam is test.bam with all 0x400 flags cleared.
+#[test]
+fn test_dup_check_fails_without_marked_duplicates() {
+    let outdir = "tests/output_dup_check_fail";
+    let _ = fs::remove_dir_all(outdir);
+    fs::create_dir_all(outdir).unwrap();
+
+    let output = run_rustqc_dup_check(outdir, "tests/data/test_nodup.bam");
+    assert!(
+        !output.status.success(),
+        "rustqc should fail when BAM has no duplicate-flagged reads"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("No duplicate-flagged reads found"),
+        "Error should mention missing duplicate flags, got:\n{}",
+        stderr
+    );
+    assert!(
+        stderr.contains("--skip-dup-check"),
+        "Error should suggest --skip-dup-check, got:\n{}",
+        stderr
+    );
+
+    // Cleanup
+    let _ = fs::remove_dir_all(outdir);
+}
+
+/// --skip-dup-check should bypass the duplicate flag requirement,
+/// allowing a no-duplicate BAM to be processed successfully.
+#[test]
+fn test_skip_dup_check_bypasses_failure() {
+    let outdir = "tests/output_dup_check_skip";
+    let _ = fs::remove_dir_all(outdir);
+    fs::create_dir_all(outdir).unwrap();
+
+    let output = run_rustqc_with_input(outdir, "tests/data/test_nodup.bam");
+    assert!(
+        output.status.success(),
+        "rustqc --skip-dup-check should succeed even without duplicate flags:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Cleanup
+    let _ = fs::remove_dir_all(outdir);
+}
+
+/// SAM input (single-threaded path) should also detect missing duplicates.
+/// This exercises the non-parallel code path in count_reads().
+#[test]
+fn test_dup_check_fails_for_sam_without_duplicates() {
+    let outdir = "tests/output_dup_check_sam";
+    let _ = fs::remove_dir_all(outdir);
+    fs::create_dir_all(outdir).unwrap();
+
+    let output = run_rustqc_dup_check(outdir, "tests/data/test_nodup.sam");
+    assert!(
+        !output.status.success(),
+        "rustqc should fail for SAM input without duplicate flags"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("No duplicate-flagged reads found"),
+        "Error should mention missing duplicate flags for SAM input, got:\n{}",
+        stderr
+    );
+
+    // Cleanup
+    let _ = fs::remove_dir_all(outdir);
+}
