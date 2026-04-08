@@ -81,6 +81,23 @@ impl GeneIdInterner {
 /// mapped reads, processing is aborted with an error.
 const DUP_CHECK_THRESHOLD: u64 = 1_000_000;
 
+/// Checks whether the duplicate-flag sample threshold has been reached without
+/// finding any duplicates. Returns an error if so, `Ok(())` otherwise.
+///
+/// Called from both the parallel and single-threaded read-processing loops to
+/// bail early rather than processing an entire (potentially huge) file.
+fn check_dup_threshold(
+    total_dup: u64,
+    total_mapped: u64,
+    skip_dup_check: bool,
+    bam_path: &str,
+) -> Result<()> {
+    if !skip_dup_check && total_dup == 0 && total_mapped >= DUP_CHECK_THRESHOLD {
+        return Err(no_duplicates_error(DUP_CHECK_THRESHOLD, bam_path));
+    }
+    Ok(())
+}
+
 /// Build the error message shown when no duplicate-flagged reads are found.
 fn no_duplicates_error(mapped_count: u64, bam_path: &str) -> anyhow::Error {
     anyhow::anyhow!(
@@ -1102,12 +1119,16 @@ fn process_chromosome_batch(
                 &mut mate_buffer,
             );
 
-            // Early bail if no duplicates found after a large sample of mapped reads
-            if !skip_dup_check
-                && result.total_dup == 0
-                && result.total_mapped == DUP_CHECK_THRESHOLD
-            {
-                return Err(no_duplicates_error(DUP_CHECK_THRESHOLD, bam_path));
+            // Only check once we've hit the threshold and haven't seen any
+            // duplicates yet. After the first dup, total_dup > 0 makes this
+            // a no-op, so skip the function call entirely.
+            if result.total_dup == 0 {
+                check_dup_threshold(
+                    result.total_dup,
+                    result.total_mapped,
+                    skip_dup_check,
+                    bam_path,
+                )?;
             }
         }
     }
@@ -1454,12 +1475,13 @@ pub fn count_reads(
                 &mut mate_buffer,
             );
 
-            // Early bail if no duplicates found after a large sample of mapped reads
-            if !skip_dup_check
-                && result.total_dup == 0
-                && result.total_mapped == DUP_CHECK_THRESHOLD
-            {
-                return Err(no_duplicates_error(DUP_CHECK_THRESHOLD, bam_path));
+            if result.total_dup == 0 {
+                check_dup_threshold(
+                    result.total_dup,
+                    result.total_mapped,
+                    skip_dup_check,
+                    bam_path,
+                )?;
             }
         }
 

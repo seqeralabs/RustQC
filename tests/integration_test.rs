@@ -34,21 +34,31 @@ fn run_rustqc(outdir: &str) -> std::process::Output {
     run_rustqc_with_input(outdir, "tests/data/test.bam")
 }
 
-/// Helper: run rustqc rna with a specified input file and return the output
-fn run_rustqc_with_input(outdir: &str, input: &str) -> std::process::Output {
+/// Helper: run rustqc rna with a specified input file and return the output.
+/// When `skip_dup_check` is true (the default for most tests), passes
+/// `--skip-dup-check` so the test doesn't depend on duplicate flags.
+fn run_rustqc_impl(outdir: &str, input: &str, skip_dup_check: bool) -> std::process::Output {
     let binary = rustqc_binary();
+    let mut args = vec![
+        "rna",
+        input,
+        "--gtf",
+        "tests/data/test.gtf",
+        "--outdir",
+        outdir,
+    ];
+    if skip_dup_check {
+        args.push("--skip-dup-check");
+    }
     Command::new(&binary)
-        .args([
-            "rna",
-            input,
-            "--gtf",
-            "tests/data/test.gtf",
-            "--outdir",
-            outdir,
-            "--skip-dup-check",
-        ])
+        .args(&args)
         .output()
         .expect("Failed to execute rustqc")
+}
+
+/// Convenience: run with a custom input and --skip-dup-check.
+fn run_rustqc_with_input(outdir: &str, input: &str) -> std::process::Output {
+    run_rustqc_impl(outdir, input, true)
 }
 
 /// Helper: run rustqc rna with --flat-output flag (all files in outdir, no subdirectories)
@@ -736,20 +746,9 @@ fn test_flat_output_no_subdirectories() {
 // the actual 0x400 duplicate flag. These tests exercise that logic.
 // ===================================================================
 
-/// Helper: run rustqc rna WITHOUT --skip-dup-check (the default user experience).
+/// Convenience: run WITHOUT --skip-dup-check (the default user experience).
 fn run_rustqc_dup_check(outdir: &str, input: &str) -> std::process::Output {
-    let binary = rustqc_binary();
-    Command::new(&binary)
-        .args([
-            "rna",
-            input,
-            "--gtf",
-            "tests/data/test.gtf",
-            "--outdir",
-            outdir,
-        ])
-        .output()
-        .expect("Failed to execute rustqc")
+    run_rustqc_impl(outdir, input, false)
 }
 
 /// A BAM with duplicates marked (0x400) should succeed without --skip-dup-check.
