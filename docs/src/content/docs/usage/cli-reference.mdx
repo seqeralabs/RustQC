@@ -115,13 +115,12 @@ files store sequences relative to a reference.
 
 #### `--skip-dup-check`
 
-Skip the pre-flight validation that checks for duplicate-marking tool signatures
-in the BAM header. By default, RustQC inspects `@PG` header lines for known
-duplicate-marking tools (Picard MarkDuplicates, samblaster, sambamba, biobambam,
-etc.) and exits with an error if none are found.
+Skip the validation that checks for duplicate-flagged reads in the BAM file.
+By default, RustQC verifies that reads have the duplicate flag (SAM flag `0x400`)
+set during parsing and exits with an error if none are found.
 
-Use this flag if your BAM was marked by an unrecognized tool, or if you want to
-run on a file without duplicate marking for testing purposes.
+Use this flag if you want to run on a file without duplicate marking for
+testing purposes.
 
 #### `--biotype-attribute <NAME>`
 

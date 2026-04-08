@@ -73,102 +73,31 @@ impl GeneIdInterner {
 }
 
 // ===================================================================
-// BAM header validation
+// Duplicate-marking validation
 // ===================================================================
 
-/// Known duplicate-marking tool identifiers.
-///
-/// These strings are matched (case-insensitively) against the `ID:` and `PN:`
-/// (program name) fields of `@PG` header entries. Matching is restricted to these
-/// fields to avoid false positives from command-line strings or unrelated tools
-/// (e.g., `picard SortSam` or `sambamba sort`).
-const KNOWN_DUP_MARKERS: &[&str] = &[
-    "markduplicates",
-    "samblaster",
-    "sambamba markdup",
-    "sambamba_markdup",
-    "biobambam",
-    "estreamer",
-    "fgbio",
-    "umis",
-    "umi_tools",
-    "umi-tools",
-    "gencore",
-    "gatk markduplicates",
-    "sentieon dedup",
-];
+/// Number of mapped reads to examine before concluding that duplicates are not
+/// marked. If no reads with the duplicate flag (0x400) are seen after this many
+/// mapped reads, processing is aborted with an error.
+const DUP_CHECK_THRESHOLD: u64 = 1_000_000;
 
-/// Extracts the value of a specific tag from a SAM header line.
-///
-/// For example, given the line `@PG\tID:MarkDuplicates\tPN:MarkDuplicates` and
-/// the tag `"ID"`, returns `Some("MarkDuplicates")`.
-fn extract_header_tag<'a>(line: &'a str, tag: &str) -> Option<&'a str> {
-    let prefix = format!("{}:", tag);
-    line.split('\t')
-        .find(|field| field.starts_with(&prefix))
-        .map(|field| &field[prefix.len()..])
-}
-
-/// Checks whether a SAM header text contains evidence of a duplicate-marking tool.
-///
-/// Only the `ID:` and `PN:` fields of `@PG` lines are inspected to avoid false
-/// positives from command-line arguments or unrelated tools that happen to share
-/// a name (e.g., `picard SortSam`).
-///
-/// Returns `true` if a known duplicate-marking tool is found.
-fn header_has_dup_marker(header_text: &str) -> bool {
-    for line in header_text.lines() {
-        // Only inspect @PG (program) header lines
-        if !line.starts_with("@PG") {
-            continue;
-        }
-
-        // Extract only the ID and PN fields for matching
-        let id = extract_header_tag(line, "ID").unwrap_or("");
-        let pn = extract_header_tag(line, "PN").unwrap_or("");
-        let id_lower = id.to_lowercase();
-        let pn_lower = pn.to_lowercase();
-
-        if KNOWN_DUP_MARKERS
-            .iter()
-            .any(|marker| id_lower.contains(marker) || pn_lower.contains(marker))
-        {
-            debug!("Found duplicate-marking tool in @PG header: {}", line);
-            return true;
-        }
-    }
-    false
-}
-
-/// Checks the BAM `@PG` header lines for evidence that a duplicate-marking tool has been run.
-///
-/// Returns `Ok(())` if a known duplicate-marking tool is found, or an error with
-/// a descriptive message if none is detected.
-///
-/// # Arguments
-///
-/// * `header` - The BAM header view to inspect
-/// * `bam_path` - The BAM file path (used in the error message)
-fn verify_duplicates_marked(header: &bam::HeaderView, bam_path: &str) -> Result<()> {
-    let header_text = String::from_utf8_lossy(header.as_bytes());
-    if header_has_dup_marker(&header_text) {
-        return Ok(());
-    }
-
-    anyhow::bail!(
-        "No duplicate-marking tool found in BAM header of '{}'.\n\
+/// Build the error message shown when no duplicate-flagged reads are found.
+fn no_duplicates_error(mapped_count: u64, bam_path: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "No duplicate-flagged reads found among {} mapped reads in '{}'.\n\
          \n\
          RustQC requires that BAM files have duplicates marked (SAM flag 0x400)\n\
-         but NOT removed. The BAM @PG header lines do not contain evidence of a\n\
-         known duplicate-marking tool.\n\
+         but NOT removed. None of the reads examined so far have the duplicate\n\
+         flag set.\n\
          \n\
-         Please run one of the following tools before using RustQC:\n\
+         Please run a duplicate-marking tool before using RustQC, for example:\n\
          \n\
            - Picard MarkDuplicates: picard MarkDuplicates I=input.bam O=marked.bam M=metrics.txt\n\
            - samblaster:            samtools view -h input.bam | samblaster | samtools view -bS - > marked.bam\n\
            - sambamba markdup:      sambamba markdup input.bam marked.bam\n\
          \n\
          If you are certain that duplicates are already marked, use --skip-dup-check to bypass this check.",
+        mapped_count,
         bam_path
     )
 }
@@ -1057,6 +986,7 @@ fn process_chromosome_batch(
     qualimap_index: Option<&crate::rna::qualimap::QualimapIndex>,
     gene_to_biotype: &[u16],
     num_biotypes: usize,
+    skip_dup_check: bool,
     progress: Option<&ProgressBar>,
 ) -> Result<(ChromResult, Option<RseqcAccumulators>)> {
     let mut result = ChromResult::new(num_genes, num_biotypes);
@@ -1171,6 +1101,14 @@ fn process_chromosome_batch(
                 &mut biotype_hits_buf,
                 &mut mate_buffer,
             );
+
+            // Early bail if no duplicates found after a large sample of mapped reads
+            if !skip_dup_check
+                && result.total_dup == 0
+                && result.total_mapped == DUP_CHECK_THRESHOLD
+            {
+                return Err(no_duplicates_error(DUP_CHECK_THRESHOLD, bam_path));
+            }
         }
     }
 
@@ -1236,8 +1174,7 @@ pub fn count_reads(
     // Build spatial index (uses interned gene indices)
     let index = build_index(genes, &interner);
 
-    // Get chromosome names from header using a temporary reader,
-    // and verify that duplicates have been marked in the BAM file.
+    // Get chromosome names from header using a temporary reader.
     let (tid_to_name, tid_to_len): (Vec<String>, Vec<u64>) = {
         let mut bam = bam::Reader::from_path(bam_path)
             .with_context(|| format!("Failed to open alignment file: {}", bam_path))?;
@@ -1247,13 +1184,6 @@ pub fn count_reads(
         }
         let header = bam.header().clone();
 
-        // Check for evidence of duplicate-marking in @PG header lines
-        if skip_dup_check {
-            log::info!("Skipping duplicate-marking verification (--skip-dup-check)");
-        } else {
-            verify_duplicates_marked(&header, bam_path)?;
-        }
-
         let names = (0..header.target_count())
             .map(|tid| String::from_utf8_lossy(header.tid2name(tid)).to_string())
             .collect();
@@ -1262,6 +1192,10 @@ pub fn count_reads(
             .collect();
         (names, lengths)
     };
+
+    if skip_dup_check {
+        log::info!("Skipping duplicate-marking verification (--skip-dup-check)");
+    }
 
     // Check if an alignment index is available for parallel processing
     // (BAM uses .bai/.csi, CRAM uses .crai; SAM has no index format)
@@ -1382,6 +1316,7 @@ pub fn count_reads(
                         qualimap_index,
                         &gene_to_biotype,
                         num_biotypes,
+                        skip_dup_check,
                         progress,
                     )
                 })
@@ -1518,6 +1453,14 @@ pub fn count_reads(
                 &mut biotype_hits_buf,
                 &mut mate_buffer,
             );
+
+            // Early bail if no duplicates found after a large sample of mapped reads
+            if !skip_dup_check
+                && result.total_dup == 0
+                && result.total_mapped == DUP_CHECK_THRESHOLD
+            {
+                return Err(no_duplicates_error(DUP_CHECK_THRESHOLD, bam_path));
+            }
         }
 
         result.unmatched_mates = mate_buffer;
@@ -1717,24 +1660,10 @@ pub fn count_reads(
     );
 
     // Verify that at least some reads were flagged as duplicates.
-    // Even if the @PG header check passed (or was skipped), it's possible that
-    // duplicates were not actually marked. Warn the user in that case.
+    // This catches files with fewer than DUP_CHECK_THRESHOLD mapped reads
+    // where the early check didn't trigger.
     if merged.total_dup == 0 && merged.total_mapped > 0 && !skip_dup_check {
-        anyhow::bail!(
-            "No duplicate-flagged reads found among {} mapped reads in '{}'.\n\
-             \n\
-             Although the BAM header suggests a duplicate-marking tool was run,\n\
-             no reads have the duplicate flag (0x400) set. This likely means\n\
-             duplicates were removed rather than marked, or the tool did not\n\
-             flag any duplicates.\n\
-             \n\
-             RustQC requires duplicates to be marked (flagged) but NOT removed.\n\
-             Please re-run your duplicate-marking tool without removing duplicates.\n\
-             \n\
-             If this is expected, use --skip-dup-check to bypass this check.",
-            merged.total_mapped,
-            bam_path
-        );
+        return Err(no_duplicates_error(merged.total_mapped, bam_path));
     }
 
     // Detect chromosome name mismatch
@@ -1865,110 +1794,6 @@ mod tests {
     }
 
     // ---------------------------------------------------------------
-    // Duplicate marking validation tests
-    // ---------------------------------------------------------------
-
-    #[test]
-    fn test_extract_header_tag() {
-        let line = "@PG\tID:MarkDuplicates\tPN:MarkDuplicates\tVN:2.27.4\tCL:picard MarkDuplicates I=in.bam O=out.bam";
-        assert_eq!(extract_header_tag(line, "ID"), Some("MarkDuplicates"));
-        assert_eq!(extract_header_tag(line, "PN"), Some("MarkDuplicates"));
-        assert_eq!(extract_header_tag(line, "VN"), Some("2.27.4"));
-        assert_eq!(
-            extract_header_tag(line, "CL"),
-            Some("picard MarkDuplicates I=in.bam O=out.bam")
-        );
-        assert_eq!(extract_header_tag(line, "XX"), None);
-    }
-
-    #[test]
-    fn test_dup_check_picard_markduplicates() {
-        let header = "@HD\tVN:1.6\tSO:coordinate\n\
-                       @PG\tID:MarkDuplicates\tPN:MarkDuplicates\tVN:2.27.4";
-        assert!(header_has_dup_marker(header));
-    }
-
-    #[test]
-    fn test_dup_check_samblaster() {
-        let header = "@HD\tVN:1.6\n\
-                       @PG\tID:samblaster\tPN:samblaster\tVN:0.1.26";
-        assert!(header_has_dup_marker(header));
-    }
-
-    #[test]
-    fn test_dup_check_sambamba_markdup() {
-        let header = "@HD\tVN:1.6\n\
-                       @PG\tID:sambamba_markdup\tPN:sambamba markdup";
-        assert!(header_has_dup_marker(header));
-    }
-
-    #[test]
-    fn test_dup_check_biobambam() {
-        let header = "@HD\tVN:1.6\n\
-                       @PG\tID:biobambam2\tPN:biobambam";
-        assert!(header_has_dup_marker(header));
-    }
-
-    #[test]
-    fn test_dup_check_case_insensitive() {
-        // MarkDuplicates with different casing
-        let header = "@PG\tID:MARKDUPLICATES\tPN:markduplicates";
-        assert!(header_has_dup_marker(header));
-    }
-
-    #[test]
-    fn test_dup_check_no_dup_marker() {
-        // Header with only alignment tools, no dup marker
-        let header = "@HD\tVN:1.6\tSO:coordinate\n\
-                       @PG\tID:bwa\tPN:bwa\tVN:0.7.17\n\
-                       @PG\tID:samtools\tPN:samtools\tVN:1.17";
-        assert!(!header_has_dup_marker(header));
-    }
-
-    #[test]
-    fn test_dup_check_empty_header() {
-        assert!(!header_has_dup_marker(""));
-        assert!(!header_has_dup_marker("@HD\tVN:1.6\tSO:coordinate"));
-    }
-
-    #[test]
-    fn test_dup_check_picard_sortsam_no_false_positive() {
-        // Picard SortSam should NOT match — only the CL field mentions "picard"
-        let header = "@PG\tID:SortSam\tPN:SortSam\tCL:picard SortSam I=in.bam O=out.bam";
-        assert!(!header_has_dup_marker(header));
-    }
-
-    #[test]
-    fn test_dup_check_picard_collect_metrics_no_false_positive() {
-        // Another Picard tool that should not match
-        let header =
-            "@PG\tID:CollectInsertSizeMetrics\tPN:CollectInsertSizeMetrics\tCL:picard CollectInsertSizeMetrics";
-        assert!(!header_has_dup_marker(header));
-    }
-
-    #[test]
-    fn test_dup_check_sambamba_sort_no_false_positive() {
-        // sambamba sort should NOT match
-        let header = "@PG\tID:sambamba\tPN:sambamba sort";
-        assert!(!header_has_dup_marker(header));
-    }
-
-    #[test]
-    fn test_dup_check_multiple_pg_lines() {
-        // MarkDuplicates appears as a later @PG entry in the chain
-        let header = "@HD\tVN:1.6\tSO:coordinate\n\
-                       @PG\tID:bwa\tPN:bwa\tVN:0.7.17\n\
-                       @PG\tID:samtools\tPN:samtools\tVN:1.17\n\
-                       @PG\tID:MarkDuplicates\tPN:MarkDuplicates\tPP:samtools";
-        assert!(header_has_dup_marker(header));
-    }
-
-    #[test]
-    fn test_dup_check_dup_marker_only_in_cl_no_match() {
-        let header_text = "@PG\tID:STAR\tPN:STAR\tVN:2.7.10a\tCL:STAR --readFilesIn sample.fastq --outSAMtype BAM SortedByCoordinate\n";
-        assert!(!header_has_dup_marker(header_text));
-    }
-
     // --- Per-read featureCounts classification tests ---
 
     /// Helper to create a ChromResult for testing classify_read_fc
