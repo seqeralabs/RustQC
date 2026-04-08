@@ -9,6 +9,7 @@
 //! (flagstat, idxstats, stats), and Qualimap gene body coverage profiling.
 //! Individual tools can be disabled via the YAML config file.
 
+mod citations;
 mod cli;
 mod config;
 mod gtf;
@@ -670,6 +671,16 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
             ui.output_item("JSON summary", &path.display().to_string());
         }
     }
+
+    // Write citations file
+    let citations_path = outdir.join("CITATIONS.md");
+    citations::write_citations(
+        &citations_path,
+        &config,
+        env!("CARGO_PKG_VERSION"),
+        env!("GIT_SHORT_HASH"),
+    )?;
+    ui.output_item("Citations", &citations_path.display().to_string());
 
     // Check for strandedness mismatch between user-specified and inferred values
     for (bam_path, result) in &bam_results {
