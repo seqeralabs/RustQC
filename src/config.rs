@@ -780,8 +780,7 @@ pub fn collect_config_paths(cli_config: Option<&str>) -> Vec<(PathBuf, &'static 
     let mut paths = Vec::new();
 
     // 1. XDG system config (lowest priority)
-    let xdg_dirs =
-        std::env::var("XDG_CONFIG_DIRS").unwrap_or_else(|_| "/etc/xdg".to_string());
+    let xdg_dirs = std::env::var("XDG_CONFIG_DIRS").unwrap_or_else(|_| "/etc/xdg".to_string());
     for dir in xdg_dirs.split(':').filter(|s| !s.is_empty()) {
         let p = Path::new(dir).join("rustqc").join("rustqc.yml");
         if p.is_file() {
@@ -838,8 +837,8 @@ pub fn load_merged_config(
         deep_merge(&mut merged, layer);
     }
 
-    let config: Config = serde_yaml_ng::from_value(merged)
-        .context("Failed to deserialize merged configuration")?;
+    let config: Config =
+        serde_yaml_ng::from_value(merged).context("Failed to deserialize merged configuration")?;
     Ok((config, paths))
 }
 
@@ -1182,8 +1181,7 @@ preseq:
             "rna:\n  preseq:\n    seed: 1\n    n_bootstraps: 200\n  tin:\n    enabled: false",
         )
         .unwrap();
-        let overlay: Value =
-            serde_yaml_ng::from_str("rna:\n  preseq:\n    seed: 42").unwrap();
+        let overlay: Value = serde_yaml_ng::from_str("rna:\n  preseq:\n    seed: 42").unwrap();
         deep_merge(&mut base, overlay);
         let config: Config = serde_yaml_ng::from_value(base).unwrap();
         assert_eq!(config.rna.preseq.seed, 42);
@@ -1193,10 +1191,8 @@ preseq:
 
     #[test]
     fn test_deep_merge_sequence_replaces() {
-        let mut base: Value =
-            serde_yaml_ng::from_str("items:\n  - a\n  - b").unwrap();
-        let overlay: Value =
-            serde_yaml_ng::from_str("items:\n  - x").unwrap();
+        let mut base: Value = serde_yaml_ng::from_str("items:\n  - a\n  - b").unwrap();
+        let overlay: Value = serde_yaml_ng::from_str("items:\n  - x").unwrap();
         deep_merge(&mut base, overlay);
         let m = base.as_mapping().unwrap();
         let items = m
@@ -1237,10 +1233,8 @@ preseq:
         )
         .unwrap();
         let layer2: Value =
-            serde_yaml_ng::from_str("rna:\n  preseq:\n    seed: 2\n    n_bootstraps: 200")
-                .unwrap();
-        let layer3: Value =
-            serde_yaml_ng::from_str("rna:\n  preseq:\n    seed: 3").unwrap();
+            serde_yaml_ng::from_str("rna:\n  preseq:\n    seed: 2\n    n_bootstraps: 200").unwrap();
+        let layer3: Value = serde_yaml_ng::from_str("rna:\n  preseq:\n    seed: 3").unwrap();
         deep_merge(&mut base, layer2);
         deep_merge(&mut base, layer3);
         let config: Config = serde_yaml_ng::from_value(base).unwrap();

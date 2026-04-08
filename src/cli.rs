@@ -77,11 +77,23 @@ pub struct RnaArgs {
     pub input: Vec<String>,
 
     /// GTF gene annotation (plain or .gz)
-    #[arg(short, long, value_name = "GTF", env = "RUSTQC_GTF", help_heading = "Input / Output")]
+    #[arg(
+        short,
+        long,
+        value_name = "GTF",
+        env = "RUSTQC_GTF",
+        help_heading = "Input / Output"
+    )]
     pub gtf: String,
 
     /// Reference FASTA (required for CRAM)
-    #[arg(short, long, value_name = "FASTA", env = "RUSTQC_REFERENCE", help_heading = "Input / Output")]
+    #[arg(
+        short,
+        long,
+        value_name = "FASTA",
+        env = "RUSTQC_REFERENCE",
+        help_heading = "Input / Output"
+    )]
     pub reference: Option<String>,
 
     /// Output directory [default: .]
@@ -96,11 +108,21 @@ pub struct RnaArgs {
     pub outdir: String,
 
     /// Override sample name for output filenames (default: derived from BAM filename)
-    #[arg(long, value_name = "NAME", env = "RUSTQC_SAMPLE_NAME", help_heading = "Input / Output")]
+    #[arg(
+        long,
+        value_name = "NAME",
+        env = "RUSTQC_SAMPLE_NAME",
+        help_heading = "Input / Output"
+    )]
     pub sample_name: Option<String>,
 
     /// Write outputs to a flat directory (no subdirs)
-    #[arg(long, default_value_t = false, env = "RUSTQC_FLAT_OUTPUT", help_heading = "Input / Output")]
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "RUSTQC_FLAT_OUTPUT",
+        help_heading = "Input / Output"
+    )]
     pub flat_output: bool,
 
     /// YAML configuration file (see also: RUSTQC_CONFIG env var)
@@ -113,7 +135,13 @@ pub struct RnaArgs {
 
     // ── Library ─────────────────────────────────────────────────────────
     /// Strandedness: unstranded, forward, reverse
-    #[arg(short, long, value_enum, env = "RUSTQC_STRANDED", help_heading = "Library")]
+    #[arg(
+        short,
+        long,
+        value_enum,
+        env = "RUSTQC_STRANDED",
+        help_heading = "Library"
+    )]
     pub stranded: Option<Strandedness>,
 
     /// Paired-end reads
@@ -144,11 +172,21 @@ pub struct RnaArgs {
     pub mapq_cut: u8,
 
     /// GTF attribute for biotype grouping
-    #[arg(long, value_name = "ATTR", env = "RUSTQC_BIOTYPE_ATTRIBUTE", help_heading = "General")]
+    #[arg(
+        long,
+        value_name = "ATTR",
+        env = "RUSTQC_BIOTYPE_ATTRIBUTE",
+        help_heading = "General"
+    )]
     pub biotype_attribute: Option<String>,
 
     /// Skip duplicate-marking check
-    #[arg(long, default_value_t = false, env = "RUSTQC_SKIP_DUP_CHECK", help_heading = "General")]
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "RUSTQC_SKIP_DUP_CHECK",
+        help_heading = "General"
+    )]
     pub skip_dup_check: bool,
 
     /// Suppress output except warnings/errors
@@ -162,7 +200,13 @@ pub struct RnaArgs {
     pub quiet: bool,
 
     /// Show additional detail
-    #[arg(short = 'v', long, conflicts_with = "quiet", env = "RUSTQC_VERBOSE", help_heading = "General")]
+    #[arg(
+        short = 'v',
+        long,
+        conflicts_with = "quiet",
+        env = "RUSTQC_VERBOSE",
+        help_heading = "General"
+    )]
     pub verbose: bool,
 
     // ── Tool parameters ─────────────────────────────────────────────────
@@ -269,19 +313,39 @@ pub struct RnaArgs {
     pub inner_distance_step: Option<i64>,
 
     /// TIN: random seed for reproducible results
-    #[arg(long = "tin-seed", value_name = "N", env = "RUSTQC_TIN_SEED", help_heading = "Tool parameters")]
+    #[arg(
+        long = "tin-seed",
+        value_name = "N",
+        env = "RUSTQC_TIN_SEED",
+        help_heading = "Tool parameters"
+    )]
     pub tin_seed: Option<u64>,
 
     /// Skip TIN analysis
-    #[arg(long, default_value_t = false, env = "RUSTQC_SKIP_TIN", help_heading = "Tool parameters")]
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "RUSTQC_SKIP_TIN",
+        help_heading = "Tool parameters"
+    )]
     pub skip_tin: bool,
 
     /// Skip read duplication analysis
-    #[arg(long, default_value_t = false, env = "RUSTQC_SKIP_READ_DUPLICATION", help_heading = "Tool parameters")]
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "RUSTQC_SKIP_READ_DUPLICATION",
+        help_heading = "Tool parameters"
+    )]
     pub skip_read_duplication: bool,
 
     /// Skip preseq library complexity analysis
-    #[arg(long, default_value_t = false, env = "RUSTQC_SKIP_PRESEQ", help_heading = "Tool parameters")]
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "RUSTQC_SKIP_PRESEQ",
+        help_heading = "Tool parameters"
+    )]
     pub skip_preseq: bool,
 
     /// preseq: random seed for bootstrap CIs
