@@ -1,6 +1,6 @@
 [package]
 name = "rustqc"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.87"
 authors = ["Phil Ewels <phil.ewels@seqera.io>", "Jon Manning <jonathan.manning@seqera.io>"]

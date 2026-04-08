@@ -1,5 +1,24 @@
 # RustQC Changelog
 
+## [Version 0.2.0](https://github.com/seqeralabs/RustQC/releases/tag/v0.2.0) - 2026-04-09
+
+### Features
+
+- Ship SIMD-optimized binaries with CPU detection and upgrade hints (#81)
+- Write `CITATIONS.md` with upstream tool versions (#87)
+- Add XDG config discovery and deep-merge support (#88)
+
+### Bug fixes
+
+- Replace header-based duplicate check with flag-based detection (#84)
+- Use `.log` extension for junction_annotation output (#80)
+
+### Other changes
+
+- Bump docker/login-action from 4.0.0 to 4.1.0 (#78)
+- Bump vite from 7.3.1 to 7.3.2 in docs (#77)
+- Bump defu from 6.1.4 to 6.1.6 in docs (#74)
+
 ## [Version 0.1.1](https://github.com/seqeralabs/RustQC/releases/tag/v0.1.1) - 2026-04-02
 
 ### Bug fixes
