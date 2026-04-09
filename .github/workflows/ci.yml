@@ -23,7 +23,7 @@ jobs:
             os: ubuntu-latest
           - name: linux-x86_64-v3
             os: ubuntu-latest
-            rustflags: "-C target-cpu=x86-64-v3"
+            target_cpu: x86-64-v3
           - name: macos-aarch64
             os: macos-latest
     steps:
@@ -46,14 +46,18 @@ jobs:
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # ratchet:Swatinem/rust-cache@v2.9.1
 
       - name: Build
-        run: cargo build --release
+        run: >
+          cargo build --release
+          ${TARGET_CPU:+--config "build.rustflags=['-C', 'target-cpu=$TARGET_CPU']"}
         env:
-          RUSTFLAGS: ${{ matrix.rustflags || '' }}
+          TARGET_CPU: ${{ matrix.target_cpu || '' }}
 
       - name: Test
-        run: cargo test --release
+        run: >
+          cargo test --release
+          ${TARGET_CPU:+--config "build.rustflags=['-C', 'target-cpu=$TARGET_CPU']"}
         env:
-          RUSTFLAGS: ${{ matrix.rustflags || '' }}
+          TARGET_CPU: ${{ matrix.target_cpu || '' }}
 
   fmt:
     name: Formatting
