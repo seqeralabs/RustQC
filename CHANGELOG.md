@@ -1,5 +1,15 @@
 # RustQC Changelog
 
+## [Version 0.2.1](https://github.com/seqeralabs/RustQC/releases/tag/v0.2.1) - 2026-04-09
+
+### Bug fixes
+
+- Fix SIMD builds by scoping rustflags to target triple with explicit `--target` (#90, #91)
+
+### Other changes
+
+- Trigger releases via workflow dispatch instead of tag push (#92)
+
 ## [Version 0.2.0](https://github.com/seqeralabs/RustQC/releases/tag/v0.2.0) - 2026-04-09
 
 ### Features
