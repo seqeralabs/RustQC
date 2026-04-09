@@ -21,9 +21,11 @@ COPY Cargo.toml Cargo.lock build.rs ./
 COPY cpp/ cpp/
 COPY src/ src/
 
-RUN RUSTFLAGS="${CPU_TARGET:+-C target-cpu=$CPU_TARGET}" \
+RUN HOST_TRIPLE=$(rustc -vV | awk '/^host:/ {print $2}') && \
     GIT_SHORT_HASH="${GIT_SHORT_HASH}" \
-    cargo build --release && strip target/release/rustqc
+    cargo build --release \
+        ${CPU_TARGET:+--config "target.'$HOST_TRIPLE'.rustflags=['-C', 'target-cpu=$CPU_TARGET']"} \
+    && strip target/release/rustqc
 
 # ---- Runtime stage ----
 FROM debian:bookworm-slim
