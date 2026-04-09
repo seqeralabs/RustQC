@@ -45,17 +45,21 @@ jobs:
 
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # ratchet:Swatinem/rust-cache@v2.9.1
 
+      - name: Detect host triple
+        if: matrix.target_cpu
+        run: echo "HOST_TRIPLE=$(rustc -vV | awk '/^host:/ {print $2}')" >> "$GITHUB_ENV"
+
       - name: Build
         run: >
           cargo build --release
-          ${TARGET_CPU:+--config "build.rustflags=['-C', 'target-cpu=$TARGET_CPU']"}
+          ${TARGET_CPU:+--config "target.'$HOST_TRIPLE'.rustflags=['-C', 'target-cpu=$TARGET_CPU']"}
         env:
           TARGET_CPU: ${{ matrix.target_cpu || '' }}
 
       - name: Test
         run: >
           cargo test --release
-          ${TARGET_CPU:+--config "build.rustflags=['-C', 'target-cpu=$TARGET_CPU']"}
+          ${TARGET_CPU:+--config "target.'$HOST_TRIPLE'.rustflags=['-C', 'target-cpu=$TARGET_CPU']"}
         env:
           TARGET_CPU: ${{ matrix.target_cpu || '' }}
 
