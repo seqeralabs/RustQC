@@ -49,6 +49,13 @@ jobs:
               echo "::error::Tag $VERSION already exists"
               exit 1
             fi
+
+            LOCK_VERSION=$(awk '/^name = "rustqc"/{found=1} found && /^version =/{print; exit}' Cargo.lock | sed 's/.*"\(.*\)"/\1/')
+            if [ "$LOCK_VERSION" != "$RAW" ]; then
+              echo "::error::Cargo.lock version ($LOCK_VERSION) does not match Cargo.toml version ($RAW)"
+              exit 1
+            fi
+
             echo "Detected release: $VERSION"
           else
             echo "is_release=false" >> "$GITHUB_OUTPUT"
