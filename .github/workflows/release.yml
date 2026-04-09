@@ -124,7 +124,7 @@ jobs:
       - name: Build
         run: >
           cargo build --release --target ${{ matrix.target }}
-          ${TARGET_CPU:+--config "build.rustflags=['-C', 'target-cpu=$TARGET_CPU']"}
+          ${TARGET_CPU:+--config "target.'${{ matrix.target }}'.rustflags=['-C', 'target-cpu=$TARGET_CPU']"}
         env:
           TARGET_CPU: ${{ matrix.target_cpu || '' }}
 

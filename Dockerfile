@@ -21,9 +21,10 @@ COPY Cargo.toml Cargo.lock build.rs ./
 COPY cpp/ cpp/
 COPY src/ src/
 
-RUN GIT_SHORT_HASH="${GIT_SHORT_HASH}" \
+RUN HOST_TRIPLE=$(rustc -vV | awk '/^host:/ {print $2}') && \
+    GIT_SHORT_HASH="${GIT_SHORT_HASH}" \
     cargo build --release \
-        ${CPU_TARGET:+--config "build.rustflags=['-C', 'target-cpu=$CPU_TARGET']"} \
+        ${CPU_TARGET:+--config "target.'$HOST_TRIPLE'.rustflags=['-C', 'target-cpu=$CPU_TARGET']"} \
     && strip target/release/rustqc
 
 # ---- Runtime stage ----
