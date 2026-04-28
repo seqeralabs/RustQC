@@ -9,7 +9,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-use crate::cli::Strandedness;
+use crate::Strandedness;
 use log::debug;
 
 // ===================================================================

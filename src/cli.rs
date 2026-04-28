@@ -10,34 +10,9 @@
 //!
 //! A GTF gene annotation file is required for all analyses.
 
-use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
-use serde::Deserialize;
+use clap::{CommandFactory, Parser, Subcommand};
 
-/// Library strandedness protocol.
-///
-/// Determines how read strand is interpreted relative to the gene annotation
-/// strand during counting. Accepted CLI values: `unstranded`, `forward`, `reverse`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Strandedness {
-    /// Count reads on either strand (library is not strand-specific).
-    #[default]
-    Unstranded,
-    /// Forward stranded: read 1 maps to the transcript strand.
-    Forward,
-    /// Reverse stranded: read 2 maps to the transcript strand (e.g. dUTP).
-    Reverse,
-}
-
-impl std::fmt::Display for Strandedness {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Strandedness::Unstranded => write!(f, "unstranded"),
-            Strandedness::Forward => write!(f, "forward"),
-            Strandedness::Reverse => write!(f, "reverse"),
-        }
-    }
-}
+use rustqc::Strandedness;
 
 /// Fast quality control tools for sequencing data, written in Rust.
 #[derive(Parser, Debug)]
@@ -407,7 +382,7 @@ pub fn parse_args() -> Cli {
             env!("CARGO_PKG_VERSION"),
             env!("GIT_SHORT_HASH"),
             env!("BUILD_TIMESTAMP"),
-            crate::cpu::cpu_info_line(),
+            rustqc::cpu::cpu_info_line(),
         )
         .into_boxed_str(),
     );

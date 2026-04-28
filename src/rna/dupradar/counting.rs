@@ -9,11 +9,11 @@
 //!
 //! This implements a simplified featureCounts-compatible counting strategy.
 
-use crate::cli::Strandedness;
 use crate::gtf::Gene;
+use crate::io::format_count;
 use crate::rna::qualimap::QualimapAccum;
 use crate::rna::rseqc::accumulators::{RseqcAccumulators, RseqcAnnotations, RseqcConfig};
-use crate::ui::format_count;
+use crate::Strandedness;
 use anyhow::{Context, Result};
 use coitrees::{COITree, Interval, IntervalTree};
 use indexmap::IndexMap;
