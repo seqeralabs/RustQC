@@ -127,6 +127,11 @@ impl TinResults {
     pub fn len(&self) -> usize {
         self.transcripts.len()
     }
+
+    /// Whether there are no transcripts with computed TIN scores.
+    pub fn is_empty(&self) -> bool {
+        self.transcripts.is_empty()
+    }
 }
 
 // ===================================================================
@@ -331,7 +336,7 @@ pub struct TinAccum {
     /// Per-transcript unique read start positions, capped at `min_cov + 1`.
     /// Once exceeded, the set is drained and `exceeded_threshold[tx_idx]`
     /// is set instead.
-    pub unique_starts: Vec<HashSet<u64, TinHashState>>,
+    pub(crate) unique_starts: Vec<HashSet<u64, TinHashState>>,
     /// Per-transcript flag: true once unique start count exceeded `min_cov`.
     /// Avoids further HashSet inserts for high-coverage transcripts.
     pub exceeded_threshold: Vec<bool>,

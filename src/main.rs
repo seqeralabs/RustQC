@@ -11,12 +11,6 @@
 
 mod citations;
 mod cli;
-mod config;
-mod cpu;
-mod gtf;
-mod io;
-mod rna;
-mod summary;
 mod ui;
 
 use anyhow::{ensure, Context, Result};
@@ -27,7 +21,10 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use ui::{format_count, format_duration, format_pct, Ui, Verbosity};
+use rustqc::io::{format_count, format_duration, format_pct};
+use rustqc::{config, cpu, gtf, rna, summary};
+
+use ui::{Ui, Verbosity};
 
 use rust_htslib::bam::Read as BamRead;
 
@@ -310,7 +307,7 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
     let effective_stranded = args
         .stranded
         .or(config.stranded)
-        .unwrap_or(cli::Strandedness::Unstranded);
+        .unwrap_or(rustqc::Strandedness::Unstranded);
     let effective_paired = args.paired || config.paired.unwrap_or(false);
 
     if n_bams == 1 {
@@ -749,7 +746,7 @@ struct SharedParams<'a> {
     /// Terminal UI handle.
     ui: &'a Ui,
     /// Library strandedness.
-    stranded: cli::Strandedness,
+    stranded: rustqc::Strandedness,
     /// Whether the library is paired-end.
     paired: bool,
     /// Alignment-to-GTF chromosome name mapping.
