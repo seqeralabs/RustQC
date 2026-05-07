@@ -1,23 +1,66 @@
 //! RustQC — fast quality control tools for sequencing data.
 //!
-//! This is the library API. The companion CLI (`rustqc` binary) is built on
-//! top of these same modules and provides a single-pass RNA-Seq QC pipeline
-//! that runs dupRadar, featureCounts, RSeQC tools, preseq, samtools-style
-//! outputs, and Qualimap analyses.
+//! RustQC is primarily a CLI (`rustqc rna ...`) that runs a single-pass
+//! RNA-Seq QC pipeline (dupRadar, featureCounts, 8 RSeQC tools, Qualimap,
+//! preseq, samtools-style outputs). The same analysis modules are also
+//! exposed as a library so they can be embedded into other Rust programs.
 //!
-//! Library consumers can drive individual analyses directly. The submodules
-//! are organised by tool family:
+//! # Adding RustQC as a dependency
 //!
-//! - [`gtf`] — GTF gene-annotation parsing.
-//! - [`io`] — shared I/O helpers (transparent gzip decompression, etc.).
-//! - [`config`] — configuration types (mirrors the CLI's YAML config).
+//! ```toml
+//! [dependencies]
+//! rustqc = "0.2"
+//! ```
+//!
+//! The library pulls in `rust-htslib` (linked statically), `plotters`, and
+//! a small C++ component used by the preseq tool (built via `build.rs`),
+//! so a working C/C++ toolchain is required at build time.
+//!
+//! # Modules
+//!
+//! - [`gtf`] — GTF gene-annotation parsing into [`gtf::Gene`] / [`gtf::Transcript`] / [`gtf::Exon`].
+//! - [`io`] — shared I/O helpers (transparent gzip decompression, FNV-1a, number formatting).
+//! - [`config`] — configuration types that mirror the CLI's YAML config file.
 //! - [`summary`] — serializable types for the JSON run summary.
 //! - [`cpu`] — CPU feature detection and binary-target identification.
-//! - [`rna`] — the RNA-Seq QC analysis modules (dupRadar, featureCounts,
-//!   RSeQC, Qualimap, preseq, samtools-style outputs).
+//! - [`rna`] — the RNA-Seq analysis modules:
+//!   - [`rna::dupradar`], [`rna::featurecounts`], [`rna::qualimap`],
+//!     [`rna::preseq`], [`rna::rseqc`].
 //!
-//! The [`Strandedness`] enum lives at the crate root because it is used
-//! across most analysis modules.
+//! [`Strandedness`] lives at the crate root because it is used across most
+//! analysis modules.
+//!
+//! # Stability
+//!
+//! The library is at `0.2.x` and the public surface is intentionally small
+//! at this stage. Expect breaking changes in minor releases until `1.0`.
+//! The full single-pass RNA-Seq pipeline (the `run_rna` orchestrator that
+//! the binary uses) is not yet exposed as a library entry point — for now
+//! library consumers drive individual analyses themselves. Pipeline-level
+//! orchestration may be exposed in a future release; see issue
+//! [#72](https://github.com/seqeralabs/RustQC/issues/72).
+//!
+//! # Examples
+//!
+//! Parse a GTF file and inspect the first gene:
+//!
+//! ```no_run
+//! use rustqc::gtf;
+//!
+//! let genes = gtf::parse_gtf("genes.gtf", &[]).unwrap();
+//! if let Some((gene_id, gene)) = genes.iter().next() {
+//!     println!("{gene_id}: {} transcripts", gene.transcripts.len());
+//! }
+//! ```
+//!
+//! Use the [`Strandedness`] enum (also accepted by `serde` for YAML configs):
+//!
+//! ```
+//! use rustqc::Strandedness;
+//!
+//! let s = Strandedness::Reverse;
+//! assert_eq!(s.to_string(), "reverse");
+//! ```
 
 use clap::ValueEnum;
 use serde::Deserialize;

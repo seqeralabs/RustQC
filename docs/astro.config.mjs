@@ -57,6 +57,7 @@ export default defineConfig({
               slug: "usage/configuration",
             },
             { label: "Performance & Tuning", slug: "usage/performance" },
+            { label: "Rust Library", slug: "usage/library" },
           ],
         },
         {

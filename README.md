@@ -82,6 +82,17 @@ cargo install rustqc
 
 See the [documentation](https://seqeralabs.github.io/RustQC/) for full usage details, configuration options, output file descriptions, and benchmark results.
 
+## Use as a Rust library
+
+The crate is also published as a library, so the QC analysis modules (GTF parsing, dupRadar, featureCounts, RSeQC, Qualimap, preseq, samtools-style outputs) can be embedded into other Rust programs:
+
+```toml
+[dependencies]
+rustqc = "0.2"
+```
+
+See the [library guide](https://seqeralabs.github.io/RustQC/usage/library/) and the full API reference on [docs.rs/rustqc](https://docs.rs/rustqc).
+
 ## AI & Provenance
 
 RustQC was developed with substantial assistance from AI coding agents (primarily [Claude](https://claude.ai/)), using the upstream tool source code as reference. Correctness is validated by comparing output against the original tools on real sequencing data, not by manual code review alone. See the [AI & Provenance](https://seqeralabs.github.io/RustQC/about/ai-statement/) documentation for full details, including known validation gaps.
