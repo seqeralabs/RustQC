@@ -75,30 +75,32 @@ jobs:
       matrix:
         include:
           # Linux x86_64 (baseline)
+          # Built on ubuntu-22.04 (glibc 2.35) for broader compatibility
+          # with older distros (RHEL/Rocky 9, Debian 12, etc.)
           - name: linux-x86_64
-            os: ubuntu-latest
+            os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
 
           # Linux x86_64 with AVX2 (x86-64-v3)
           - name: linux-x86_64-v3
-            os: ubuntu-latest
+            os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             target_cpu: x86-64-v3
 
           # Linux x86_64 with AVX-512 (x86-64-v4)
           - name: linux-x86_64-v4
-            os: ubuntu-latest
+            os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             target_cpu: x86-64-v4
 
           # Linux aarch64 (native arm64 runner, baseline)
           - name: linux-aarch64
-            os: ubuntu-24.04-arm
+            os: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
 
           # Linux aarch64 with SVE (Graviton 3+, Axion, Grace)
           - name: linux-aarch64-neoverse-v1
-            os: ubuntu-24.04-arm
+            os: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
             target_cpu: neoverse-v1
 
