@@ -1273,11 +1273,11 @@ pub fn count_reads(
         // with BGZF I/O. When total threads exceed num_workers the extra
         // threads are distributed evenly; when threads == num_workers every
         // worker still gets 1 dedicated decompression thread.
-        let htslib_threads = if num_workers > 0 {
-            ((threads.saturating_sub(num_workers)) / num_workers).max(1)
-        } else {
-            0
-        };
+        let htslib_threads = threads
+            .saturating_sub(num_workers)
+            .checked_div(num_workers)
+            .map(|n| n.max(1))
+            .unwrap_or(0);
 
         // Process chromosome batches in parallel
         let results: Vec<Result<(ChromResult, Option<RseqcAccumulators>)>> = pool.install(|| {

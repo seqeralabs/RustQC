@@ -204,17 +204,13 @@ pub fn build_regions_from_genes(genes: &IndexMap<String, Gene>) -> RegionSets {
             // 5' UTR: exon portions before CDS (strand-aware)
             for (&es, &ee) in exon_starts.iter().zip(exon_ends.iter()) {
                 match strand {
-                    '+' => {
-                        if es < cds_start {
-                            let e = ee.min(cds_start);
-                            regions.utr_5.entry(chrom.clone()).or_default().add(es, e);
-                        }
+                    '+' if es < cds_start => {
+                        let e = ee.min(cds_start);
+                        regions.utr_5.entry(chrom.clone()).or_default().add(es, e);
                     }
-                    '-' => {
-                        if ee > cds_end {
-                            let s = es.max(cds_end);
-                            regions.utr_5.entry(chrom.clone()).or_default().add(s, ee);
-                        }
+                    '-' if ee > cds_end => {
+                        let s = es.max(cds_end);
+                        regions.utr_5.entry(chrom.clone()).or_default().add(s, ee);
                     }
                     _ => {}
                 }
@@ -223,17 +219,13 @@ pub fn build_regions_from_genes(genes: &IndexMap<String, Gene>) -> RegionSets {
             // 3' UTR: exon portions after CDS (strand-aware)
             for (&es, &ee) in exon_starts.iter().zip(exon_ends.iter()) {
                 match strand {
-                    '+' => {
-                        if ee > cds_end {
-                            let s = es.max(cds_end);
-                            regions.utr_3.entry(chrom.clone()).or_default().add(s, ee);
-                        }
+                    '+' if ee > cds_end => {
+                        let s = es.max(cds_end);
+                        regions.utr_3.entry(chrom.clone()).or_default().add(s, ee);
                     }
-                    '-' => {
-                        if es < cds_start {
-                            let e = ee.min(cds_start);
-                            regions.utr_3.entry(chrom.clone()).or_default().add(es, e);
-                        }
+                    '-' if es < cds_start => {
+                        let e = ee.min(cds_start);
+                        regions.utr_3.entry(chrom.clone()).or_default().add(es, e);
                     }
                     _ => {}
                 }
