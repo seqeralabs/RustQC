@@ -4,7 +4,7 @@
 //! like chromosome name mappings between alignment file and GTF references,
 //! per-tool output configuration, and tool enable/disable toggles.
 
-use crate::cli::Strandedness;
+use crate::Strandedness;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_yaml_ng::Value;
@@ -1213,7 +1213,7 @@ preseq:
         deep_merge(&mut base, overlay);
         let m = base.as_mapping().unwrap();
         let items = m
-            .get(&Value::String("items".into()))
+            .get(Value::String("items".into()))
             .unwrap()
             .as_sequence()
             .unwrap();
@@ -1268,7 +1268,7 @@ preseq:
 
         let paths = collect_config_paths(Some("/tmp/nonexistent.yml"));
         // The -c flag should always be last
-        assert!(paths.last().unwrap().0 == PathBuf::from("/tmp/nonexistent.yml"));
+        assert!(paths.last().unwrap().0 == Path::new("/tmp/nonexistent.yml"));
         assert_eq!(paths.last().unwrap().1, "-c flag");
 
         // Restore

@@ -9,11 +9,11 @@
 //!
 //! This implements a simplified featureCounts-compatible counting strategy.
 
-use crate::cli::Strandedness;
 use crate::gtf::Gene;
+use crate::io::format_count;
 use crate::rna::qualimap::QualimapAccum;
 use crate::rna::rseqc::accumulators::{RseqcAccumulators, RseqcAnnotations, RseqcConfig};
-use crate::ui::format_count;
+use crate::Strandedness;
 use anyhow::{Context, Result};
 use coitrees::{COITree, Interval, IntervalTree};
 use indexmap::IndexMap;
@@ -1273,11 +1273,11 @@ pub fn count_reads(
         // with BGZF I/O. When total threads exceed num_workers the extra
         // threads are distributed evenly; when threads == num_workers every
         // worker still gets 1 dedicated decompression thread.
-        let htslib_threads = if num_workers > 0 {
-            ((threads.saturating_sub(num_workers)) / num_workers).max(1)
-        } else {
-            0
-        };
+        let htslib_threads = threads
+            .saturating_sub(num_workers)
+            .checked_div(num_workers)
+            .map(|n| n.max(1))
+            .unwrap_or(0);
 
         // Process chromosome batches in parallel
         let results: Vec<Result<(ChromResult, Option<RseqcAccumulators>)>> = pool.install(|| {

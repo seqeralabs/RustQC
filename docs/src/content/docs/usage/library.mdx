@@ -1,0 +1,102 @@
+---
+title: Rust Library
+description: Use RustQC as a Rust library crate, embedding its QC analysis modules in your own programs.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+RustQC is published on [crates.io](https://crates.io/crates/rustqc) as both a
+binary and a library. The CLI (`rustqc rna ...`) is the primary interface, but
+the same analysis modules are also exposed as a library so they can be embedded
+into other Rust programs.
+
+Full API reference: **[docs.rs/rustqc](https://docs.rs/rustqc)**.
+
+## Adding RustQC as a dependency
+
+```toml
+[dependencies]
+rustqc = "0.2.1"  # Or whatever the latest release is
+```
+
+`rust-htslib` is linked statically and a small C++ component (used by the preseq
+tool) is built from source, so a working C/C++ toolchain (`cc`, `c++`) is
+required when building. No runtime dependencies are added beyond what the binary
+already needs.
+
+## What's in the library
+
+The crate exposes these modules:
+
+| Module                        | Contents                                                                                                  |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------- |
+| [`gtf`][docs-gtf]             | GTF gene-annotation parsing. `Gene`, `Transcript`, `Exon`, `parse_gtf`.                                   |
+| [`io`][docs-io]               | Transparent gzip-aware reader, FNV-1a hashing, number formatters.                                         |
+| [`config`][docs-config]       | Configuration types mirroring the CLI's YAML config file.                                                 |
+| [`summary`][docs-summary]     | Serializable types for the JSON run summary.                                                              |
+| [`cpu`][docs-cpu]             | CPU feature detection and binary-target identification.                                                   |
+| [`rna`][docs-rna]             | RNA-Seq analyses: `dupradar`, `featurecounts`, `qualimap`, `preseq`, `rseqc`.                             |
+
+[`Strandedness`][docs-strandedness] lives at the crate root because it is used
+across most analysis modules.
+
+[docs-gtf]: https://docs.rs/rustqc/latest/rustqc/gtf/
+[docs-io]: https://docs.rs/rustqc/latest/rustqc/io/
+[docs-config]: https://docs.rs/rustqc/latest/rustqc/config/
+[docs-summary]: https://docs.rs/rustqc/latest/rustqc/summary/
+[docs-cpu]: https://docs.rs/rustqc/latest/rustqc/cpu/
+[docs-rna]: https://docs.rs/rustqc/latest/rustqc/rna/
+[docs-strandedness]: https://docs.rs/rustqc/latest/rustqc/enum.Strandedness.html
+
+## Quick examples
+
+Parse a GTF file:
+
+```rust
+use rustqc::gtf;
+
+let genes = gtf::parse_gtf("genes.gtf", &[])?;
+println!("{} genes parsed", genes.len());
+for (gene_id, gene) in genes.iter().take(3) {
+    println!("{gene_id}: {} transcripts", gene.transcripts.len());
+}
+# Ok::<(), anyhow::Error>(())
+```
+
+Open a possibly-gzipped annotation or output file with one call:
+
+```rust
+use std::io::BufRead;
+use rustqc::io::open_reader;
+
+let reader = open_reader("counts.tsv.gz")?;
+for line in reader.lines() {
+    println!("{}", line?);
+}
+# Ok::<(), anyhow::Error>(())
+```
+
+Use the `Strandedness` enum (it derives `serde::Deserialize` and clap's
+`ValueEnum`, so it integrates with both YAML configs and CLI parsers):
+
+```rust
+use rustqc::Strandedness;
+
+let s = Strandedness::Reverse;
+assert_eq!(s.to_string(), "reverse");
+```
+
+## Stability
+
+The library is at `0.2.x` and the public surface is intentionally small. Expect
+breaking changes in minor releases until `1.0`. Module visibility may be
+narrowed in future versions if internal types are inadvertently exposed.
+
+<Aside type="note">
+The full single-pass RNA-Seq pipeline (the `run_rna` orchestrator that the
+binary uses) is not yet exposed as a library entry point. For now, library
+consumers drive individual analyses themselves. Pipeline-level orchestration
+may be exposed in a future release — track [issue #72][issue-72].
+</Aside>
+
+[issue-72]: https://github.com/seqeralabs/RustQC/issues/72

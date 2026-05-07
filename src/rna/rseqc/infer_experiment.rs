@@ -4,8 +4,8 @@
 //! gene models (from GTF annotation) and determines the fraction consistent with
 //! each strand protocol.
 
-use crate::cli::Strandedness;
 use crate::gtf::Gene;
+use crate::Strandedness;
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
 use log::debug;

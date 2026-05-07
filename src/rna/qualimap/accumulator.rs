@@ -13,7 +13,7 @@ use coitrees::IntervalTree;
 use rust_htslib::bam;
 use rust_htslib::bam::record::Cigar;
 
-use crate::cli::Strandedness;
+use crate::Strandedness;
 
 use super::coverage::TranscriptCoverage;
 use super::index::QualimapIndex;

@@ -13,7 +13,7 @@ use super::coverage::TranscriptCoverage;
 use super::index::QualimapIndex;
 use super::plots;
 use super::QualimapResult;
-use crate::cli::Strandedness;
+use crate::Strandedness;
 
 // ============================= Constants =======================================
 

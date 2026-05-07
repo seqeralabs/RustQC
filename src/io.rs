@@ -9,6 +9,7 @@ use flate2::read::GzDecoder;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek};
 use std::path::Path;
+use std::time::Duration;
 
 /// Gzip magic bytes: the first two bytes of any gzip-compressed file.
 const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
@@ -101,6 +102,56 @@ pub fn format_with_commas(n: u64) -> String {
     result
 }
 
+/// Format a count with SI suffixes (e.g. "1.5K", "48.2M", "2.3G").
+///
+/// Used for compact human-readable counts in progress messages and summaries.
+pub fn format_count(n: u64) -> String {
+    use number_prefix::NumberPrefix;
+    match NumberPrefix::decimal(n as f64) {
+        NumberPrefix::Standalone(n) => format!("{n}"),
+        NumberPrefix::Prefixed(prefix, n) => {
+            // Map SI prefixes to short single-char suffixes
+            let suffix = match prefix {
+                number_prefix::Prefix::Kilo => "K",
+                number_prefix::Prefix::Mega => "M",
+                number_prefix::Prefix::Giga => "G",
+                number_prefix::Prefix::Tera => "T",
+                _ => return format!("{:.1}{prefix:?}", n),
+            };
+            format!("{n:.1}{suffix}")
+        }
+    }
+}
+
+/// Format a percentage string (e.g. "(83.3%)").
+pub fn format_pct(n: u64, total: u64) -> String {
+    if total == 0 {
+        return "(0.0%)".to_string();
+    }
+    format!("({:.1}%)", n as f64 / total as f64 * 100.0)
+}
+
+/// Format a duration as human-friendly mm:ss or h:mm:ss.
+///
+/// - Under 60s: `"45.2s"`
+/// - Under 1h: `"1:23"`
+/// - Over 1h: `"1:02:34"`
+pub fn format_duration(d: Duration) -> String {
+    let total_secs = d.as_secs_f64();
+    if total_secs < 60.0 {
+        return format!("{total_secs:.1}s");
+    }
+    let total_secs = d.as_secs();
+    let hours = total_secs / 3600;
+    let minutes = (total_secs % 3600) / 60;
+    let seconds = total_secs % 60;
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes}:{seconds:02}")
+    }
+}
+
 // ============================================================
 // Numeric helpers
 // ============================================================
@@ -179,6 +230,60 @@ mod tests {
         assert_eq!(format_with_commas(999), "999");
         assert_eq!(format_with_commas(1000), "1,000");
         assert_eq!(format_with_commas(1234567), "1,234,567");
+    }
+
+    #[test]
+    fn test_format_count_small() {
+        assert_eq!(format_count(0), "0");
+        assert_eq!(format_count(42), "42");
+        assert_eq!(format_count(999), "999");
+    }
+
+    #[test]
+    fn test_format_count_thousands() {
+        assert_eq!(format_count(1000), "1.0K");
+        assert_eq!(format_count(1500), "1.5K");
+        assert_eq!(format_count(50000), "50.0K");
+    }
+
+    #[test]
+    fn test_format_count_millions() {
+        assert_eq!(format_count(1_000_000), "1.0M");
+        assert_eq!(format_count(48_200_000), "48.2M");
+        assert_eq!(format_count(50_000_000), "50.0M");
+    }
+
+    #[test]
+    fn test_format_count_billions() {
+        assert_eq!(format_count(1_000_000_000), "1.0G");
+        assert_eq!(format_count(5_000_000_000), "5.0G");
+    }
+
+    #[test]
+    fn test_format_pct() {
+        assert_eq!(format_pct(833, 1000), "(83.3%)");
+        assert_eq!(format_pct(0, 0), "(0.0%)");
+        assert_eq!(format_pct(1000, 1000), "(100.0%)");
+    }
+
+    #[test]
+    fn test_format_duration_seconds() {
+        assert_eq!(format_duration(Duration::from_secs_f64(0.5)), "0.5s");
+        assert_eq!(format_duration(Duration::from_secs_f64(45.2)), "45.2s");
+        assert_eq!(format_duration(Duration::from_secs_f64(59.9)), "59.9s");
+    }
+
+    #[test]
+    fn test_format_duration_minutes() {
+        assert_eq!(format_duration(Duration::from_secs(60)), "1:00");
+        assert_eq!(format_duration(Duration::from_secs(83)), "1:23");
+        assert_eq!(format_duration(Duration::from_secs(3599)), "59:59");
+    }
+
+    #[test]
+    fn test_format_duration_hours() {
+        assert_eq!(format_duration(Duration::from_secs(3600)), "1:00:00");
+        assert_eq!(format_duration(Duration::from_secs(3754)), "1:02:34");
     }
 
     #[test]

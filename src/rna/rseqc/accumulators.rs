@@ -781,13 +781,12 @@ impl BamStatAccum {
                 // GC content: cumulative step function with ngc=200 bins.
                 // Matches samtools stats.c:925-941. For a read with gc_count G/C
                 // bases out of read_len total, increment bins gc_idx_min..gc_idx_max.
-                if read_len > 0 {
-                    let ngc: usize = 200;
-                    let gc_idx_min = gc_count as usize * (ngc - 1) / read_len;
-                    let mut gc_idx_max = (gc_count as usize + 1) * (ngc - 1) / read_len;
-                    if gc_idx_max >= ngc {
-                        gc_idx_max = ngc - 1;
-                    }
+                let ngc: usize = 200;
+                if let (Some(gc_idx_min), Some(gc_idx_max)) = (
+                    (gc_count as usize * (ngc - 1)).checked_div(read_len),
+                    ((gc_count as usize + 1) * (ngc - 1)).checked_div(read_len),
+                ) {
+                    let gc_idx_max = gc_idx_max.min(ngc - 1);
                     for item in gc_arr.iter_mut().take(gc_idx_max).skip(gc_idx_min) {
                         *item += 1;
                     }

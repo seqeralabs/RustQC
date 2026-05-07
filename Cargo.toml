@@ -13,6 +13,10 @@ categories = ["command-line-utilities", "science"]
 homepage = "https://seqeralabs.github.io/RustQC/"
 exclude = ["benchmark/", "docs/", "paper/", "tests/", ".github/", "Dockerfile", ".dockerignore", ".pre-commit-config.yaml", "netlify.toml", "CONTRIBUTING.md", "AGENTS.md"]
 
+[lib]
+name = "rustqc"
+path = "src/lib.rs"
+
 [[bin]]
 name = "rustqc"
 path = "src/main.rs"
