@@ -26,7 +26,6 @@ use rustqc::{config, cpu, gtf, rna, summary};
 
 use ui::{Ui, Verbosity};
 
-
 use rna::rseqc::accumulators::{RseqcAccumulators, RseqcAnnotations, RseqcConfig};
 
 /// Common BAM filename suffixes added by alignment and duplicate-marking tools.

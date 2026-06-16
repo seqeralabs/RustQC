@@ -2,7 +2,7 @@
 name = "rustqc"
 version = "0.2.1"
 edition = "2021"
-rust-version = "1.87"
+rust-version = "1.89"
 authors = ["Phil Ewels <phil.ewels@seqera.io>", "Jon Manning <jonathan.manning@seqera.io>"]
 description = "Fast RNA-seq QC in a single pass: dupRadar, featureCounts, 8 RSeQC tools, preseq, samtools stats, and Qualimap — reimplemented in Rust"
 license = "GPL-3.0-or-later"

@@ -102,7 +102,7 @@ jobs:
       - name: Install Rust MSRV toolchain
         uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # ratchet:dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.87"
+          toolchain: "1.89"
 
       - name: Install Linux build deps
         run: |
