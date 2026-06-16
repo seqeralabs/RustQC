@@ -68,6 +68,7 @@ export default defineConfig({
             { label: "featureCounts", slug: "rna/featurecounts" },
             { label: "RSeQC", slug: "rna/rseqc" },
             { label: "Qualimap", slug: "rna/qualimap" },
+            { label: "bigWig", slug: "rna/bigwig" },
             { label: "Preseq", slug: "rna/preseq" },
             { label: "Samtools", slug: "rna/samtools" },
           ],

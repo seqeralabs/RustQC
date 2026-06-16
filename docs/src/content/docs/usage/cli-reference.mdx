@@ -16,7 +16,7 @@ RNA-seq quality control: duplicate rate analysis (dupRadar equivalent),
 featureCounts-compatible read counting with biotype summaries, 8
 RSeQC-equivalent tools (bam_stat, infer_experiment, read_duplication,
 read_distribution, junction_annotation, junction_saturation, inner_distance,
-TIN), Qualimap RNA-seq QC, preseq library complexity, and samtools-compatible
+TIN), Qualimap RNA-seq QC, bigWig genome coverage tracks, preseq library complexity, and samtools-compatible
 outputs.
 
 ### Synopsis
@@ -54,7 +54,7 @@ Path to a GTF gene annotation file (plain or gzip-compressed). **Required.**
 The GTF must contain `exon` features with a `gene_id` attribute.
 Transcript-level structure (exon blocks, CDS features) is extracted automatically
 and used by all analyses: dupRadar, featureCounts, all 8 RSeQC tools (including TIN),
-Qualimap, preseq, and samtools.
+Qualimap, bigWig coverage tracks, preseq, and samtools.
 
 Gzip compression is detected automatically by inspecting the file header (magic
 bytes), so the `.gz` extension is not required.
@@ -78,6 +78,11 @@ Library strandedness for strand-aware read counting:
 | `reverse`    | Reverse stranded (read 2 maps to the transcript strand) |
 
 **Default:** `unstranded`
+
+For **bigWig coverage tracks**, stranded libraries also produce
+`{sample}.forward.bigWig` and `{sample}.reverse.bigWig` with nf-core/rnaseq-
+compatible strand filters. Unstranded libraries receive only `{sample}.bigWig`.
+See [bigWig](../rna/bigwig/) for details.
 
 <Aside type="tip">
   RustQC automatically checks this value against the
@@ -159,7 +164,7 @@ rustqc rna sample.markdup.sorted.bam --gtf genes.gtf --sample-name sample
 
 Write all output files directly into the output directory instead of organizing
 them into subdirectories. By default, RustQC creates `dupradar/`,
-`featurecounts/`, `rseqc/<tool>/`, `qualimap/`, `preseq/`, and `samtools/`
+`featurecounts/`, `rseqc/<tool>/`, `qualimap/`, `bigwig/`, `preseq/`, and `samtools/`
 subdirectories under the output directory. With `--flat-output`, all files are
 written to the top-level output directory.
 
