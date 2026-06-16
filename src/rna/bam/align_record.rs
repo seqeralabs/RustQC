@@ -113,16 +113,17 @@ impl Record {
         inner
             .try_clone_from_alignment_record(header, bam)
             .context("failed to convert BAM record")?;
+        let cigar_cache = bam
+            .cigar()
+            .iter()
+            .map(decode_op)
+            .collect::<Result<Vec<_>, io::Error>>()
+            .context("failed to decode BAM CIGAR")?;
         Ok(Self {
             inner,
             seq_packed: bam.sequence().as_bytes().to_vec(),
             qual_cache: bam.quality_scores().as_ref().to_vec(),
-            cigar_cache: bam
-                .cigar()
-                .iter()
-                .map(decode_op)
-                .collect::<Result<Vec<_>, io::Error>>()
-                .unwrap_or_default(),
+            cigar_cache,
         })
     }
 
@@ -260,19 +261,22 @@ impl Record {
     }
 }
 fn pack_ascii_sequence(seq: &[u8]) -> Vec<u8> {
+    // Full htslib `seq_nt16_table` mapping (the inverse of the `=ACMGRSVTWYHKDBN`
+    // decode table), so IUPAC ambiguity codes round-trip through SAM/CRAM packing
+    // and produce samtools-identical CHK checksums. Unknown bytes fall back to N.
     const TABLE: [u8; 256] = {
         let mut t = [15u8; 256];
-        t[b'=' as usize] = 0;
-        t[b'A' as usize] = 1;
-        t[b'a' as usize] = 1;
-        t[b'C' as usize] = 2;
-        t[b'c' as usize] = 2;
-        t[b'G' as usize] = 4;
-        t[b'g' as usize] = 4;
-        t[b'T' as usize] = 8;
-        t[b't' as usize] = 8;
-        t[b'N' as usize] = 15;
-        t[b'n' as usize] = 15;
+        let symbols = b"=ACMGRSVTWYHKDBN";
+        let mut code = 0usize;
+        while code < symbols.len() {
+            let upper = symbols[code];
+            t[upper as usize] = code as u8;
+            // Map the lowercase variant of each letter to the same code.
+            if upper.is_ascii_uppercase() {
+                t[upper.to_ascii_lowercase() as usize] = code as u8;
+            }
+            code += 1;
+        }
         t
     };
     let mut out = Vec::with_capacity(seq.len().div_ceil(2));
@@ -298,4 +302,41 @@ pub(crate) fn alignment_to_record(
 /// Export for writer tests that need BAM bytes from a SAM line.
 pub(crate) fn record_buf_for_writer(record: &Record) -> &RecordBuf {
     &record.inner
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn packs_all_iupac_codes_losslessly() {
+        // The full set of IUPAC symbols, in htslib 4-bit code order, must pack
+        // and decode back unchanged (the inverse of the `=ACMGRSVTWYHKDBN` table).
+        let seq = b"=ACMGRSVTWYHKDBN".to_vec();
+        let packed = pack_ascii_sequence(&seq);
+        let view = Seq {
+            seq_packed: &packed,
+            seq_len: seq.len(),
+        };
+        assert_eq!(view.as_bytes(), seq);
+        for code in 0u8..16 {
+            assert_eq!(view.encoded_base(code as usize), code);
+        }
+    }
+
+    #[test]
+    fn packs_lowercase_like_uppercase() {
+        assert_eq!(
+            pack_ascii_sequence(b"acgtnmrn"),
+            pack_ascii_sequence(b"ACGTNMRN")
+        );
+    }
+
+    #[test]
+    fn packs_odd_length_trailing_nibble_is_zero() {
+        // Odd-length sequences leave the final low nibble as 0 (`=`), matching
+        // the BAM 4-bit packing layout.
+        let packed = pack_ascii_sequence(b"A");
+        assert_eq!(packed, vec![0b0001_0000]);
+    }
 }
