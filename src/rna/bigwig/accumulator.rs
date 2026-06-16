@@ -23,10 +23,11 @@ pub enum StrandFilter {
 }
 
 /// Settings for a single coverage track.
+///
+/// All nf-core/rnaseq tracks use `-split` (reads are always split at splicing
+/// blocks), so splitting is unconditional rather than a toggle.
 #[derive(Debug, Clone, Copy)]
 struct TrackSettings {
-    /// Split reads at splicing blocks (`-split`).
-    split: bool,
     /// Flip second-mate strand for strand-specific libraries (`-du`).
     deduplicate_strand: bool,
     /// Optional strand filter (`-strand`).
@@ -86,30 +87,41 @@ impl ChromCoverage {
 #[derive(Debug, Default, Clone)]
 pub struct TrackAccum {
     chroms: Vec<(String, ChromCoverage)>,
+    /// Maps chromosome name to its index in `chroms` for O(1) lookup in the
+    /// per-read hot loop (avoids a linear name scan on every record).
+    index: std::collections::HashMap<String, usize>,
 }
 
 impl TrackAccum {
     fn new(chroms: &[(String, u64)]) -> Self {
-        Self {
-            chroms: chroms
-                .iter()
-                .map(|(name, len)| (name.clone(), ChromCoverage::new(*len)))
-                .collect(),
-        }
+        let chroms: Vec<(String, ChromCoverage)> = chroms
+            .iter()
+            .map(|(name, len)| (name.clone(), ChromCoverage::new(*len)))
+            .collect();
+        let index = chroms
+            .iter()
+            .enumerate()
+            .map(|(i, (name, _))| (name.clone(), i))
+            .collect();
+        Self { chroms, index }
     }
 
     fn chrom_mut(&mut self, chrom: &str) -> Option<&mut ChromCoverage> {
-        self.chroms
-            .iter_mut()
-            .find(|(name, _)| name == chrom)
-            .map(|(_, cov)| cov)
+        let i = *self.index.get(chrom)?;
+        Some(&mut self.chroms[i].1)
+    }
+
+    fn chrom(&self, chrom: &str) -> Option<&ChromCoverage> {
+        let i = *self.index.get(chrom)?;
+        Some(&self.chroms[i].1)
     }
 
     fn merge(&mut self, other: Self) {
         for (name, other_cov) in other.chroms {
-            if let Some((_, self_cov)) = self.chroms.iter_mut().find(|(n, _)| *n == name) {
-                self_cov.merge(&other_cov);
+            if let Some(&i) = self.index.get(&name) {
+                self.chroms[i].1.merge(&other_cov);
             } else {
+                self.index.insert(name.clone(), self.chroms.len());
                 self.chroms.push((name, other_cov));
             }
         }
@@ -125,6 +137,9 @@ pub struct GenomeCovAccum {
     pub forward: Option<TrackAccum>,
     /// Reverse-genome-strand coverage (stranded libraries only).
     pub reverse: Option<TrackAccum>,
+    /// Scratch buffer for split-read alignment blocks, reused across reads to
+    /// avoid a per-record heap allocation in the hot loop.
+    blocks_buf: Vec<(u64, u64)>,
 }
 
 impl GenomeCovAccum {
@@ -141,6 +156,7 @@ impl GenomeCovAccum {
             combined: TrackAccum::new(chroms),
             forward,
             reverse,
+            blocks_buf: Vec::new(),
         }
     }
 
@@ -166,10 +182,10 @@ impl GenomeCovAccum {
             record,
             chrom,
             TrackSettings {
-                split: true,
                 deduplicate_strand: false,
                 strand: None,
             },
+            &mut self.blocks_buf,
         );
 
         if stranded == Strandedness::Unstranded {
@@ -188,10 +204,10 @@ impl GenomeCovAccum {
                 record,
                 chrom,
                 TrackSettings {
-                    split: true,
                     deduplicate_strand: true,
                     strand: Some(fwd_strand),
                 },
+                &mut self.blocks_buf,
             );
         }
         if let Some(ref mut reverse) = self.reverse {
@@ -200,10 +216,10 @@ impl GenomeCovAccum {
                 record,
                 chrom,
                 TrackSettings {
-                    split: true,
                     deduplicate_strand: true,
                     strand: Some(rev_strand),
                 },
+                &mut self.blocks_buf,
             );
         }
     }
@@ -214,6 +230,7 @@ fn process_track(
     record: &bam::Record,
     chrom: &str,
     settings: TrackSettings,
+    blocks_buf: &mut Vec<(u64, u64)>,
 ) {
     let Some(cov) = track.chrom_mut(chrom) else {
         return;
@@ -237,17 +254,11 @@ fn process_track(
         }
     }
 
-    if settings.split {
-        let mut blocks_buf = Vec::new();
-        genomecov_blocks(record, &mut blocks_buf);
-        for (start, end) in blocks_buf {
-            // bedtools uses inclusive end; blocks are half-open [start, end).
-            cov.add_interval(start, end.saturating_sub(1));
-        }
-    } else {
-        let start = record.pos() as u64;
-        let end = record.cigar().end_pos() as u64 - 1;
-        cov.add_interval(start, end);
+    // All nf-core/rnaseq tracks use `-split`: accumulate per alignment block.
+    genomecov_blocks(record, blocks_buf);
+    for &(start, end) in blocks_buf.iter() {
+        // bedtools uses inclusive end; blocks are half-open [start, end).
+        cov.add_interval(start, end.saturating_sub(1));
     }
 }
 
@@ -281,14 +292,20 @@ pub struct GenomeCovResult {
     pub forward: Option<TrackAccum>,
     /// Reverse-genome-strand track (None for unstranded libraries).
     pub reverse: Option<TrackAccum>,
+    /// Chromosome names and lengths in BAM header order, carried through so
+    /// output does not need to re-open the BAM to recover them.
+    pub chrom_sizes: Vec<(String, u64)>,
 }
 
-impl From<GenomeCovAccum> for GenomeCovResult {
-    fn from(acc: GenomeCovAccum) -> Self {
-        Self {
-            combined: acc.combined,
-            forward: acc.forward,
-            reverse: acc.reverse,
+impl GenomeCovAccum {
+    /// Finalize the accumulator into a result, attaching the BAM header-ordered
+    /// chromosome sizes used for bedGraph flattening and bigWig writing.
+    pub fn into_result(self, chrom_sizes: Vec<(String, u64)>) -> GenomeCovResult {
+        GenomeCovResult {
+            combined: self.combined,
+            forward: self.forward,
+            reverse: self.reverse,
+            chrom_sizes,
         }
     }
 }
@@ -334,6 +351,10 @@ pub(crate) fn chrom_to_bedgraph(chrom: &str, cov: &ChromCoverage) -> Vec<(String
 }
 
 /// Clip bedGraph intervals to chromosome sizes (UCSC `bedClip` behaviour).
+///
+/// `chrom_to_bedgraph` already bounds intervals to each chromosome's length, so
+/// in the normal pipeline this is defensive: it guarantees `bedClip` parity and
+/// drops any entry whose chromosome is absent from `chrom_sizes`.
 pub fn clip_bedgraph(
     entries: Vec<(String, u32, u32, u32)>,
     chrom_sizes: &[(String, u64)],
@@ -364,7 +385,7 @@ pub fn track_to_bedgraph(
 ) -> Vec<(String, u32, u32, u32)> {
     let mut entries = Vec::new();
     for (chrom, _) in chrom_order {
-        if let Some((_, cov)) = track.chroms.iter().find(|(n, _)| n == chrom) {
+        if let Some(cov) = track.chrom(chrom) {
             entries.extend(chrom_to_bedgraph(chrom, cov));
         }
     }

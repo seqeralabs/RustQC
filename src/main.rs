@@ -1431,25 +1431,13 @@ fn process_single_bam(
             outdir.join("bigwig")
         };
 
-        let chrom_sizes: Vec<(String, u64)> = {
-            let reader = rust_htslib::bam::Reader::from_path(bam_path).with_context(|| {
-                format!("Failed to open BAM for bigWig chrom sizes: {}", bam_path)
-            })?;
-            let header = reader.header();
-            (0..header.target_count())
-                .map(|tid| {
-                    let name = String::from_utf8_lossy(header.tid2name(tid)).to_string();
-                    let len = header.target_len(tid).unwrap_or(0);
-                    (name, len)
-                })
-                .collect()
-        };
-
+        // Chromosome sizes are carried through from the count pass (BAM header
+        // order), so there is no need to re-open the BAM here.
         let bw_outputs = rna::bigwig::write_bigwig_tracks(
             &bw_dir,
             &sample_name,
             gc_result,
-            &chrom_sizes,
+            &gc_result.chrom_sizes,
             threads,
         )?;
         for (label, path) in bw_outputs {

@@ -1770,7 +1770,14 @@ pub fn count_reads(
             }
             _ => None,
         },
-        genomecov: merged.genomecov.map(Into::into),
+        genomecov: merged.genomecov.map(|acc| {
+            let chrom_sizes: Vec<(String, u64)> = tid_to_name
+                .iter()
+                .cloned()
+                .zip(tid_to_len.iter().copied())
+                .collect();
+            acc.into_result(chrom_sizes)
+        }),
     })
 }
 

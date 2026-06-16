@@ -1066,12 +1066,9 @@ fn which_bedtools() -> Option<String> {
 }
 
 fn which_ucsc_tool(name: &str) -> Option<String> {
-    for candidate in [format!("/tmp/{name}"), name.to_string()] {
-        if Path::new(&candidate).exists() {
-            return Some(candidate);
-        }
-    }
-    None
+    [format!("/tmp/{name}"), name.to_string()]
+        .into_iter()
+        .find(|candidate| Path::new(candidate).exists())
 }
 
 fn bigwig_to_bedgraph(bw: &Path, out: &Path) -> bool {
