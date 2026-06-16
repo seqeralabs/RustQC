@@ -6,9 +6,9 @@ on:
       - main
   workflow_dispatch: {}
 
+# Default to read-only; jobs that need write access request it explicitly below.
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -31,6 +31,7 @@ jobs:
         with:
           fetch-depth: 1
           fetch-tags: true
+          persist-credentials: false
 
       - name: Detect release
         id: check
@@ -119,6 +120,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
@@ -180,6 +183,9 @@ jobs:
   docker-build:
     name: Docker ${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -190,6 +196,8 @@ jobs:
             runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
 
       - name: Lowercase image name
         run: echo "IMAGE_NAME=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
@@ -221,10 +229,11 @@ jobs:
           cache-to: type=gha,scope=${{ matrix.platform }},mode=max
 
       - name: Export digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           mkdir -p /tmp/digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "/tmp/digests/${digest#sha256:}"
+          touch "/tmp/digests/${DIGEST#sha256:}"
 
       - name: Upload digest
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7.0.1
@@ -241,6 +250,9 @@ jobs:
     name: Docker ${{ matrix.name }}
     needs: [check-release]
     runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -262,6 +274,8 @@ jobs:
             tag_suffix: sve
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
 
       - name: Prepare build metadata
         id: prep
@@ -309,6 +323,9 @@ jobs:
     name: Docker merge
     needs: [check-release, docker-build]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Lowercase image name
         run: echo "IMAGE_NAME=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
@@ -347,7 +364,7 @@ jobs:
         run: |
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf 'ghcr.io/${{ env.IMAGE_NAME }}@sha256:%s ' *)
+            $(printf "ghcr.io/${IMAGE_NAME}@sha256:%s " *)
 
   # ------------------------------------------------------------------
   # 3. Create tag and draft release (release only, after all builds)
@@ -357,29 +374,37 @@ jobs:
     if: needs.check-release.outputs.is_release == 'true'
     needs: [check-release, build-binaries, docker-merge, docker-build-simd]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       tag: ${{ needs.check-release.outputs.version }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      # Credentials are intentionally persisted: the "Create tag" step pushes the tag.
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3 # zizmor: ignore[artipacked]
 
       - name: Create tag
+        env:
+          VERSION: ${{ needs.check-release.outputs.version }}
         run: |
-          git tag "${{ needs.check-release.outputs.version }}"
-          git push origin "${{ needs.check-release.outputs.version }}"
+          git tag "$VERSION"
+          git push origin "$VERSION"
 
       - name: Extract changelog
+        env:
+          VERSION: ${{ needs.check-release.outputs.version }}
         run: |
-          RAW="${{ needs.check-release.outputs.version }}"
-          RAW="${RAW#v}"
+          RAW="${VERSION#v}"
           awk '/^## \[Version '"$RAW"'\]/{found=1; next} /^## \[/{if(found) exit} found' CHANGELOG.md > /tmp/release-notes.md
 
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check-release.outputs.version }}
+          GIT_SHA: ${{ github.sha }}
         run: |
-          gh release create "${{ needs.check-release.outputs.version }}" \
-            --target "${{ github.sha }}" \
-            --title "RustQC ${{ needs.check-release.outputs.version }}" \
+          gh release create "$VERSION" \
+            --target "$GIT_SHA" \
+            --title "RustQC $VERSION" \
             --notes-file /tmp/release-notes.md
 
   # ------------------------------------------------------------------
@@ -390,8 +415,12 @@ jobs:
     if: needs.check-release.outputs.is_release == 'true'
     needs: [check-release, create-tag-and-release, build-binaries]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
 
       - name: Download all binary artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # ratchet:actions/download-artifact@v8.0.1
@@ -403,8 +432,9 @@ jobs:
       - name: Upload to release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.create-tag-and-release.outputs.tag }}
         run: |
-          gh release upload "${{ needs.create-tag-and-release.outputs.tag }}" \
+          gh release upload "$TAG" \
             /tmp/binaries/*.tar.gz \
             /tmp/binaries/*.sha256
 
@@ -421,6 +451,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
 
       - name: Authenticate with crates.io
         id: auth
