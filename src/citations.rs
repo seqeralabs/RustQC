@@ -64,6 +64,14 @@ const QUALIMAP: Citation = Citation {
     doi: "10.1093/bioinformatics/bts503",
 };
 
+const BIGWIG: Citation = Citation {
+    heading: "bedtools genomecov (v2.31.1) + UCSC utilities",
+    description: "RustQC produces nf-core/rnaseq-compatible bigWig coverage tracks (bedtools genomecov, bedClip, bedGraphToBigWig).",
+    reference: "Quinlan AR, Hall IM. BEDTools: a flexible suite of utilities for comparing genomic features. *Bioinformatics*. 2010;26(6):841-842. Kent WJ, et al. The human genome browser at UCSC. *Genome Res*. 2002;12(6):996-1006.",
+    url: "https://github.com/arq5x/bedtools2",
+    doi: "10.1093/bioinformatics/btq033",
+};
+
 fn write_citation(w: &mut impl Write, c: &Citation) -> std::io::Result<()> {
     writeln!(w, "## {}\n", c.heading)?;
     writeln!(w, "{}\n", c.description)?;
@@ -112,6 +120,9 @@ pub fn write_citations(path: &Path, config: &RnaConfig, version: &str, commit: &
     }
     if config.qualimap.enabled {
         write_citation(&mut w, &QUALIMAP)?;
+    }
+    if config.bigwig.enabled {
+        write_citation(&mut w, &BIGWIG)?;
     }
 
     w.flush()?;

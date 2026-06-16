@@ -165,6 +165,10 @@ pub struct RnaConfig {
     /// Qualimap RNA-Seq QC configuration.
     #[serde(default)]
     pub qualimap: QualimapConfig,
+
+    /// bigWig genome coverage track configuration.
+    #[serde(default)]
+    pub bigwig: BigwigConfig,
 }
 
 // ============================================================================
@@ -595,6 +599,30 @@ pub struct QualimapConfig {
 }
 
 impl Default for QualimapConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+/// Configuration for bigWig genome coverage tracks.
+///
+/// When enabled, produces nf-core/rnaseq-compatible bigWig files using
+/// bedtools genomecov-equivalent parameters (`-split -bg`, plus per-strand
+/// `-split -du -strand +/- -bg` for stranded libraries).
+///
+/// Example:
+/// ```yaml
+/// bigwig:
+///   enabled: true
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct BigwigConfig {
+    /// Whether to generate bigWig coverage tracks. Defaults to true.
+    pub enabled: bool,
+}
+
+impl Default for BigwigConfig {
     fn default() -> Self {
         Self { enabled: true }
     }

@@ -6,7 +6,8 @@
 //! 8 RSeQC-equivalent tools (bam_stat, infer_experiment, read_duplication,
 //! read_distribution, junction_annotation, junction_saturation, inner_distance, TIN),
 //! preseq library complexity extrapolation, samtools-compatible outputs
-//! (flagstat, idxstats, stats), and Qualimap gene body coverage profiling.
+//! (flagstat, idxstats, stats), Qualimap gene body coverage profiling, and
+//! nf-core/rnaseq-compatible bigWig coverage tracks.
 //! Individual tools can be disabled via the YAML config file.
 
 mod citations;
@@ -1043,6 +1044,7 @@ fn process_single_bam(
             None
         },
         qualimap_index.as_ref(),
+        config.bigwig.enabled,
         Some(&pb),
     )?;
     let count_duration = count_start.elapsed();
@@ -1419,6 +1421,40 @@ fn process_single_bam(
         let p = qm_dir.display().to_string();
         ui.output_item("Qualimap", &format!("{p}/*"));
         written_outputs.push(("Qualimap".into(), p));
+    }
+
+    // === bigWig genome coverage tracks ===
+    if let Some(ref gc_result) = count_result.genomecov {
+        let bw_dir = if params.flat_output {
+            outdir.to_path_buf()
+        } else {
+            outdir.join("bigwig")
+        };
+
+        let chrom_sizes: Vec<(String, u64)> = {
+            let reader = rust_htslib::bam::Reader::from_path(bam_path)
+                .with_context(|| format!("Failed to open BAM for bigWig chrom sizes: {}", bam_path))?;
+            let header = reader.header();
+            (0..header.target_count())
+                .map(|tid| {
+                    let name = String::from_utf8_lossy(header.tid2name(tid)).to_string();
+                    let len = header.target_len(tid).unwrap_or(0);
+                    (name, len)
+                })
+                .collect()
+        };
+
+        let bw_outputs = rna::bigwig::write_bigwig_tracks(
+            &bw_dir,
+            &sample_name,
+            gc_result,
+            &chrom_sizes,
+            threads,
+        )?;
+        for (label, path) in bw_outputs {
+            ui.output_item(&label, &path);
+            written_outputs.push((label, path));
+        }
     }
 
     // === RSeQC analyses (post-processing of single-pass accumulators) ===

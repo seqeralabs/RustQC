@@ -13,6 +13,7 @@ use crate::gtf::Gene;
 use crate::io::format_count;
 use crate::rna::qualimap::QualimapAccum;
 use crate::rna::rseqc::accumulators::{RseqcAccumulators, RseqcAnnotations, RseqcConfig};
+use crate::rna::bigwig::GenomeCovAccum;
 use crate::Strandedness;
 use anyhow::{Context, Result};
 use coitrees::{COITree, Interval, IntervalTree};
@@ -299,6 +300,8 @@ pub struct CountResult {
     /// Qualimap RNA-Seq QC results (if enabled).
     #[allow(dead_code)]
     pub qualimap: Option<crate::rna::qualimap::QualimapResult>,
+    /// Genome coverage for bigWig tracks (if enabled).
+    pub genomecov: Option<crate::rna::bigwig::GenomeCovResult>,
 }
 
 /// Metadata stored with each interval in the cache-oblivious interval tree.
@@ -542,6 +545,9 @@ struct ChromResult {
 
     /// Qualimap RNA-Seq QC accumulator (if enabled).
     qualimap: Option<QualimapAccum>,
+
+    /// Genome coverage accumulator for bigWig tracks (if enabled).
+    genomecov: Option<GenomeCovAccum>,
 }
 
 impl ChromResult {
@@ -575,6 +581,7 @@ impl ChromResult {
             fc_biotype_ambiguous: 0,
             fc_biotype_no_features: 0,
             qualimap: None,
+            genomecov: None,
         }
     }
 
@@ -664,6 +671,14 @@ impl ChromResult {
                 self_qm.merge(other_qm);
             } else {
                 self.qualimap = Some(other_qm);
+            }
+        }
+        // Merge genome coverage accumulators
+        if let Some(other_gc) = other.genomecov {
+            if let Some(ref mut self_gc) = self.genomecov {
+                self_gc.merge(other_gc);
+            } else {
+                self.genomecov = Some(other_gc);
             }
         }
     }
@@ -979,6 +994,8 @@ fn process_chromosome_batch(
     rseqc_annotations: Option<&RseqcAnnotations>,
     htslib_threads: usize,
     qualimap_index: Option<&crate::rna::qualimap::QualimapIndex>,
+    genomecov_enabled: bool,
+    tid_to_len: &[u64],
     gene_to_biotype: &[u16],
     num_biotypes: usize,
     progress: Option<&ProgressBar>,
@@ -986,6 +1003,18 @@ fn process_chromosome_batch(
     let mut result = ChromResult::new(num_genes, num_biotypes);
     if qualimap_index.is_some() {
         result.qualimap = Some(crate::rna::qualimap::QualimapAccum::new(stranded));
+    }
+    if genomecov_enabled {
+        let batch_chroms: Vec<(String, u64)> = tids
+            .iter()
+            .map(|&tid| {
+                (
+                    tid_to_name[tid as usize].clone(),
+                    tid_to_len[tid as usize],
+                )
+            })
+            .collect();
+        result.genomecov = Some(GenomeCovAccum::new(stranded, &batch_chroms));
     }
     let mut rseqc_accums = rseqc_config.map(|cfg| RseqcAccumulators::new(cfg, rseqc_annotations));
 
@@ -1074,6 +1103,15 @@ fn process_chromosome_batch(
                 }
             }
 
+            // --- bigWig genome coverage (bedtools genomecov equivalent) ---
+            // Only skips unmapped reads; uses BAM reference names.
+            if let Some(ref mut gc) = result.genomecov {
+                let tid = record.tid();
+                if tid >= 0 && (tid as usize) < tid_to_name.len() {
+                    gc.process_read(&record, &tid_to_name[tid as usize], stranded);
+                }
+            }
+
             // Resolve chromosome for gene counting
             let rec_tid = record.tid();
             let chrom = if rec_tid >= 0 && (rec_tid as usize) < tid_to_gtf_chrom.len() {
@@ -1152,6 +1190,7 @@ pub fn count_reads(
     rseqc_config: Option<&RseqcConfig>,
     rseqc_annotations: Option<&RseqcAnnotations>,
     qualimap_index: Option<&crate::rna::qualimap::QualimapIndex>,
+    genomecov_enabled: bool,
     progress: Option<&ProgressBar>,
 ) -> Result<CountResult> {
     // Build gene ID interner for allocation-free lookups in the hot loop
@@ -1300,6 +1339,8 @@ pub fn count_reads(
                         rseqc_annotations,
                         htslib_threads,
                         qualimap_index,
+                        genomecov_enabled,
+                        &tid_to_len,
                         &gene_to_biotype,
                         num_biotypes,
                         progress,
@@ -1332,6 +1373,16 @@ pub fn count_reads(
             rseqc_config.map(|cfg| RseqcAccumulators::new(cfg, rseqc_annotations));
         let mut qualimap_accum: Option<crate::rna::qualimap::QualimapAccum> =
             qualimap_index.map(|_| crate::rna::qualimap::QualimapAccum::new(stranded));
+        let mut genomecov_accum = if genomecov_enabled {
+            let all_chroms: Vec<(String, u64)> = tid_to_name
+                .iter()
+                .zip(tid_to_len.iter())
+                .map(|(name, len)| (name.clone(), *len))
+                .collect();
+            Some(GenomeCovAccum::new(stranded, &all_chroms))
+        } else {
+            None
+        };
 
         // Pre-compute resolved chromosome names for RSeQC tools
         // (apply chromosome prefix and mapping, same as parallel path)
@@ -1417,6 +1468,14 @@ pub fn count_reads(
                 }
             }
 
+            // --- bigWig genome coverage (bedtools genomecov equivalent) ---
+            if let Some(ref mut gc) = genomecov_accum {
+                let tid = record.tid();
+                if tid >= 0 && (tid as usize) < tid_to_name.len() {
+                    gc.process_read(&record, &tid_to_name[tid as usize], stranded);
+                }
+            }
+
             // Resolve chromosome for gene counting
             let tid = record.tid();
             let chrom = if tid >= 0 && (tid as usize) < tid_to_rseqc_chrom.len() {
@@ -1442,6 +1501,7 @@ pub fn count_reads(
 
         result.unmatched_mates = mate_buffer;
         result.qualimap = qualimap_accum;
+        result.genomecov = genomecov_accum;
         (result, rseqc_accums)
     };
 
@@ -1715,6 +1775,7 @@ pub fn count_reads(
             }
             _ => None,
         },
+        genomecov: merged.genomecov.map(Into::into),
     })
 }
 
