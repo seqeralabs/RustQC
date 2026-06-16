@@ -158,8 +158,8 @@ pub fn write_flagstat(result: &BamStatResult, output_path: &Path) -> Result<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rna::bam::{self, Read as BamRead};
     use crate::rna::rseqc::accumulators::BamStatAccum;
-    use rust_htslib::bam::{self, Read as BamRead};
     use std::io::Read;
     #[test]
     fn test_flagstat_format() {

@@ -2,8 +2,4 @@
 # https://github.com/rustsec/rustsec/tree/main/cargo-audit
 
 [advisories]
-# custom_derive v0.1.7 — unmaintained crate pulled in transitively by
-# rust-htslib v1.0.0.  There is no newer rust-htslib release that drops it,
-# and this is an "unmaintained" notice, not a vulnerability.
-# Re-evaluate when rust-htslib releases a version without custom_derive.
-ignore = ["RUSTSEC-2025-0058"]
+ignore = []
