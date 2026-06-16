@@ -366,34 +366,6 @@ impl GenomeCovAccum {
     }
 }
 
-/// Clip bedGraph intervals to chromosome sizes (UCSC `bedClip` behaviour).
-///
-/// The streaming accumulator already clamps interval ends to each chromosome's
-/// length, so in the normal pipeline this is defensive: it guarantees `bedClip`
-/// parity and drops any entry whose chromosome is absent from `chrom_sizes`.
-pub fn clip_bedgraph(
-    entries: Vec<BedGraphEntry>,
-    chrom_sizes: &[(String, u64)],
-) -> Vec<BedGraphEntry> {
-    let sizes: std::collections::HashMap<&str, u64> =
-        chrom_sizes.iter().map(|(n, s)| (n.as_str(), *s)).collect();
-
-    entries
-        .into_iter()
-        .filter_map(|(chrom, start, end, val)| {
-            let size = *sizes.get(chrom.as_str())? as u32;
-            if start >= size {
-                return None;
-            }
-            let clipped_end = end.min(size);
-            if start >= clipped_end {
-                return None;
-            }
-            Some((chrom, start, clipped_end, val))
-        })
-        .collect()
-}
-
 /// Return a track's bedGraph intervals grouped in `chrom_order` (BAM header)
 /// order. Intervals within each chromosome are already in ascending position
 /// order from the streaming sweep, so a stable sort by chromosome suffices.
@@ -523,14 +495,6 @@ mod tests {
             let brute = brute_force_bedgraph("c", size, &blocks);
             assert_eq!(stream, brute, "mismatch on trial {trial}");
         }
-    }
-
-    #[test]
-    fn test_clip_bedgraph() {
-        let entries = vec![("chr1".to_string(), 100, 200, 5)];
-        let sizes = vec![("chr1".to_string(), 150u64)];
-        let clipped = clip_bedgraph(entries, &sizes);
-        assert_eq!(clipped, vec![("chr1".to_string(), 100, 150, 5)]);
     }
 
     #[test]

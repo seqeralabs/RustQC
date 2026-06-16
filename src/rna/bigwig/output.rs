@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use bigtools::beddata::BedParserStreamingIterator;
 use bigtools::{BigWigWrite, Value};
 
-use super::accumulator::{clip_bedgraph, track_to_bedgraph, GenomeCovResult, TrackAccum};
+use super::accumulator::{track_to_bedgraph, GenomeCovResult, TrackAccum};
 
 /// Write all bigWig coverage tracks for a sample.
 ///
@@ -63,7 +63,9 @@ pub fn write_bigwig_tracks(
 ///
 /// Skips writing when the track has no coverage intervals (e.g. an empty
 /// per-strand track), matching upstream behaviour where `bedGraphToBigWig`
-/// receives an empty clipped bedGraph.
+/// receives an empty bedGraph. Interval ends are already clamped to each
+/// chromosome's length during accumulation, so no separate `bedClip` step is
+/// needed.
 fn write_track_bigwig(
     path: &Path,
     track: &TrackAccum,
@@ -71,15 +73,14 @@ fn write_track_bigwig(
     threads: usize,
 ) -> Result<bool> {
     let bedgraph = track_to_bedgraph(track, chrom_sizes);
-    let clipped = clip_bedgraph(bedgraph, chrom_sizes);
-    if clipped.is_empty() {
+    if bedgraph.is_empty() {
         log::debug!(
             "Skipping empty bigWig track (no coverage intervals): {}",
             path.display()
         );
         return Ok(false);
     }
-    write_bedgraph_bigwig(path, clipped, chrom_sizes, threads)?;
+    write_bedgraph_bigwig(path, bedgraph, chrom_sizes, threads)?;
     Ok(true)
 }
 
