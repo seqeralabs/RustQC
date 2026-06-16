@@ -1005,11 +1005,7 @@ fn process_chromosome_batch(
         result.qualimap = Some(crate::rna::qualimap::QualimapAccum::new(stranded));
     }
     if genomecov_enabled {
-        let batch_chroms: Vec<(String, u64)> = tids
-            .iter()
-            .map(|&tid| (tid_to_name[tid as usize].clone(), tid_to_len[tid as usize]))
-            .collect();
-        result.genomecov = Some(GenomeCovAccum::new(stranded, &batch_chroms));
+        result.genomecov = Some(GenomeCovAccum::new(stranded));
     }
     let mut rseqc_accums = rseqc_config.map(|cfg| RseqcAccumulators::new(cfg, rseqc_annotations));
 
@@ -1103,7 +1099,8 @@ fn process_chromosome_batch(
             if let Some(ref mut gc) = result.genomecov {
                 let tid = record.tid();
                 if tid >= 0 && (tid as usize) < tid_to_name.len() {
-                    gc.process_read(&record, &tid_to_name[tid as usize], stranded);
+                    let tid = tid as usize;
+                    gc.process_read(&record, tid as u32, &tid_to_name[tid], tid_to_len[tid]);
                 }
             }
 
@@ -1129,6 +1126,12 @@ fn process_chromosome_batch(
                 &mut mate_buffer,
             );
         }
+    }
+
+    // Finalize the active chromosome's coverage so the accumulator holds only
+    // sparse bedGraph intervals (no live per-base state) before merging.
+    if let Some(ref mut gc) = result.genomecov {
+        gc.finish();
     }
 
     // Move unmatched mates into the result for cross-chromosome reconciliation
@@ -1369,12 +1372,7 @@ pub fn count_reads(
         let mut qualimap_accum: Option<crate::rna::qualimap::QualimapAccum> =
             qualimap_index.map(|_| crate::rna::qualimap::QualimapAccum::new(stranded));
         let mut genomecov_accum = if genomecov_enabled {
-            let all_chroms: Vec<(String, u64)> = tid_to_name
-                .iter()
-                .zip(tid_to_len.iter())
-                .map(|(name, len)| (name.clone(), *len))
-                .collect();
-            Some(GenomeCovAccum::new(stranded, &all_chroms))
+            Some(GenomeCovAccum::new(stranded))
         } else {
             None
         };
@@ -1467,7 +1465,8 @@ pub fn count_reads(
             if let Some(ref mut gc) = genomecov_accum {
                 let tid = record.tid();
                 if tid >= 0 && (tid as usize) < tid_to_name.len() {
-                    gc.process_read(&record, &tid_to_name[tid as usize], stranded);
+                    let tid = tid as usize;
+                    gc.process_read(&record, tid as u32, &tid_to_name[tid], tid_to_len[tid]);
                 }
             }
 
@@ -1496,6 +1495,11 @@ pub fn count_reads(
 
         result.unmatched_mates = mate_buffer;
         result.qualimap = qualimap_accum;
+        // Finalize the active chromosome's coverage before handing the
+        // accumulator on (leaves only sparse bedGraph intervals).
+        if let Some(ref mut gc) = genomecov_accum {
+            gc.finish();
+        }
         result.genomecov = genomecov_accum;
         (result, rseqc_accums)
     };
