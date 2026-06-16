@@ -27,8 +27,8 @@ use crate::gtf::Gene;
 ///
 /// # Returns
 /// Vector of `(intron_start, intron_end)` tuples (0-based coordinates).
-pub fn fetch_introns(start_pos: u64, cigar: &[rust_htslib::bam::record::Cigar]) -> Vec<(u64, u64)> {
-    use rust_htslib::bam::record::Cigar::*;
+pub fn fetch_introns(start_pos: u64, cigar: &[crate::rna::bam::record::Cigar]) -> Vec<(u64, u64)> {
+    use crate::rna::bam::record::Cigar::*;
 
     let mut pos = start_pos;
     let mut introns = Vec::new();
@@ -202,7 +202,7 @@ mod tests {
 
     #[test]
     fn test_fetch_introns_simple() {
-        use rust_htslib::bam::record::Cigar::*;
+        use crate::rna::bam::record::Cigar::*;
         // 50M500N50M — one intron at position 100+50=150 to 150+500=650
         let cigar = vec![Match(50), RefSkip(500), Match(50)];
         let introns = fetch_introns(100, &cigar);
@@ -212,7 +212,7 @@ mod tests {
 
     #[test]
     fn test_fetch_introns_multiple() {
-        use rust_htslib::bam::record::Cigar::*;
+        use crate::rna::bam::record::Cigar::*;
         // 10M500N20M300N10M — two introns
         let cigar = vec![Match(10), RefSkip(500), Match(20), RefSkip(300), Match(10)];
         let introns = fetch_introns(100, &cigar);
@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn test_fetch_introns_with_deletions() {
-        use rust_htslib::bam::record::Cigar::*;
+        use crate::rna::bam::record::Cigar::*;
         // 10M5D10M500N10M
         let cigar = vec![Match(10), Del(5), Match(10), RefSkip(500), Match(10)];
         let introns = fetch_introns(100, &cigar);
@@ -233,7 +233,7 @@ mod tests {
 
     #[test]
     fn test_fetch_introns_no_introns() {
-        use rust_htslib::bam::record::Cigar::*;
+        use crate::rna::bam::record::Cigar::*;
         let cigar = vec![Match(100)];
         let introns = fetch_introns(100, &cigar);
         assert!(introns.is_empty());
@@ -241,7 +241,7 @@ mod tests {
 
     #[test]
     fn test_fetch_introns_soft_clip_no_advance() {
-        use rust_htslib::bam::record::Cigar::*;
+        use crate::rna::bam::record::Cigar::*;
         // 5S50M500N50M — soft clip should NOT advance position
         let cigar = vec![SoftClip(5), Match(50), RefSkip(500), Match(50)];
         let introns = fetch_introns(100, &cigar);

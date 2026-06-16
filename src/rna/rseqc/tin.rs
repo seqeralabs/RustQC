@@ -4,7 +4,7 @@
 //! uniformity across sampled exonic positions. Reimplementation of
 //! RSeQC's `tin.py` tool.
 
-use rust_htslib::bam;
+use crate::rna::bam;
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasher, Hasher};
 use std::io::Write;
@@ -638,7 +638,7 @@ fn compute_tin(coverage: &[u32], n_total_positions: usize) -> f64 {
 /// Fill `buf` with aligned blocks from the CIGAR, reusing the existing
 /// Vec capacity to avoid per-read heap allocation.
 fn fill_aligned_blocks(record: &bam::Record, buf: &mut Vec<(u64, u64)>) {
-    use rust_htslib::bam::record::Cigar;
+    use crate::rna::bam::record::Cigar;
 
     buf.clear();
     let mut pos = record.pos() as u64;
