@@ -4,9 +4,9 @@
 //! sequencing depth using the Good-Toulmin rational function extrapolation
 //! method, matching the behavior of preseq v3.
 
+use crate::rna::bam;
 use anyhow::{bail, Context, Result};
 use log::debug;
-use rust_htslib::bam;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
@@ -154,7 +154,7 @@ impl PreseqAccum {
 
         let tid = record.tid();
         let start = record.pos();
-        let end = record.cigar().end_pos();
+        let end = record.cigar().end_pos() as i64;
 
         let info = MateInfo { tid, start, end };
 

@@ -9,9 +9,9 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::rna::bam;
+use crate::rna::bam::record::Cigar;
 use coitrees::IntervalTree;
-use rust_htslib::bam;
-use rust_htslib::bam::record::Cigar;
 
 use crate::Strandedness;
 

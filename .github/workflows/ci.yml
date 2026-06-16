@@ -10,6 +10,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  CXX: g++
 
 jobs:
   test:
@@ -36,12 +37,11 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake zlib1g-dev libbz2-dev liblzma-dev \
-            libcurl4-openssl-dev libssl-dev libfontconfig1-dev pkg-config clang
+          sudo apt-get install -y g++ libfontconfig1-dev pkg-config
 
       - name: Install macOS build deps
         if: runner.os == 'macOS'
-        run: brew install bzip2 xz
+        run: brew install fontconfig
 
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # ratchet:Swatinem/rust-cache@v2.9.1
 
@@ -87,8 +87,7 @@ jobs:
       - name: Install Linux build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake zlib1g-dev libbz2-dev liblzma-dev \
-            libcurl4-openssl-dev libssl-dev libfontconfig1-dev pkg-config clang
+          sudo apt-get install -y g++ libfontconfig1-dev pkg-config
 
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # ratchet:Swatinem/rust-cache@v2.9.1
 
@@ -103,13 +102,12 @@ jobs:
       - name: Install Rust MSRV toolchain
         uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # ratchet:dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.87"
+          toolchain: "1.89"
 
       - name: Install Linux build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake zlib1g-dev libbz2-dev liblzma-dev \
-            libcurl4-openssl-dev libssl-dev libfontconfig1-dev pkg-config clang
+          sudo apt-get install -y g++ libfontconfig1-dev pkg-config
 
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # ratchet:Swatinem/rust-cache@v2.9.1
 

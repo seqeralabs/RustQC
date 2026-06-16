@@ -1006,8 +1006,8 @@ fn write_gc_depth(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rna::bam::{self, Read as BamRead};
     use crate::rna::rseqc::accumulators::BamStatAccum;
-    use rust_htslib::bam::{self, Read as BamRead};
     use std::io::Read;
     #[test]
     fn test_stats_sn_format() {

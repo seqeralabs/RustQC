@@ -9,8 +9,8 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rust_htslib::bam;
-use rust_htslib::bam::header::HeaderRecord;
+use rustqc::rna::bam;
+use rustqc::rna::bam::header::{HeaderRecord, HeaderView};
 
 /// Helper: get the path to the rustqc binary.
 ///
@@ -129,11 +129,11 @@ fn write_bam_fixture(path: &Path, chroms: &[(&str, u64)], sam_lines: &[&str]) {
         header.push_record(
             HeaderRecord::new(b"SQ")
                 .push_tag(b"SN", *chrom)
-                .push_tag(b"LN", *len as i64),
+                .push_tag(b"LN", len.to_string()),
         );
     }
 
-    let header_view = bam::HeaderView::from_header(&header);
+    let header_view = HeaderView::from_header(&header);
     let mut writer = bam::Writer::from_path(path, &header, bam::Format::Bam).unwrap();
     for line in sam_lines {
         let record = bam::Record::from_sam(&header_view, line.as_bytes()).unwrap();
