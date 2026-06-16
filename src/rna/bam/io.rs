@@ -9,8 +9,11 @@ use super::align_record::{alignment_to_record, Record};
 use anyhow::{Context, Result};
 use noodles::bam as noodles_bam;
 use noodles::bgzf;
+use noodles::bgzf::io::Seek as _;
+use noodles::core::region::Interval;
 use noodles::core::Region;
 use noodles::cram as noodles_cram;
+use noodles::csi::binning_index::index::reference_sequence::bin::Chunk;
 use noodles::fasta as noodles_fasta;
 use noodles::sam as noodles_sam;
 
@@ -249,14 +252,34 @@ impl Read for Reader {
     }
 }
 
+/// Lazy streaming cursor for indexed BAM reads.
+///
+/// Mirrors the chunk state machine in `noodles_csi::io::Query` so records are
+/// decoded one at a time directly from the BGZF stream, instead of buffering an
+/// entire reference sequence (or all unmapped reads) in memory. This matters
+/// because dupRadar fetches one chromosome per worker thread concurrently, so
+/// the old buffering cost scaled as reference size times thread count.
+enum BamCursor {
+    /// No active fetch, or the current fetch has been exhausted.
+    Done,
+    /// Streaming the mapped records of a single reference via its index chunks.
+    Region {
+        chunks: std::vec::IntoIter<Chunk>,
+        /// End virtual position of the chunk currently being read; `None` means
+        /// the next chunk still needs to be seeked to.
+        chunk_end: Option<bgzf::VirtualPosition>,
+        reference_sequence_id: usize,
+    },
+    /// Streaming unmapped records from a seeked position to end of file.
+    Unmapped,
+}
+
 enum IndexedBackend {
     Bam {
         reader: noodles_bam::io::IndexedReader<bgzf::io::Reader<File>>,
         header: Header,
-        query_records: Vec<noodles_bam::Record>,
-        query_idx: usize,
-        unmapped_records: Vec<noodles_bam::Record>,
-        unmapped_idx: usize,
+        scratch: noodles_bam::Record,
+        cursor: BamCursor,
     },
     Cram {
         reader: noodles_cram::io::IndexedReader<File>,
@@ -308,10 +331,8 @@ impl IndexedReader {
             IndexedBackend::Bam {
                 reader,
                 header,
-                query_records: Vec::new(),
-                query_idx: 0,
-                unmapped_records: Vec::new(),
-                unmapped_idx: 0,
+                scratch: noodles_bam::Record::default(),
+                cursor: BamCursor::Done,
             }
         };
         Ok(Self {
@@ -353,27 +374,19 @@ impl IndexedReader {
 
     fn fetch_tid(&mut self, tid: u32) -> Result<()> {
         match &mut self.backend {
-            IndexedBackend::Bam {
-                reader,
-                header,
-                query_records,
-                query_idx,
-                unmapped_records,
-                unmapped_idx,
-                ..
-            } => {
-                *unmapped_records = Vec::new();
-                *unmapped_idx = 0;
-                let region = region_for_tid(header, tid);
-                let mut fetched = Vec::new();
-                let query = reader
-                    .query(header.noodles_header(), &region)
-                    .with_context(|| format!("failed to query tid {tid}"))?;
-                for result in query.records() {
-                    fetched.push(result.context("failed to read queried BAM record")?);
-                }
-                *query_records = fetched;
-                *query_idx = 0;
+            IndexedBackend::Bam { reader, cursor, .. } => {
+                // Resolve the chunks covering the whole reference straight from
+                // the index and stream them lazily, rather than buffering every
+                // record on the reference in memory.
+                let chunks = reader
+                    .index()
+                    .query(tid as usize, Interval::from(..))
+                    .with_context(|| format!("failed to query index for tid {tid}"))?;
+                *cursor = BamCursor::Region {
+                    chunks: chunks.into_iter(),
+                    chunk_end: None,
+                    reference_sequence_id: tid as usize,
+                };
                 Ok(())
             }
             IndexedBackend::Cram {
@@ -401,26 +414,34 @@ impl IndexedReader {
     }
 
     fn fetch_unmapped(&mut self) -> Result<()> {
+        let source_path = self.source_path.clone();
         match &mut self.backend {
-            IndexedBackend::Bam {
-                reader,
-                query_records,
-                query_idx,
-                unmapped_records,
-                unmapped_idx,
-                ..
-            } => {
-                query_records.clear();
-                *query_idx = 0;
-                let mut fetched = Vec::new();
-                for result in reader
-                    .query_unmapped()
-                    .context("failed to query unmapped BAM reads")?
-                {
-                    fetched.push(result.context("failed to read unmapped BAM record")?);
+            IndexedBackend::Bam { reader, cursor, .. } => {
+                // Seek to the start of the unmapped read region and stream from
+                // there, filtering for unmapped records as we go.
+                match reader.index().last_first_record_start_position() {
+                    Some(pos) => {
+                        reader
+                            .get_mut()
+                            .seek_to_virtual_position(pos)
+                            .context("failed to seek to unmapped BAM reads")?;
+                    }
+                    None => {
+                        // The index carries no metadata pseudo-bin, so there is
+                        // no recorded unmapped offset. Reopen and stream from the
+                        // first record, relying on the per-record unmapped filter.
+                        let mut fresh = noodles_bam::io::indexed_reader::Builder::default()
+                            .build_from_path(&source_path)
+                            .with_context(|| {
+                                format!("failed to reopen indexed BAM {}", source_path.display())
+                            })?;
+                        fresh
+                            .read_header()
+                            .context("failed to read indexed BAM header")?;
+                        *reader = fresh;
+                    }
                 }
-                *unmapped_records = fetched;
-                *unmapped_idx = 0;
+                *cursor = BamCursor::Unmapped;
                 Ok(())
             }
             IndexedBackend::Cram {
@@ -453,31 +474,96 @@ impl Read for IndexedReader {
     fn read(&mut self, record: &mut Record) -> Option<Result<()>> {
         match &mut self.backend {
             IndexedBackend::Bam {
+                reader,
                 header,
-                query_records,
-                query_idx,
-                unmapped_records,
-                unmapped_idx,
-                ..
-            } => {
-                if *unmapped_idx < unmapped_records.len() {
-                    let idx = *unmapped_idx;
-                    *unmapped_idx += 1;
-                    return Some(
-                        Record::from_bam(header.noodles_header(), &unmapped_records[idx])
-                            .and_then(|loaded| store_record(record, loaded)),
-                    );
+                scratch,
+                cursor,
+            } => loop {
+                // Take ownership of the cursor each iteration so `reader` can be
+                // mutated (seek/read) and the new state written back without
+                // fighting the borrow checker. Early returns leave the cursor as
+                // `Done`, which is the correct exhausted state.
+                match std::mem::replace(cursor, BamCursor::Done) {
+                    BamCursor::Done => return None,
+                    BamCursor::Unmapped => match reader.read_record(scratch) {
+                        Ok(0) => return None,
+                        Ok(_) => {
+                            *cursor = BamCursor::Unmapped;
+                            if scratch.flags().is_unmapped() {
+                                return Some(
+                                    Record::from_bam(header.noodles_header(), scratch)
+                                        .and_then(|loaded| store_record(record, loaded)),
+                                );
+                            }
+                            // Mapped record in the unmapped tail: skip and continue.
+                        }
+                        Err(e) => return Some(Err(e.into())),
+                    },
+                    BamCursor::Region {
+                        mut chunks,
+                        chunk_end,
+                        reference_sequence_id,
+                    } => match chunk_end {
+                        None => match chunks.next() {
+                            Some(chunk) => {
+                                if let Err(e) =
+                                    reader.get_mut().seek_to_virtual_position(chunk.start())
+                                {
+                                    return Some(Err(anyhow::Error::new(e)
+                                        .context("failed to seek to BAM index chunk")));
+                                }
+                                *cursor = BamCursor::Region {
+                                    chunks,
+                                    chunk_end: Some(chunk.end()),
+                                    reference_sequence_id,
+                                };
+                            }
+                            None => return None,
+                        },
+                        Some(end) => {
+                            if reader.get_mut().virtual_position() >= end {
+                                // Reached the end of this chunk; advance to the next.
+                                *cursor = BamCursor::Region {
+                                    chunks,
+                                    chunk_end: None,
+                                    reference_sequence_id,
+                                };
+                                continue;
+                            }
+                            match reader.read_record(scratch) {
+                                Ok(0) => {
+                                    *cursor = BamCursor::Region {
+                                        chunks,
+                                        chunk_end: None,
+                                        reference_sequence_id,
+                                    };
+                                }
+                                Ok(_) => {
+                                    *cursor = BamCursor::Region {
+                                        chunks,
+                                        chunk_end: Some(end),
+                                        reference_sequence_id,
+                                    };
+                                    // A chunk may begin with a few records from a
+                                    // neighbouring reference; keep only ours.
+                                    let on_reference = match scratch.reference_sequence_id() {
+                                        Some(Ok(id)) => id == reference_sequence_id,
+                                        Some(Err(e)) => return Some(Err(e.into())),
+                                        None => false,
+                                    };
+                                    if on_reference {
+                                        return Some(
+                                            Record::from_bam(header.noodles_header(), scratch)
+                                                .and_then(|loaded| store_record(record, loaded)),
+                                        );
+                                    }
+                                }
+                                Err(e) => return Some(Err(e.into())),
+                            }
+                        }
+                    },
                 }
-                if *query_idx >= query_records.len() {
-                    return None;
-                }
-                let idx = *query_idx;
-                *query_idx += 1;
-                Some(
-                    Record::from_bam(header.noodles_header(), &query_records[idx])
-                        .and_then(|loaded| store_record(record, loaded)),
-                )
-            }
+            },
             IndexedBackend::Cram {
                 query_records,
                 query_idx,
