@@ -1105,9 +1105,12 @@ fn sort_bedgraph_file(path: &Path) {
     lines.sort_by(|a, b| {
         let pa: Vec<&str> = a.split('\t').collect();
         let pb: Vec<&str> = b.split('\t').collect();
-        pa[0]
-            .cmp(pb[0])
-            .then_with(|| pa[1].parse::<u64>().unwrap().cmp(&pb[1].parse::<u64>().unwrap()))
+        pa[0].cmp(pb[0]).then_with(|| {
+            pa[1]
+                .parse::<u64>()
+                .unwrap()
+                .cmp(&pb[1].parse::<u64>().unwrap())
+        })
     });
     fs::write(path, lines.join("\n") + "\n").unwrap();
 }
@@ -1130,13 +1133,7 @@ fn test_bigwig_combined_matches_bedtools_genomecov() {
     let ref_bw = root.join("ref.bigWig");
 
     let status = Command::new(&bedtools)
-        .args([
-            "genomecov",
-            "-ibam",
-            "tests/data/test.bam",
-            "-split",
-            "-bg",
-        ])
+        .args(["genomecov", "-ibam", "tests/data/test.bam", "-split", "-bg"])
         .stdout(std::process::Stdio::from(
             std::fs::File::create(&bg).expect("create bedGraph"),
         ))

@@ -1432,8 +1432,9 @@ fn process_single_bam(
         };
 
         let chrom_sizes: Vec<(String, u64)> = {
-            let reader = rust_htslib::bam::Reader::from_path(bam_path)
-                .with_context(|| format!("Failed to open BAM for bigWig chrom sizes: {}", bam_path))?;
+            let reader = rust_htslib::bam::Reader::from_path(bam_path).with_context(|| {
+                format!("Failed to open BAM for bigWig chrom sizes: {}", bam_path)
+            })?;
             let header = reader.header();
             (0..header.target_count())
                 .map(|tid| {

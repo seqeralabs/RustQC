@@ -25,8 +25,12 @@ pub fn write_bigwig_tracks(
     chrom_sizes: &[(String, u64)],
     threads: usize,
 ) -> Result<Vec<(String, String)>> {
-    std::fs::create_dir_all(outdir)
-        .with_context(|| format!("Failed to create bigwig output directory: {}", outdir.display()))?;
+    std::fs::create_dir_all(outdir).with_context(|| {
+        format!(
+            "Failed to create bigwig output directory: {}",
+            outdir.display()
+        )
+    })?;
 
     let mut written = Vec::new();
 

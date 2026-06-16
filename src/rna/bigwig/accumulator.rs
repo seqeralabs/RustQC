@@ -135,10 +135,7 @@ impl GenomeCovAccum {
         let (forward, reverse) = if stranded == Strandedness::Unstranded {
             (None, None)
         } else {
-            (
-                Some(TrackAccum::new(chroms)),
-                Some(TrackAccum::new(chroms)),
-            )
+            (Some(TrackAccum::new(chroms)), Some(TrackAccum::new(chroms)))
         };
         Self {
             combined: TrackAccum::new(chroms),
@@ -341,10 +338,8 @@ pub fn clip_bedgraph(
     entries: Vec<(String, u32, u32, u32)>,
     chrom_sizes: &[(String, u64)],
 ) -> Vec<(String, u32, u32, u32)> {
-    let sizes: std::collections::HashMap<&str, u64> = chrom_sizes
-        .iter()
-        .map(|(n, s)| (n.as_str(), *s))
-        .collect();
+    let sizes: std::collections::HashMap<&str, u64> =
+        chrom_sizes.iter().map(|(n, s)| (n.as_str(), *s)).collect();
 
     entries
         .into_iter()

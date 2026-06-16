@@ -11,9 +11,9 @@
 
 use crate::gtf::Gene;
 use crate::io::format_count;
+use crate::rna::bigwig::GenomeCovAccum;
 use crate::rna::qualimap::QualimapAccum;
 use crate::rna::rseqc::accumulators::{RseqcAccumulators, RseqcAnnotations, RseqcConfig};
-use crate::rna::bigwig::GenomeCovAccum;
 use crate::Strandedness;
 use anyhow::{Context, Result};
 use coitrees::{COITree, Interval, IntervalTree};
@@ -1007,12 +1007,7 @@ fn process_chromosome_batch(
     if genomecov_enabled {
         let batch_chroms: Vec<(String, u64)> = tids
             .iter()
-            .map(|&tid| {
-                (
-                    tid_to_name[tid as usize].clone(),
-                    tid_to_len[tid as usize],
-                )
-            })
+            .map(|&tid| (tid_to_name[tid as usize].clone(), tid_to_len[tid as usize]))
             .collect();
         result.genomecov = Some(GenomeCovAccum::new(stranded, &batch_chroms));
     }
