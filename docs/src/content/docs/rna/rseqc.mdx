@@ -568,8 +568,8 @@ RustQC's TIN output uses the same file format and column names as RSeQC's
   TIN scores may differ from RSeQC's `tin.py`. Both tools sample identical
   positions and apply identical flag filters, but they count per-position
   coverage differently: upstream uses pysam's pileup engine (`bam_plp_auto`)
-  while RustQC uses CIGAR-derived aligned blocks via the BAM index. The htslib
-  pileup engine uses a different internal read traversal that can produce
+  while RustQC uses CIGAR-derived aligned blocks via the BAM index. pysam's pileup
+  engine uses a different internal read traversal that can produce
   different coverage counts at certain positions, leading to per-transcript TIN
   differences. Summary-level statistics (mean, median, stdev) remain closely
   aligned across all benchmarks. Per-transcript accuracy is an active area of

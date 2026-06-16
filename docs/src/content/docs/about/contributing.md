@@ -20,7 +20,7 @@ cargo build --release
 ```
 
 See the [Installation](../getting-started/installation/) page for system
-dependency requirements (cmake, zlib, bz2, lzma, curl, ssl, clang).
+dependency requirements (C++ compiler and libfontconfig).
 
 ## Running tests
 

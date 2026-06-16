@@ -1,5 +1,12 @@
 # RustQC Changelog
 
+## [Unreleased]
+
+### Other changes
+
+- Migrate BAM/SAM/CRAM I/O from rust-htslib to pure-Rust [noodles](https://crates.io/crates/noodles) (#113)
+- Simplify build requirements: no cmake or htslib system libraries needed
+
 ## [Version 0.2.1](https://github.com/seqeralabs/RustQC/releases/tag/v0.2.1) - 2026-04-09
 
 ### Bug fixes

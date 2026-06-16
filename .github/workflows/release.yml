@@ -12,6 +12,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  CXX: g++
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
@@ -130,13 +131,12 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake zlib1g-dev libbz2-dev liblzma-dev \
-            libcurl4-openssl-dev libssl-dev libfontconfig1-dev pkg-config clang
+          sudo apt-get install -y g++ libfontconfig1-dev pkg-config
 
       # macOS build dependencies
       - name: Install macOS build deps
         if: runner.os == 'macOS'
-        run: brew install bzip2 xz
+        run: brew install fontconfig
 
       - name: Build
         run: >

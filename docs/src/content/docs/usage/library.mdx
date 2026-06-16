@@ -19,10 +19,11 @@ Full API reference: **[docs.rs/rustqc](https://docs.rs/rustqc)**.
 rustqc = "0.2.1"  # Or whatever the latest release is
 ```
 
-`rust-htslib` is linked statically and a small C++ component (used by the preseq
-tool) is built from source, so a working C/C++ toolchain (`cc`, `c++`) is
-required when building. No runtime dependencies are added beyond what the binary
-already needs.
+SAM/BAM/CRAM I/O is handled by the pure-Rust [noodles](https://crates.io/crates/noodles)
+crate. A small C++ component (used by the preseq tool) is built from source, so a
+working C++ compiler (`g++` or `clang++`) is required when building. No htslib or
+cmake dependencies are needed. No runtime dependencies are added beyond what the
+binary already needs.
 
 ## What's in the library
 
