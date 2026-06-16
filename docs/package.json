@@ -10,10 +10,10 @@
     "astro": "astro"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.38.2",
+    "@astrojs/starlight": "^0.40.0",
     "@catppuccin/starlight": "^2.0.1",
-    "astro": "^6.1.9",
-    "sharp": "^0.34.5",
-    "starlight-image-zoom": "^0.14.1"
+    "astro": "^6.4.7",
+    "sharp": "^0.35.1",
+    "starlight-image-zoom": "^0.14.2"
   }
 }
