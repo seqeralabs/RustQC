@@ -364,7 +364,7 @@ impl IndexedReader {
             } => {
                 *unmapped_records = Vec::new();
                 *unmapped_idx = 0;
-                let region = region_for_tid(header, tid)?;
+                let region = region_for_tid(header, tid);
                 let mut fetched = Vec::new();
                 let query = reader
                     .query(header.noodles_header(), &region)
@@ -387,7 +387,7 @@ impl IndexedReader {
             } => {
                 *unmapped_records = Vec::new();
                 *unmapped_idx = 0;
-                let region = region_for_tid(header, tid)?;
+                let region = region_for_tid(header, tid);
                 let mut fetched = Vec::new();
                 let query = reader.query(header.noodles_header(), &region)?;
                 for result in query {
@@ -507,10 +507,10 @@ impl Read for IndexedReader {
     }
 }
 
-fn region_for_tid(header: &Header, tid: u32) -> Result<Region> {
-    let name = header.tid2name(tid);
-    let len = header.target_len(tid).unwrap_or(1).max(1);
-    format!("{}:1-{}", String::from_utf8_lossy(name), len)
-        .parse()
-        .context("failed to build region from tid")
+fn region_for_tid(header: &Header, tid: u32) -> Region {
+    // Query the whole reference sequence by name. Building the `Region` directly
+    // (rather than formatting and re-parsing `name:start-end`) avoids mangling
+    // reference names that contain `:` or `-` (e.g. HLA contigs) and preserves
+    // non-UTF-8 names byte-for-byte.
+    Region::new(header.tid2name(tid).to_vec(), ..)
 }
