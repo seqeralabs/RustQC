@@ -1426,3 +1426,71 @@ fn test_bigwig_strand_edge_cases_match_bedtools() {
 
     let _ = fs::remove_dir_all(root);
 }
+
+/// Per-strand bigWig tracks are only produced when meaningful, and empty
+/// tracks are skipped rather than written as stubs. Uses a forward-only BAM:
+///
+/// - unstranded run -> only the combined `{sample}.bigWig`
+/// - `--stranded forward` run -> combined + forward present, but the reverse
+///   track has zero coverage and so its file is omitted
+///
+/// Tool-independent: asserts file presence/absence, not coverage values.
+#[test]
+fn test_bigwig_per_strand_track_presence() {
+    let root = unique_test_dir("bigwig-presence");
+    let bam = root.join("fwdonly.bam");
+    let gtf = root.join("fwdonly.gtf");
+
+    // Two forward single-end reads (FLAG 0): all coverage is on the + strand.
+    write_bam_fixture(
+        &bam,
+        &[("chrP", 1000)],
+        &[
+            "f1\t0\tchrP\t11\t60\t10M\t*\t0\t0\tAAAAAAAAAA\tIIIIIIIIII",
+            "f2\t0\tchrP\t101\t60\t10M\t*\t0\t0\tAAAAAAAAAA\tIIIIIIIIII",
+        ],
+    );
+    write_test_gtf(&gtf, &["chrP"]);
+    let binary = rustqc_binary();
+
+    let run = |outdir: &Path, stranded: Option<&str>| {
+        let mut args = vec![
+            "rna",
+            bam.to_str().unwrap(),
+            "--gtf",
+            gtf.to_str().unwrap(),
+            "--outdir",
+            outdir.to_str().unwrap(),
+            "--skip-dup-check",
+        ];
+        if let Some(s) = stranded {
+            args.push("--stranded");
+            args.push(s);
+        }
+        let output = Command::new(&binary).args(&args).output().expect("rustqc");
+        assert!(
+            output.status.success(),
+            "rustqc failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+
+    // Unstranded: combined only, no per-strand tracks.
+    let unstranded = root.join("unstranded");
+    run(&unstranded, None);
+    assert!(unstranded.join("bigwig/fwdonly.bigWig").exists());
+    assert!(!unstranded.join("bigwig/fwdonly.forward.bigWig").exists());
+    assert!(!unstranded.join("bigwig/fwdonly.reverse.bigWig").exists());
+
+    // Stranded forward: forward populated, reverse empty -> file skipped.
+    let forward = root.join("forward");
+    run(&forward, Some("forward"));
+    assert!(forward.join("bigwig/fwdonly.bigWig").exists());
+    assert!(forward.join("bigwig/fwdonly.forward.bigWig").exists());
+    assert!(
+        !forward.join("bigwig/fwdonly.reverse.bigWig").exists(),
+        "empty reverse track should be skipped, not written as a stub"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
