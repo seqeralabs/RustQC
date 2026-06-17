@@ -326,8 +326,8 @@ pub fn write_bam_stat(result: &BamStatResult, output_path: &Path) -> Result<()> 
 
 #[cfg(test)]
 mod tests {
+    use crate::rna::bam::{self, Read as BamRead};
     use crate::rna::rseqc::accumulators::BamStatAccum;
-    use rust_htslib::bam::{self, Read as BamRead};
 
     #[test]
     fn test_bam_stat_small() {

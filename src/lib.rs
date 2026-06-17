@@ -12,9 +12,8 @@
 //! rustqc = "0.2"
 //! ```
 //!
-//! The library pulls in `rust-htslib` (linked statically), `plotters`, and
-//! a small C++ component used by the preseq tool (built via `build.rs`),
-//! so a working C/C++ toolchain is required at build time.
+//! The library uses [noodles](https://crates.io/crates/noodles) for BAM/SAM/CRAM I/O
+//! (pure Rust, no htslib dependency) and a small C++ component used by the preseq tool
 //!
 //! # Modules
 //!

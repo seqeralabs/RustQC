@@ -156,8 +156,8 @@ fn write_r_script(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rna::bam::{self, Read as BamRead};
     use log::debug;
-    use rust_htslib::bam::{self, Read as BamRead};
     use std::collections::HashMap;
     use std::time::Instant;
 
@@ -166,7 +166,7 @@ mod tests {
     /// Constructs `{chrom}:{start}:{exon1_start}-{exon1_end}:{exon2_start}-{exon2_end}:...`
     /// matching RSeQC's `fetch_exon` + position key logic.
     fn build_position_key(chrom: &str, pos: i64, cigar: &bam::record::CigarStringView) -> String {
-        use rust_htslib::bam::record::Cigar;
+        use crate::rna::bam::record::Cigar;
 
         let mut key = format!("{}:{}:", chrom, pos);
         let mut ref_pos = pos;
@@ -218,8 +218,9 @@ mod tests {
         let mut pos_dup: HashMap<String, u64> = HashMap::new();
         let mut total_processed = 0u64;
 
-        for result in bam.records() {
-            let record = result.context("Failed to read BAM record")?;
+        let mut record = bam::Record::new();
+        while let Some(result) = bam.read(&mut record) {
+            result.context("Failed to read BAM record")?;
 
             if record.is_unmapped() || record.is_quality_check_failed() || record.mapq() < mapq_cut
             {
@@ -274,8 +275,8 @@ mod tests {
 
     #[test]
     fn test_build_position_key_simple() {
-        use rust_htslib::bam::record::Cigar;
-        use rust_htslib::bam::record::{CigarString, CigarStringView};
+        use crate::rna::bam::record::Cigar;
+        use crate::rna::bam::record::{CigarString, CigarStringView};
 
         let cigar_ops = vec![Cigar::Match(50)];
         let cigar_string = CigarString(cigar_ops);
@@ -287,8 +288,8 @@ mod tests {
 
     #[test]
     fn test_build_position_key_spliced() {
-        use rust_htslib::bam::record::Cigar;
-        use rust_htslib::bam::record::{CigarString, CigarStringView};
+        use crate::rna::bam::record::Cigar;
+        use crate::rna::bam::record::{CigarString, CigarStringView};
 
         let cigar_ops = vec![Cigar::Match(10), Cigar::RefSkip(500), Cigar::Match(20)];
         let cigar_string = CigarString(cigar_ops);

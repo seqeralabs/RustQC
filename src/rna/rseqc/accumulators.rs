@@ -7,9 +7,9 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
+use crate::rna::bam;
 use anyhow::Result;
 use indexmap::IndexMap;
-use rust_htslib::bam;
 
 use super::bam_stat::{BamStatResult, GcDepthBin};
 
@@ -483,21 +483,11 @@ impl BamStatAccum {
 
             let seq_len = record.seq_len();
             if seq_len > 0 {
-                // SAFETY: We access the raw BAM record data to compute CRC32
-                // checksums matching samtools' approach. The pointer arithmetic
-                // replicates htslib's bam_get_seq() macro:
-                //   data + l_qname + (n_cigar << 2)
-                // The seq_len > 0 guard above ensures sequence data exists.
-                // The slice length seq_len.div_ceil(2) matches the BAM spec's
-                // 4-bit encoded sequence format: (seq_len+1)/2 bytes.
-                let seq_bytes = unsafe {
-                    let inner = record.inner();
-                    let data = inner.data;
-                    let seq_offset =
-                        inner.core.l_qname as isize + ((inner.core.n_cigar as isize) << 2);
-                    let seq_nbytes = seq_len.div_ceil(2);
-                    std::slice::from_raw_parts(data.offset(seq_offset), seq_nbytes)
-                };
+                let seq_len = seq_len as usize;
+                let seq = record.seq();
+                let seq_bytes = seq.encoded_bytes();
+                let seq_nbytes = seq_len.div_ceil(2);
+                let seq_bytes = &seq_bytes[..seq_nbytes.min(seq_bytes.len())];
                 let seq_crc = crc32fast::hash(seq_bytes);
                 self.chk[1] = self.chk[1].wrapping_add(seq_crc);
 
@@ -569,21 +559,21 @@ impl BamStatAccum {
                 // separate full CIGAR traversal here.
 
                 // NM tag (edit distance)
-                if let Ok(rust_htslib::bam::record::Aux::U8(nm)) = record.aux(b"NM") {
+                if let Ok(bam::record::Aux::U8(nm)) = record.aux(b"NM") {
                     self.mismatches += u64::from(nm);
-                } else if let Ok(rust_htslib::bam::record::Aux::U16(nm)) = record.aux(b"NM") {
+                } else if let Ok(bam::record::Aux::U16(nm)) = record.aux(b"NM") {
                     self.mismatches += u64::from(nm);
-                } else if let Ok(rust_htslib::bam::record::Aux::U32(nm)) = record.aux(b"NM") {
+                } else if let Ok(bam::record::Aux::U32(nm)) = record.aux(b"NM") {
                     self.mismatches += u64::from(nm);
-                } else if let Ok(rust_htslib::bam::record::Aux::I8(nm)) = record.aux(b"NM") {
+                } else if let Ok(bam::record::Aux::I8(nm)) = record.aux(b"NM") {
                     if nm > 0 {
                         self.mismatches += nm as u64;
                     }
-                } else if let Ok(rust_htslib::bam::record::Aux::I16(nm)) = record.aux(b"NM") {
+                } else if let Ok(bam::record::Aux::I16(nm)) = record.aux(b"NM") {
                     if nm > 0 {
                         self.mismatches += nm as u64;
                     }
-                } else if let Ok(rust_htslib::bam::record::Aux::I32(nm)) = record.aux(b"NM") {
+                } else if let Ok(bam::record::Aux::I32(nm)) = record.aux(b"NM") {
                     if nm > 0 {
                         self.mismatches += nm as u64;
                     }
@@ -640,7 +630,7 @@ impl BamStatAccum {
                             // Cap at MAX_INSERT_SIZE (8000), matching
                             // samtools stats which accumulates overflow
                             // into the cap bucket.
-                            let capped = abs_tlen.min(8000);
+                            let capped = u64::from(abs_tlen.min(8000));
                             let entry = self.is_hist.entry(capped).or_insert([0; 4]);
                             entry[0] += 1; // total
                             entry[orientation_idx] += 1;
@@ -824,7 +814,7 @@ impl BamStatAccum {
         //   Buffer grown to max_read_len * 5 as needed.
         // =============================================================
         if is_mapped && !is_secondary {
-            use rust_htslib::bam::record::Cigar as C;
+            use crate::rna::bam::record::Cigar as C;
             let is_reverse = flags & BAM_FREVERSE != 0;
             let read_len = record.seq_len();
             let tid = record.tid();
@@ -846,7 +836,7 @@ impl BamStatAccum {
                 // When growing, linearise the circular data just like
                 // upstream samtools: copy [idx..old_size] then [0..idx]
                 // into a fresh buffer, and reset idx to 0.
-                let need = read_len * 5;
+                let need = (read_len * 5) as usize;
                 if need > self.cov_buf.len() {
                     let old_size = self.cov_buf.len();
                     let mut new_buf = vec![0u32; need];
@@ -874,14 +864,14 @@ impl BamStatAccum {
 
             // Single CIGAR traversal serving IC/ID + bases_mapped_cigar + COV
             let cigar = record.cigar();
-            let mut icycle: usize = 0;
+            let mut icycle: i32 = 0;
             let mut cigar_mapped: u64 = 0;
             let mut ref_pos = pos;
 
             for op in cigar.iter() {
                 match op {
                     C::Ins(n) => {
-                        let ncig = *n as usize;
+                        let ncig = *n as i32;
                         let len = *n as u64;
                         cigar_mapped += len; // I counts toward bases_mapped_cigar
 
@@ -891,9 +881,9 @@ impl BamStatAccum {
 
                         // IC: indels per cycle (read-oriented index)
                         let idx = if is_reverse {
-                            read_len.saturating_sub(icycle + ncig)
+                            read_len.saturating_sub(icycle + ncig) as usize
                         } else {
-                            icycle
+                            icycle as usize
                         };
                         if idx >= self.ic.len() {
                             self.ic.resize(idx + 1, [0u64; 4]);
@@ -922,13 +912,13 @@ impl BamStatAccum {
                                 ref_pos += *n as i64; // still advance ref for COV
                                 continue;
                             }
-                            read_len.saturating_sub(icycle + 1)
+                            read_len.saturating_sub(icycle + 1) as usize
                         } else {
                             if icycle == 0 {
                                 ref_pos += *n as i64;
                                 continue;
                             }
-                            icycle - 1
+                            (icycle - 1) as usize
                         };
                         if idx >= self.ic.len() {
                             self.ic.resize(idx + 1, [0u64; 4]);
@@ -945,7 +935,7 @@ impl BamStatAccum {
                     C::Match(n) | C::Equal(n) | C::Diff(n) => {
                         let len = *n as u64;
                         cigar_mapped += len; // M/=/X count toward bases_mapped_cigar
-                        icycle += *n as usize;
+                        icycle += *n as i32;
                         // COV: M/=/X consumes reference positions
                         if do_cov {
                             let end = ref_pos + *n as i64;
@@ -959,8 +949,8 @@ impl BamStatAccum {
                         ref_pos += *n as i64; // N advances ref (COV skips it)
                     }
                     C::SoftClip(n) => {
-                        icycle += *n as usize; // S advances query cycle
-                                               // COV: S consumes no reference positions
+                        icycle += *n as i32; // S advances query cycle
+                                             // COV: S consumes no reference positions
                     }
                     C::HardClip(_) | C::Pad(_) => {}
                 }
@@ -1011,7 +1001,7 @@ impl BamStatAccum {
                         let seq = record.seq();
                         let mut count: u32 = 0;
                         for i in 0..seq_len {
-                            let base = seq.encoded_base(i);
+                            let base = seq.encoded_base(i as usize);
                             if base == 2 || base == 4 {
                                 count += 1;
                             }
@@ -1076,7 +1066,7 @@ impl BamStatAccum {
         let has_splice = record
             .cigar()
             .iter()
-            .any(|op| matches!(op, rust_htslib::bam::record::Cigar::RefSkip(_)));
+            .any(|op| matches!(op, crate::rna::bam::record::Cigar::RefSkip(_)));
         if has_splice {
             self.splice += 1;
         } else {
@@ -1370,7 +1360,7 @@ impl InferExpAccum {
             .cigar()
             .iter()
             .filter_map(|op| {
-                use rust_htslib::bam::record::Cigar::*;
+                use crate::rna::bam::record::Cigar::*;
                 match op {
                     Match(len) | Ins(len) | Equal(len) | Diff(len) => Some(*len as u64),
                     _ => None,
@@ -1504,7 +1494,7 @@ fn hash_sequence_encoded(seq: &bam::record::Seq<'_>) -> u128 {
 /// Hash position key matching RSeQC's `fetch_exon` + position key logic.
 /// Uses FNV-1a hashing to avoid string allocation per read.
 fn hash_position_key(chrom: &str, pos: i64, cigar: &bam::record::CigarStringView) -> u64 {
-    use rust_htslib::bam::record::Cigar;
+    use crate::rna::bam::record::Cigar;
 
     let mut h = crate::io::FNV1A_OFFSET;
     crate::io::fnv1a_update(&mut h, chrom.as_bytes());
@@ -2061,7 +2051,7 @@ fn compute_qalen_and_intron_size(record: &bam::Record) -> (u64, u64) {
     let mut qalen: u64 = 0;
     let mut intron_size: u64 = 0;
     for op in record.cigar().iter() {
-        use rust_htslib::bam::record::Cigar::*;
+        use crate::rna::bam::record::Cigar::*;
         match op {
             Match(len) | Equal(len) | Diff(len) => qalen += *len as u64,
             Ins(len) => qalen += *len as u64,
@@ -2081,7 +2071,7 @@ fn fetch_exon_blocks_rseqc(record: &bam::Record) -> Vec<(u64, u64)> {
     let mut chrom_st = record.pos() as u64;
 
     for op in record.cigar().iter() {
-        use rust_htslib::bam::record::Cigar::*;
+        use crate::rna::bam::record::Cigar::*;
         match op {
             Match(len) => {
                 let start = chrom_st;
