@@ -1262,3 +1262,167 @@ fn test_bigwig_stranded_forward_matches_bedtools() {
 
     let _ = fs::remove_dir_all(root);
 }
+
+/// Build a synthetic BAM exercising every bigWig strand/CIGAR/flag edge case,
+/// and confirm the combined and per-strand tracks match `bedtools genomecov`
+/// exactly. The reads deliberately cover:
+///
+/// - read-1 forward/reverse (never strand-flipped under `-du`)
+/// - read-2 forward/reverse with mate **mapped** (flipped under `-du`)
+/// - read-2 forward/reverse with mate **unmapped** (NOT flipped — the subtle
+///   case: bedtools only flips when the mate is mapped)
+/// - read-1 with an unmapped mate, and single-end reads (no flip)
+/// - spliced (`N`) and deletion (`D`) CIGARs (`-split` block boundaries)
+/// - a read overhanging the chromosome end (clamping)
+/// - secondary, duplicate, QC-fail and supplementary alignments (all counted)
+/// - a fully unmapped read (ignored)
+/// - a second chromosome (exercises the parallel per-chromosome merge)
+///
+/// Run at one and four threads to cover the sequential and parallel paths.
+#[test]
+fn test_bigwig_strand_edge_cases_match_bedtools() {
+    if which_bedtools().is_none()
+        || which_ucsc_tool("bigWigToBedGraph").is_none()
+        || which_ucsc_tool("bedClip").is_none()
+        || which_ucsc_tool("bedGraphToBigWig").is_none()
+    {
+        eprintln!("Skipping bigWig strand edge-case cross-check: upstream tools not found");
+        return;
+    }
+
+    let root = unique_test_dir("bigwig-strand-edge");
+    let bam = root.join("strand.bam");
+    let gtf = root.join("strand.gtf");
+    let chrom_sizes = root.join("chrom.sizes");
+
+    // SEQ/QUAL are 10 bases for every record (query length is 10 for 10M,
+    // 5M5N5M and 5M2D5M alike), so a single constant pair suffices.
+    write_bam_fixture(
+        &bam,
+        &[("chrTest", 300), ("chrTest2", 200)],
+        &[
+            // chrTest — coordinate-sorted
+            "r1_fwd_mm\t65\tchrTest\t11\t60\t10M\t*\t0\t0\tAAAAAAAAAA\tIIIIIIIIII",
+            "r1_rev_mm\t81\tchrTest\t31\t60\t10M\t*\t0\t0\tAAAAAAAAAA\tIIIIIIIIII",
+            "r2_fwd_mm\t129\tchrTest\t51\t60\t10M\t*\t0\t0\tAAAAAAAAAA\tIIIIIIIIII",
+            "r2_rev_mm\t145\tchrTest\t71\t60\t10M\t*\t0\t0\tAAAAAAAAAA\tIIIIIIIIII",
+            "r2_fwd_mu\t137\tchrTest\t91\t60\t10M\t*\t0\t0\tAAAAAAAAAA\tIIIIIIIIII",
+            "r2_rev_mu\t153\tchrTest\t111\t60\t10M\t*\t0\t0\tAAAAAAAAAA\tIIIIIIIIII",
+            "r1_fwd_mu\t73\tchrTest\t131\t60\t10M\t*\t0\t0\tAAAAAAAAAA\tIIIIIIIIII",
+            "se_fwd\t0\tchrTest\t151\t60\t10M\t*\t0\t0\tAAAAAAAAAA\tIIIIIIIIII",
+            "secondary_fwd\t256\tchrTest\t151\t60\t10M\t*\t0\t0\tAAAAAAAAAA\tIIIIIIIIII",
+            "se_rev\t16\tchrTest\t171\t60\t10M\t*\t0\t0\tAAAAAAAAAA\tIIIIIIIIII",
+            "spliced_fwd\t65\tchrTest\t191\t60\t5M5N5M\t*\t0\t0\tAAAAAAAAAA\tIIIIIIIIII",
+            "del_fwd\t0\tchrTest\t211\t60\t5M2D5M\t*\t0\t0\tAAAAAAAAAA\tIIIIIIIIII",
+            "dup_fwd\t1024\tchrTest\t231\t60\t10M\t*\t0\t0\tAAAAAAAAAA\tIIIIIIIIII",
+            "qcfail_fwd\t512\tchrTest\t241\t60\t10M\t*\t0\t0\tAAAAAAAAAA\tIIIIIIIIII",
+            "supp_fwd\t2048\tchrTest\t251\t60\t10M\t*\t0\t0\tAAAAAAAAAA\tIIIIIIIIII",
+            "clipend_fwd\t0\tchrTest\t295\t60\t10M\t*\t0\t0\tAAAAAAAAAA\tIIIIIIIIII",
+            // chrTest2
+            "t2_fwd\t0\tchrTest2\t11\t60\t10M\t*\t0\t0\tAAAAAAAAAA\tIIIIIIIIII",
+            "t2_rev\t16\tchrTest2\t51\t60\t10M\t*\t0\t0\tAAAAAAAAAA\tIIIIIIIIII",
+            // unmapped read (sorted last) — must be ignored by both tools
+            "unmapped\t4\t*\t0\t0\t*\t*\t0\t0\tAAAAAAAAAA\tIIIIIIIIII",
+        ],
+    );
+    write_test_gtf(&gtf, &["chrTest", "chrTest2"]);
+    fs::write(&chrom_sizes, "chrTest\t300\nchrTest2\t200\n").unwrap();
+
+    let bedtools = which_bedtools().unwrap();
+    let binary = rustqc_binary();
+
+    // (track filename suffix, bedtools genomecov strand args)
+    let tracks: [(&str, &[&str]); 3] = [
+        ("strand.bigWig", &["-split"]),
+        ("strand.forward.bigWig", &["-split", "-du", "-strand", "+"]),
+        ("strand.reverse.bigWig", &["-split", "-du", "-strand", "-"]),
+    ];
+
+    for threads in ["1", "4"] {
+        let outdir = root.join(format!("out_t{threads}"));
+        let output = Command::new(&binary)
+            .args([
+                "rna",
+                bam.to_str().unwrap(),
+                "--gtf",
+                gtf.to_str().unwrap(),
+                "--outdir",
+                outdir.to_str().unwrap(),
+                "--stranded",
+                "forward",
+                "--threads",
+                threads,
+                "--skip-dup-check",
+            ])
+            .output()
+            .expect("rustqc");
+        assert!(
+            output.status.success(),
+            "rustqc failed (threads={threads}):\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        for (suffix, strand_args) in &tracks {
+            let label = format!("threads={threads} track={suffix}");
+
+            // Reference: bedtools genomecov -> bedClip -> bedGraphToBigWig.
+            let raw = root.join(format!("ref.{threads}.{suffix}.bg"));
+            let mut args: Vec<&str> = vec!["genomecov", "-ibam", bam.to_str().unwrap()];
+            args.extend_from_slice(strand_args);
+            args.push("-bg");
+            let status = Command::new(&bedtools)
+                .args(&args)
+                .stdout(std::process::Stdio::from(
+                    std::fs::File::create(&raw).expect("create bedGraph"),
+                ))
+                .status()
+                .expect("bedtools");
+            assert!(status.success(), "bedtools failed for {label}");
+            sort_bedgraph_file(&raw);
+
+            let clip = root.join(format!("ref.{threads}.{suffix}.clip.bg"));
+            Command::new(which_ucsc_tool("bedClip").unwrap())
+                .args([
+                    raw.to_str().unwrap(),
+                    chrom_sizes.to_str().unwrap(),
+                    clip.to_str().unwrap(),
+                ])
+                .status()
+                .unwrap();
+            let ref_bw = root.join(format!("ref.{threads}.{suffix}.bw"));
+            Command::new(which_ucsc_tool("bedGraphToBigWig").unwrap())
+                .args([
+                    clip.to_str().unwrap(),
+                    chrom_sizes.to_str().unwrap(),
+                    ref_bw.to_str().unwrap(),
+                ])
+                .status()
+                .unwrap();
+
+            // bedtools emits no per-strand track when there is zero coverage;
+            // RustQC likewise skips the file. Treat "no reference intervals"
+            // and "no RustQC file" as consistent.
+            let ref_bg = root.join(format!("ref.{threads}.{suffix}.dec.bg"));
+            let has_ref =
+                bigwig_to_bedgraph(&ref_bw, &ref_bg) && !read_bedgraph(&ref_bg).is_empty();
+
+            if !has_ref {
+                continue;
+            }
+            let rust_bw = outdir.join(format!("bigwig/{suffix}"));
+            assert!(rust_bw.exists(), "missing RustQC bigWig for {label}");
+            let rust_bg = root.join(format!("rust.{threads}.{suffix}.dec.bg"));
+            assert!(
+                bigwig_to_bedgraph(&rust_bw, &rust_bg),
+                "decode failed {label}"
+            );
+            assert_eq!(
+                read_bedgraph(&ref_bg),
+                read_bedgraph(&rust_bg),
+                "bedGraph mismatch for {label}"
+            );
+        }
+    }
+
+    let _ = fs::remove_dir_all(root);
+}
