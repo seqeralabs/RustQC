@@ -6,7 +6,8 @@
 //! 8 RSeQC-equivalent tools (bam_stat, infer_experiment, read_duplication,
 //! read_distribution, junction_annotation, junction_saturation, inner_distance, TIN),
 //! preseq library complexity extrapolation, samtools-compatible outputs
-//! (flagstat, idxstats, stats), and Qualimap gene body coverage profiling.
+//! (flagstat, idxstats, stats), Qualimap gene body coverage profiling, and
+//! nf-core/rnaseq-compatible bigWig coverage tracks.
 //! Individual tools can be disabled via the YAML config file.
 
 mod citations;
@@ -1043,6 +1044,7 @@ fn process_single_bam(
             None
         },
         qualimap_index.as_ref(),
+        config.bigwig.enabled,
         Some(&pb),
     )?;
     let count_duration = count_start.elapsed();
@@ -1419,6 +1421,29 @@ fn process_single_bam(
         let p = qm_dir.display().to_string();
         ui.output_item("Qualimap", &format!("{p}/*"));
         written_outputs.push(("Qualimap".into(), p));
+    }
+
+    // === bigWig genome coverage tracks ===
+    if let Some(ref gc_result) = count_result.genomecov {
+        let bw_dir = if params.flat_output {
+            outdir.to_path_buf()
+        } else {
+            outdir.join("bigwig")
+        };
+
+        // Chromosome sizes are carried through from the count pass (BAM header
+        // order), so there is no need to re-open the BAM here.
+        let bw_outputs = rna::bigwig::write_bigwig_tracks(
+            &bw_dir,
+            &sample_name,
+            gc_result,
+            &gc_result.chrom_sizes,
+            threads,
+        )?;
+        for (label, path) in bw_outputs {
+            ui.output_item(&label, &path);
+            written_outputs.push((label, path));
+        }
     }
 
     // === RSeQC analyses (post-processing of single-pass accumulators) ===

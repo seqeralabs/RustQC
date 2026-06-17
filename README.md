@@ -28,7 +28,7 @@
 <p align="center">
 <picture>
    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/seqeralabs/RustQC/main/docs/public/benchmarks/benchmark_dark.png">
-   <img src="https://raw.githubusercontent.com/seqeralabs/RustQC/main/docs/public/benchmarks/benchmark_light.png" alt="Benchmark: RustQC ~14m 54s vs traditional tools ~15h 34m sequential (dupRadar + featureCounts + 8 RSeQC tools incl. TIN + preseq + samtools + Qualimap)" width="600">
+   <img src="https://raw.githubusercontent.com/seqeralabs/RustQC/main/docs/public/benchmarks/benchmark_light.png" alt="Benchmark: RustQC ~14m 54s vs traditional tools ~15h 34m sequential (dupRadar + featureCounts + 8 RSeQC tools incl. TIN + preseq + samtools + Qualimap + bigWig)" width="600">
 </picture>
 </p>
 
@@ -52,11 +52,12 @@ It currently includes:
 | TIN                 | [RSeQC](https://rseqc.sourceforge.net/#tin-py) `tin.py`                                 | Transcript Integrity Number                                           |
 | preseq              | [preseq](http://smithlabresearch.org/software/preseq/) `lc_extrap`                      | Library complexity extrapolation                                      |
 | Qualimap rnaseq     | [Qualimap](http://qualimap.conesalab.org/) `rnaseq`                                     | Gene body coverage, read origin, strand specificity                   |
+| bigWig              | [nf-core/rnaseq](https://nf-co.re/rnaseq) `bedtools genomecov` + UCSC utilities         | Genome-wide coverage tracks (combined and per-strand)                 |
 | flagstat            | [samtools](http://www.htslib.org/) `flagstat`                                           | Alignment flag summary                                                |
 | idxstats            | [samtools](http://www.htslib.org/) `idxstats`                                           | Per-chromosome read counts                                            |
 | stats               | [samtools](http://www.htslib.org/) `stats`                                              | Full samtools stats output including all histogram sections           |
 
-All outputs are format- and numerically identical to the upstream tools, and compatible with [MultiQC](https://multiqc.info/) for reporting.
+Most outputs are format- and numerically identical to the upstream tools, and compatible with [MultiQC](https://multiqc.info/) for reporting. bigWig coverage intervals match [bedtools](https://github.com/arq5x/bedtools2) `genomecov` exactly; binary `.bigWig` files use a different encoder but decode to the same coverage (see [bigWig docs](https://seqeralabs.github.io/RustQC/rna/bigwig/)).
 
 ## Quick start
 
@@ -84,7 +85,7 @@ See the [documentation](https://seqeralabs.github.io/RustQC/) for full usage det
 
 ## Use as a Rust library
 
-The crate is also published as a library, so the QC analysis modules (GTF parsing, dupRadar, featureCounts, RSeQC, Qualimap, preseq, samtools-style outputs) can be embedded into other Rust programs:
+The crate is also published as a library, so the QC analysis modules (GTF parsing, dupRadar, featureCounts, RSeQC, Qualimap, bigWig, preseq, samtools-style outputs) can be embedded into other Rust programs:
 
 ```toml
 [dependencies]

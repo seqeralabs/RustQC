@@ -13,6 +13,7 @@ RustQC is a fast quality control toolkit for sequencing data, written in Rust. I
 - [preseq](https://github.com/smithlabcode/preseq): library complexity extrapolation (lc_extrap)
 - [samtools](http://www.htslib.org/): flagstat, idxstats, and full stats output including all histogram sections
 - [Qualimap](http://qualimap.conesalab.org/): gene body coverage profiling and RNA-seq QC summary
+- [nf-core/rnaseq](https://nf-co.re/rnaseq) bigWig: genome-wide coverage tracks (`bedtools genomecov` + UCSC utilities)
 
 ## Why RustQC?
 
@@ -41,6 +42,7 @@ Given a duplicate-marked BAM file and a GTF annotation, `rustqc rna` runs all of
 | dupRadar        | [dupRadar](https://bioconductor.org/packages/dupRadar/)            | RNA-seq PCR duplicate rate analysis      |
 | featureCounts   | [featureCounts](http://subread.sourceforge.net/)                   | Gene-level read counting and biotypes    |
 | Qualimap rnaseq | [Qualimap](http://qualimap.conesalab.org/) rnaseq                  | Gene body coverage and RNA-seq QC        |
+| bigWig          | [nf-core/rnaseq](https://nf-co.re/rnaseq) `bedtools genomecov`    | Genome-wide coverage tracks              |
 | preseq          | [preseq](http://smithlabresearch.org/software/preseq/) `lc_extrap` | Library complexity extrapolation         |
 | flagstat        | `samtools flagstat`                                                | Alignment flag statistics                |
 | idxstats        | `samtools idxstats`                                                | Per-chromosome read counts               |

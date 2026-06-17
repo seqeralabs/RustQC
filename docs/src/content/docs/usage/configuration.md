@@ -19,7 +19,7 @@ settings live under a top-level `rna:` key, matching the `rustqc rna` subcommand
 
 :::note
 The `rna:` section controls all tools: dupRadar, featureCounts, all 8 RSeQC tools
-(including TIN), Qualimap, preseq, and samtools. Each tool has an `enabled` toggle
+(including TIN), Qualimap, bigWig coverage tracks, preseq, and samtools. Each tool has an `enabled` toggle
 and tool-specific parameter overrides where applicable.
 CLI flags take precedence over config file values.
 :::
@@ -233,6 +233,10 @@ rna:
 
   # Qualimap RNA-Seq QC
   qualimap:
+    enabled: true
+
+  # bigWig genome coverage tracks (nf-core/rnaseq compatible)
+  bigwig:
     enabled: true
 
   # Library complexity (preseq lc_extrap)
@@ -536,6 +540,32 @@ gene body coverage profiling (100 percentile bins, 5' to 3'), 5'/3' bias metrics
 read origin classification (exonic/intronic/intergenic), strand-specificity
 estimation, and splice junction motif counting. Produces Qualimap-compatible
 output files parseable by MultiQC.
+
+## bigwig
+
+```yaml
+rna:
+  bigwig:
+    enabled: true # Set to false to skip bigWig coverage track generation
+```
+
+Generates nf-core/rnaseq-compatible genome-wide bigWig coverage tracks in the
+`bigwig/` subdirectory. No GTF annotation is used for coverage calculation, but
+`--gtf` is still required by the `rustqc rna` command.
+
+Produces:
+
+- `{sample}.bigWig` — combined strand-agnostic track (`bedtools genomecov -split -bg`)
+- `{sample}.forward.bigWig` and `{sample}.reverse.bigWig` — per-strand tracks
+  for stranded libraries (`-split -du -strand +/-`), with strand labels matching
+  nf-core/rnaseq conventions
+
+Set `--stranded forward` or `--stranded reverse` (or configure `stranded:` in
+YAML) to enable per-strand tracks. Unstranded libraries receive only the
+combined track.
+
+See [bigWig Coverage Tracks](../rna/bigwig/) for full details on parameters,
+validation, and nf-core integration.
 
 ## preseq
 

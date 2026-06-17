@@ -98,6 +98,22 @@ Qualimap rnaseq report.
 - Website: [qualimap.conesalab.org](http://qualimap.conesalab.org/)
 - Publication: [doi.org/10.1093/bioinformatics/bts503](https://doi.org/10.1093/bioinformatics/bts503)
 
+## bigWig coverage tracks
+
+RustQC produces nf-core/rnaseq-compatible genome-wide bigWig coverage tracks,
+matching the parameters used by [bedtools](https://github.com/arq5x/bedtools2)
+`genomecov` and UCSC `bedClip` / `bedGraphToBigWig`. See the
+[bigWig](../rna/bigwig/) page for output files, strandedness behaviour, and
+validation details.
+
+> Quinlan AR, Hall IM. BEDTools: a flexible suite of utilities for comparing
+> genomic features. *Bioinformatics*. 2010;26(6):841-842.
+
+- bedtools: [github.com/arq5x/bedtools2](https://github.com/arq5x/bedtools2)
+- Publication: [doi.org/10.1093/bioinformatics/btq033](https://doi.org/10.1093/bioinformatics/btq033)
+- bigWig format (UCSC): Kent WJ, et al. The human genome browser at UCSC.
+  *Genome Research*. 2002;12(6):996-1006.
+
 ## Key dependencies
 
 RustQC is built with the following open-source Rust libraries:
@@ -114,6 +130,8 @@ RustQC is built with the following open-source Rust libraries:
 | [flate2](https://github.com/rust-lang/flate2-rs) | Gzip decompression for annotation files |
 | [serde](https://github.com/serde-rs/serde) | YAML configuration deserialization |
 | [indexmap](https://github.com/indexmap-rs/indexmap) | Insertion-order-preserving maps |
+| [bigtools](https://github.com/jackh726/bigtools) | bigWig and BigBed file I/O |
+| [tokio](https://github.com/tokio-rs/tokio) | Async runtime (bigWig writing) |
 | [env_logger](https://github.com/rust-cli/env_logger) | Logging output |
 
 ## RustQC

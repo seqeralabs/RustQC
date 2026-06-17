@@ -27,6 +27,7 @@ export const base = import.meta.env.BASE_URL;
         <a href="https://subread.sourceforge.net/">featureCounts</a>,{" "}
         <a href="https://rseqc.sourceforge.net/">RSeQC</a>,{" "}
         <a href="http://qualimap.conesalab.org/">Qualimap</a>,{" "}
+        <a href="https://nf-co.re/rnaseq">nf-core/rnaseq bigWig</a>,{" "}
         <a href="https://daehwankimlab.github.io/preseq/">preseq</a>, and{" "}
         <a href="https://www.htslib.org/">samtools</a> in Rust, delivering
         matching results much faster.
@@ -163,7 +164,8 @@ export const base = import.meta.env.BASE_URL;
   <Card title="Matching Results" icon="approve-check">
     Produces identical or near-identical output to R's dupRadar and featureCounts,
     plus faithful reimplementations of 8 RSeQC tools (including TIN), preseq,
-    and samtools. See [benchmark details](./rna/benchmark-details/).
+    samtools, and nf-core/rnaseq-compatible bigWig coverage tracks.
+    See [benchmark details](./rna/benchmark-details/).
   </Card>
   <Card title="Dramatically Faster" icon="rocket">
     Processes ~186M reads in 14m 54s on AWS vs ~15h 34m of sequential tool
@@ -171,7 +173,7 @@ export const base = import.meta.env.BASE_URL;
     workflow.
   </Card>
   <Card title="All-in-One" icon="puzzle">
-    Replaces 14+ separate QC tool invocations with a single CLI command.
+    Replaces 15+ separate QC tool invocations with a single CLI command.
     One task to stage data for. One pass through the BAM file.
     Minimal staging and I/O overhead.
   </Card>
@@ -183,5 +185,5 @@ export const base = import.meta.env.BASE_URL;
 
 ## Credits
 
-RustQC reimplements established tools including dupRadar, featureCounts, RSeQC, preseq, samtools, and Qualimap.
+RustQC reimplements established tools including dupRadar, featureCounts, RSeQC, preseq, samtools, Qualimap, and nf-core/rnaseq bigWig coverage tracks.
 See the [Credits & Citations](./about/credits/) page for the full list and how to cite them.

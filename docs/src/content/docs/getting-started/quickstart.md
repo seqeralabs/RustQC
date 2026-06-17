@@ -7,7 +7,7 @@ A basic RustQC analysis from install to results.
 
 ## RNA-seq duplicate analysis
 
-Run all RNA-seq QC analyses (dupRadar, featureCounts, RSeQC tools including TIN, Qualimap, preseq, and samtools) in a single pass:
+Run all RNA-seq QC analyses (dupRadar, featureCounts, RSeQC tools including TIN, Qualimap, bigWig coverage tracks, preseq, and samtools) in a single pass:
 
 ```bash
 rustqc rna sample.markdup.bam --gtf genes.gtf -p -o results/
@@ -27,7 +27,8 @@ This command:
 
 ### Output
 
-Output files are organized into subdirectories by tool group.
+Output files are organized into subdirectories by tool group
+(for example `dupradar/`, `rseqc/`, `qualimap/`, `bigwig/`, `preseq/`, and `samtools/`).
 Files are generally named the same as their upstream tool equivalents.
 This means that MultiQC should find them and report them as if they were created
 by the original tool.

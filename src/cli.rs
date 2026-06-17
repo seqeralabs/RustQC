@@ -5,8 +5,9 @@
 //! compatible output, RSeQC-equivalent metrics (bam_stat, infer_experiment,
 //! read_duplication, read_distribution, junction_annotation, junction_saturation,
 //! inner_distance), TIN (Transcript Integrity Number), preseq library complexity
-//! extrapolation, samtools-compatible outputs (flagstat, idxstats, stats), and
-//! Qualimap RNA-seq QC. Individual tools can be disabled via the YAML config file.
+//! extrapolation, samtools-compatible outputs (flagstat, idxstats, stats),
+//! Qualimap RNA-seq QC, and nf-core/rnaseq-compatible bigWig coverage tracks.
+//! Individual tools can be disabled via the YAML config file.
 //!
 //! A GTF gene annotation file is required for all analyses.
 
@@ -28,7 +29,7 @@ pub struct Cli {
 pub enum Commands {
     /// RNA-Seq QC — single-pass analysis of BAM/SAM/CRAM files.
     ///
-    /// Runs featureCounts, dupRadar, Qualimap, samtools stats, and RSeQC
+    /// Runs featureCounts, dupRadar, Qualimap, bigWig coverage tracks, samtools stats, and RSeQC
     /// analyses in one pass. Requires a GTF annotation and duplicate-marked
     /// (not removed) alignments.
     Rna(RnaArgs),

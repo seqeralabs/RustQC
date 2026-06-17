@@ -86,7 +86,7 @@ src/
   gtf.rs                         GTF annotation file parser
   rna/
     mod.rs                       Re-exports all submodules (bam_flags, cpp_rng, dupradar,
-                                   featurecounts, preseq, qualimap, rseqc)
+                                   featurecounts, preseq, qualimap, bigwig, rseqc)
     bam_flags.rs                 BAM flag constants
     cpp_rng.rs                   C++ RNG FFI shim for preseq bootstrap reproducibility
     dupradar/
@@ -99,6 +99,10 @@ src/
       mod.rs                     Re-exports output
       output.rs                  featureCounts-format output and biotype counting
     preseq.rs                    preseq lc_extrap library complexity extrapolation
+    bigwig/
+      mod.rs                     Re-exports accumulator and output
+      accumulator.rs             bedtools genomecov coverage accumulation
+      output.rs                  bedClip semantics + bigWig writing
     qualimap/
       mod.rs                     Re-exports accumulator, coverage, index, output, plots, report
       accumulator.rs             Gene body coverage accumulator

@@ -2,7 +2,7 @@
 //!
 //! RustQC is primarily a CLI (`rustqc rna ...`) that runs a single-pass
 //! RNA-Seq QC pipeline (dupRadar, featureCounts, 8 RSeQC tools, Qualimap,
-//! preseq, samtools-style outputs). The same analysis modules are also
+//! bigWig coverage tracks, preseq, samtools-style outputs). The same analysis modules are also
 //! exposed as a library so they can be embedded into other Rust programs.
 //!
 //! # Adding RustQC as a dependency
@@ -25,7 +25,7 @@
 //! - [`cpu`] — CPU feature detection and binary-target identification.
 //! - [`rna`] — the RNA-Seq analysis modules:
 //!   - [`rna::dupradar`], [`rna::featurecounts`], [`rna::qualimap`],
-//!     [`rna::preseq`], [`rna::rseqc`].
+//!     [`rna::bigwig`], [`rna::preseq`], [`rna::rseqc`].
 //!
 //! [`Strandedness`] lives at the crate root because it is used across most
 //! analysis modules.

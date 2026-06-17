@@ -1,5 +1,15 @@
 # RustQC Changelog
 
+## Unreleased
+
+### Features
+
+- Add bigWig genome coverage tracks in the existing BAM streaming pass, matching nf-core/rnaseq `bedtools genomecov` + UCSC `bedClip` + `bedGraphToBigWig` output ([#112](https://github.com/seqeralabs/RustQC/issues/112))
+
+### Documentation
+
+- Document bigWig coverage tracks on the docs site, README, AGENTS.md, and related markdown files
+
 ## [Version 0.2.1](https://github.com/seqeralabs/RustQC/releases/tag/v0.2.1) - 2026-04-09
 
 ### Bug fixes

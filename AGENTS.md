@@ -13,6 +13,8 @@
 >   [preseq](https://github.com/smithlabcode/preseq) `lc_extrap`)
 > - **samtools-compatible** flagstat, idxstats, and full stats output
 > - **Gene body coverage** profiling with Qualimap-compatible output
+> - **bigWig** genome coverage tracks (nf-core/rnaseq-compatible; bedtools
+>   `genomecov` + UCSC `bedClip` semantics)
 >
 > Binary crate (`rustqc`), Rust edition 2021.
 
@@ -63,7 +65,7 @@ src/
   io.rs             — Shared I/O utilities (gzip-transparent file reading)
   gtf.rs            — GTF annotation file parser (with configurable attribute extraction)
   rna/
-    mod.rs          — Re-exports all submodules (dupradar, featurecounts, rseqc, bam_flags, cpp_rng, preseq, qualimap)
+    mod.rs          — Re-exports all submodules (dupradar, featurecounts, rseqc, bam_flags, cpp_rng, preseq, qualimap, bigwig)
     bam_flags.rs    — BAM flag constants
     cpp_rng.rs      — C++ RNG FFI shim for preseq bootstrap reproducibility
     dupradar/
@@ -76,6 +78,10 @@ src/
       mod.rs        — Re-exports output
       output.rs     — featureCounts-format output & biotype counting
     preseq.rs       — preseq lc_extrap library complexity extrapolation
+    bigwig/
+      mod.rs        — Re-exports accumulator and output
+      accumulator.rs — bedtools genomecov difference-array coverage accumulation
+      output.rs     — bedClip semantics + bigWig writing via bigtools
     qualimap/
       mod.rs        — Re-exports all Qualimap modules
       accumulator.rs — Gene body coverage accumulation logic
@@ -120,8 +126,9 @@ dupRadar duplicate rate analysis, featureCounts-compatible gene counting,
 all 8 RSeQC-equivalent tools (bam_stat, infer_experiment, read_duplication,
 read_distribution, junction_annotation, junction_saturation, inner_distance,
 TIN), preseq library complexity extrapolation, samtools-compatible outputs
-(flagstat, idxstats, stats), and gene body coverage profiling with
-Qualimap-compatible output. The GTF parser extracts transcript-level
+(flagstat, idxstats, stats), gene body coverage profiling with
+Qualimap-compatible output, and nf-core/rnaseq-compatible bigWig coverage
+tracks. The GTF parser extracts transcript-level
 structure (exons + CDS features) to derive all data needed by every tool.
 
 Individual tools can be disabled via the YAML config file (each has an `enabled`
@@ -255,6 +262,8 @@ To prepare a release:
 | `rayon`                | Data parallelism                      |
 | `rand` / `rand_chacha` | Reproducible random sampling          |
 | `flate2`               | Gzip decompression (annotation files) |
+| `bigtools`             | bigWig file writing                     |
+| `tokio`                | Async runtime for bigtools              |
 
 ## Duplicate Marking Validation
 
@@ -294,7 +303,7 @@ forwarded to `count_reads()` as the `skip_dup_check: bool` parameter).
   `infer_experiment:`, `read_duplication:`, `read_distribution:`, `junction_annotation:`,
   `junction_saturation:`, `inner_distance:`, `tin:`). Each has an `enabled: bool` toggle
   and tool-specific parameter overrides. CLI flags take precedence over config values.
-- Under `rna:`, there are also sections for `preseq:`, `qualimap:`,
+- Under `rna:`, there are also sections for `preseq:`, `qualimap:`, `bigwig:`,
   `flagstat:`, `idxstats:`, and `samtools_stats:`. Each has an `enabled: bool` toggle.
   Preseq has additional parameters: `max_extrap`, `step_size`, `n_bootstraps`,
   `confidence_level`, `seed`, `max_terms`, `defects`. TIN has `sample_size` and

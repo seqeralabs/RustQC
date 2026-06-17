@@ -1,0 +1,149 @@
+---
+title: bigWig Coverage Tracks
+description: Genome-wide bigWig coverage tracks compatible with nf-core/rnaseq, generated in the RustQC streaming pass.
+---
+
+import { Aside, FileTree } from "@astrojs/starlight/components";
+
+<Aside type="note" title="About nf-core/rnaseq bigWig">
+The [nf-core/rnaseq](https://nf-co.re/rnaseq) pipeline generates genome-wide
+coverage tracks with `bedtools genomecov`, UCSC `bedClip`, and
+`bedGraphToBigWig`. RustQC produces equivalent coverage in the same BAM
+streaming pass — no separate bedGraph round-trips.
+
+[nf-core/rnaseq bigWig docs](https://nf-co.re/rnaseq/latest/docs/output/#bigwig-files) | [bedtools genomecov](https://bedtools.readthedocs.io/en/latest/content/tools/genomecov.html)
+</Aside>
+
+RustQC generates **bigWig** genome coverage tracks during the `rustqc rna`
+single-pass BAM scan. The implementation replicates the parameters used by
+[nf-core/rnaseq](https://nf-co.re/rnaseq) for its `bigwig/` output directory.
+
+## What it replaces
+
+In nf-core/rnaseq, each sample typically runs three sequential steps per strand:
+
+1. `bedtools genomecov` on the final genome BAM → sorted bedGraph
+2. `bedClip` with chromosome sizes → clipped bedGraph
+3. `bedGraphToBigWig` → `.bigWig` file
+
+RustQC collapses this into the existing BAM read loop. Coverage is accumulated
+with the same `bedtools genomecov` logic (`-split`, optional `-du` and
+`-strand`), clipped to chromosome boundaries (UCSC `bedClip` semantics), and
+written as bigWig via the [`bigtools`](https://github.com/jackh726/bigtools)
+crate.
+
+<Aside type="tip" title="No extra BAM pass">
+bigWig tracks are generated during the same streaming pass as dupRadar,
+featureCounts, RSeQC, Qualimap, preseq, and samtools outputs.
+</Aside>
+
+## Output files
+
+All bigWig files are written to a `bigwig/` subdirectory under the output
+directory. Use `--flat-output` to write files directly to the top-level output
+directory instead.
+
+<FileTree>
+- bigwig/
+  - sample.bigWig Combined strand-agnostic coverage (all libraries)
+  - sample.forward.bigWig Forward-genome-strand coverage (stranded libraries only)
+  - sample.reverse.bigWig Reverse-genome-strand coverage (stranded libraries only)
+</FileTree>
+
+File naming matches nf-core/rnaseq: `{sample_id}.bigWig`,
+`{sample_id}.forward.bigWig`, and `{sample_id}.reverse.bigWig`.
+
+### Combined track (all libraries)
+
+**File:** `<sample>.bigWig`
+
+Equivalent to nf-core `BEDTOOLS_GENOMECOV_COMBINED`:
+
+```bash
+bedtools genomecov -ibam sample.bam -split -bg
+```
+
+### Per-strand tracks (stranded libraries only)
+
+When `--stranded forward` or `--stranded reverse` is set (or configured in
+YAML), RustQC also writes forward- and reverse-genome-strand tracks using
+`-split -du -strand +/-` with strand labels swapped for reverse libraries, matching
+nf-core/rnaseq `bigwig.config`.
+
+| Library type | Forward track file | bedtools strand filter |
+| ------------ | ------------------ | ---------------------- |
+| `forward`    | `.forward.bigWig`  | `-strand +`            |
+| `forward`    | `.reverse.bigWig`  | `-strand -`            |
+| `reverse`    | `.forward.bigWig`  | `-strand -`            |
+| `reverse`    | `.reverse.bigWig`  | `-strand +`            |
+
+For **unstranded** libraries, only the combined `{sample}.bigWig` is produced.
+Per-strand tracks are omitted because strand-specific filtering is not
+meaningful without a known library protocol.
+
+<Aside type="caution" title="Empty per-strand tracks">
+If a per-strand track has no coverage intervals (for example, the reverse track
+when all reads align to the forward strand), RustQC skips writing that file
+rather than emitting an empty bigWig stub.
+</Aside>
+
+## Parameters
+
+RustQC matches nf-core/rnaseq defaults:
+
+| Parameter | nf-core/rnaseq | RustQC |
+| --------- | -------------- | ------ |
+| Normalization | None (`scale=1`) | None |
+| Splicing | `-split` | `-split` (CIGAR N/D block splitting) |
+| PE deduplication | `-du` on per-strand tracks only | `-du` on per-strand tracks only |
+| MAPQ filter | None (all mapped reads) | None (all mapped reads) |
+| Clipping | `bedClip` with chrom sizes | Equivalent clipping before write |
+
+Input must be a **coordinate-sorted** BAM (or SAM/CRAM). No GTF annotation is
+used for coverage calculation itself, but `--gtf` is still required by the
+`rustqc rna` command.
+
+## Validation
+
+Coverage intervals match [bedtools](https://github.com/arq5x/bedtools2)
+`genomecov` v2.31.1 with UCSC `bedClip` semantics. Integration tests decode
+both RustQC and reference bigWig files with UCSC `bigWigToBedGraph` and compare
+all bedGraph intervals exactly.
+
+The **binary `.bigWig` files are not bit-identical** to UCSC `bedGraphToBigWig`
+output because RustQC encodes them with `bigtools` rather than the UCSC
+utility. Decoded coverage values and interval boundaries are identical; only
+the on-disk compression and index structure differ.
+
+## Configuration
+
+bigWig generation is enabled by default. Disable with:
+
+```yaml
+rna:
+  bigwig:
+    enabled: false
+```
+
+See the [Configuration](../usage/configuration/#bigwig) page for details.
+
+## nf-core/rnaseq integration
+
+To use RustQC bigWig output in place of the nf-core/rnaseq bigWig subworkflow,
+run `rustqc rna` on the final genome BAM and publish the `bigwig/` directory
+to `{outdir}/{aligner}/bigwig/` (the path nf-core uses for MultiQC and
+downstream consumers).
+
+Set `--stranded` to match the library protocol so per-strand tracks are
+generated with the correct nf-core naming and strand filters.
+
+## References
+
+- **bedtools:** Quinlan AR, Hall IM. BEDTools: a flexible suite of utilities
+  for comparing genomic features. *Bioinformatics*. 2010;26(6):841-842.
+  [bedtools on GitHub](https://github.com/arq5x/bedtools2)
+- **bigWig format:** Kent WJ, et al. The human genome browser at UCSC.
+  *Genome Research*. 2002;12(6):996-1006.
+- **bigtools:** Ramírez JM, et al. Bigtools: a high-performance BigWig and
+  BigBed library in Rust. *Bioinformatics*. 2024.
+  [bigtools on GitHub](https://github.com/jackh726/bigtools)
