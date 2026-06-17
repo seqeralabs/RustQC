@@ -28,6 +28,11 @@ clap = { version = "4", features = ["derive", "env"] }
 # BAM file reading (pure Rust, replaces rust-htslib)
 noodles = { version = "0.111", features = ["bam", "sam", "cram", "csi", "bgzf", "core", "fasta"] }
 
+# Self-referential structs: lets the CRAM backends hold a noodles streaming
+# iterator alongside the reader it borrows, so CRAM reads stream one container
+# at a time instead of buffering every record up front.
+ouroboros = "0.18"
+
 # Plotting
 plotters = { version = "0.3", features = ["fontconfig-dlopen"] }
 plotters-backend = "0.3"

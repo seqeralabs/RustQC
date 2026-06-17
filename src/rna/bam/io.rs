@@ -75,6 +75,39 @@ fn open_bam_reader(path: &Path) -> Result<noodles_bam::io::Reader<bgzf::io::Read
     Ok(noodles_bam::io::Reader::new(file))
 }
 
+/// Owned iterator over decoded CRAM records. Boxed so the `query` and
+/// `query_unmapped` iterators (which have distinct concrete types) can share one
+/// field on the indexed cursor.
+type CramRecordIter<'a> =
+    Box<dyn Iterator<Item = std::io::Result<noodles_sam::alignment::RecordBuf>> + 'a>;
+
+/// Self-referential holder for a sequential CRAM reader plus its streaming record
+/// iterator.
+///
+/// noodles' `Records` iterator borrows the reader and header, so it cannot sit
+/// next to them in a plain struct. ouroboros makes that borrow sound, letting us
+/// stream one container at a time instead of collecting every record up front.
+#[ouroboros::self_referencing]
+struct CramReaderCursor {
+    reader: noodles_cram::io::Reader<File>,
+    header: noodles_sam::Header,
+    #[borrows(mut reader, header)]
+    #[not_covariant]
+    iter: noodles_cram::io::reader::Records<'this, 'this, File>,
+}
+
+/// Self-referential holder for an indexed CRAM reader plus the iterator from its
+/// most recent `fetch`. Rebuilt on each fetch via `into_heads`; before the first
+/// fetch the iterator is empty.
+#[ouroboros::self_referencing]
+struct CramIndexedCursor {
+    reader: noodles_cram::io::IndexedReader<File>,
+    header: noodles_sam::Header,
+    #[borrows(mut reader, header)]
+    #[not_covariant]
+    iter: CramRecordIter<'this>,
+}
+
 enum ReaderBackend {
     Bam {
         reader: noodles_bam::io::Reader<bgzf::io::Reader<File>>,
@@ -87,10 +120,8 @@ enum ReaderBackend {
         scratch: noodles_sam::Record,
     },
     Cram {
-        reader: noodles_cram::io::Reader<File>,
+        cursor: CramReaderCursor,
         header: Header,
-        records: Vec<noodles_sam::alignment::RecordBuf>,
-        record_idx: usize,
     },
 }
 
@@ -157,14 +188,15 @@ impl Reader {
         let mut reader = noodles_cram::io::reader::Builder::default()
             .set_reference_sequence_repository(repository)
             .build_from_reader(file);
-        let header =
-            Header::from_noodles(reader.read_header().context("failed to read CRAM header")?);
-        Ok(ReaderBackend::Cram {
+        let sam_header = reader.read_header().context("failed to read CRAM header")?;
+        let header = Header::from_noodles(sam_header.clone());
+        let cursor = CramReaderCursorBuilder {
             reader,
-            header,
-            records: Vec::new(),
-            record_idx: 0,
-        })
+            header: sam_header,
+            iter_builder: |reader, header| reader.records(header),
+        }
+        .build();
+        Ok(ReaderBackend::Cram { cursor, header })
     }
 
     /// Set the reference FASTA for CRAM decoding.
@@ -223,31 +255,11 @@ impl Read for Reader {
                 ),
                 Err(e) => Some(Err(e.into())),
             },
-            ReaderBackend::Cram {
-                reader,
-                header,
-                records,
-                record_idx,
-            } => {
-                if records.is_empty() {
-                    match reader
-                        .records(header.noodles_header())
-                        .collect::<Result<Vec<_>, _>>()
-                    {
-                        Ok(v) => *records = v,
-                        Err(e) => return Some(Err(e.into())),
-                    }
-                }
-                if *record_idx >= records.len() {
-                    return None;
-                }
-                let idx = *record_idx;
-                *record_idx += 1;
-                Some(store_record(
-                    record,
-                    Record::from_buf(records[idx].clone(), None),
-                ))
-            }
+            ReaderBackend::Cram { cursor, .. } => match cursor.with_iter_mut(|iter| iter.next()) {
+                Some(Ok(buf)) => Some(store_record(record, Record::from_buf(buf, None))),
+                Some(Err(e)) => Some(Err(e.into())),
+                None => None,
+            },
         }
     }
 }
@@ -282,12 +294,9 @@ enum IndexedBackend {
         cursor: BamCursor,
     },
     Cram {
-        reader: noodles_cram::io::IndexedReader<File>,
+        /// `None` only transiently while a fetch rebuilds the cursor.
+        cursor: Option<CramIndexedCursor>,
         header: Header,
-        query_records: Vec<noodles_sam::alignment::RecordBuf>,
-        query_idx: usize,
-        unmapped_records: Vec<noodles_sam::alignment::RecordBuf>,
-        unmapped_idx: usize,
     },
 }
 
@@ -306,18 +315,19 @@ impl IndexedReader {
             let mut reader = noodles_cram::io::indexed_reader::Builder::default()
                 .build_from_path(&path)
                 .with_context(|| format!("failed to open indexed CRAM {}", path.display()))?;
-            let header = Header::from_noodles(
-                reader
-                    .read_header()
-                    .context("failed to read indexed CRAM header")?,
-            );
-            IndexedBackend::Cram {
+            let sam_header = reader
+                .read_header()
+                .context("failed to read indexed CRAM header")?;
+            let header = Header::from_noodles(sam_header.clone());
+            let cursor = CramIndexedCursorBuilder {
                 reader,
+                header: sam_header,
+                iter_builder: |_reader, _header| Box::new(std::iter::empty()) as CramRecordIter,
+            }
+            .build();
+            IndexedBackend::Cram {
+                cursor: Some(cursor),
                 header,
-                query_records: Vec::new(),
-                query_idx: 0,
-                unmapped_records: Vec::new(),
-                unmapped_idx: 0,
             }
         } else {
             let mut reader = noodles_bam::io::indexed_reader::Builder::default()
@@ -346,13 +356,22 @@ impl IndexedReader {
     pub fn set_reference<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
         let path = path.as_ref().to_path_buf();
         self.cram_reference = Some(path.clone());
-        if let IndexedBackend::Cram { reader, header, .. } = &mut self.backend {
+        let cram_path = self.source_path.clone();
+        if let IndexedBackend::Cram { cursor, header } = &mut self.backend {
             let repository = load_fasta_repository(&path)?;
-            let cram_path = self.source_path.clone();
-            *reader = noodles_cram::io::indexed_reader::Builder::default()
+            let mut reader = noodles_cram::io::indexed_reader::Builder::default()
                 .set_reference_sequence_repository(repository)
                 .build_from_path(&cram_path)?;
-            *header = Header::from_noodles(reader.read_header()?);
+            let sam_header = reader.read_header()?;
+            *header = Header::from_noodles(sam_header.clone());
+            *cursor = Some(
+                CramIndexedCursorBuilder {
+                    reader,
+                    header: sam_header,
+                    iter_builder: |_reader, _header| Box::new(std::iter::empty()) as CramRecordIter,
+                }
+                .build(),
+            );
         }
         Ok(())
     }
@@ -389,25 +408,25 @@ impl IndexedReader {
                 };
                 Ok(())
             }
-            IndexedBackend::Cram {
-                reader,
-                header,
-                query_records,
-                query_idx,
-                unmapped_records,
-                unmapped_idx,
-                ..
-            } => {
-                *unmapped_records = Vec::new();
-                *unmapped_idx = 0;
+            IndexedBackend::Cram { cursor, header } => {
+                // Rebuild the cursor with a fresh region query. noodles' query
+                // iterator borrows the reader, so we recover the owned reader via
+                // `into_heads` and stream container-by-container from there.
                 let region = region_for_tid(header, tid);
-                let mut fetched = Vec::new();
-                let query = reader.query(header.noodles_header(), &region)?;
-                for result in query {
-                    fetched.push(result.context("failed to read queried CRAM record")?);
-                }
-                *query_records = fetched;
-                *query_idx = 0;
+                let heads = cursor.take().expect("CRAM cursor present").into_heads();
+                *cursor = Some(
+                    CramIndexedCursorTryBuilder {
+                        reader: heads.reader,
+                        header: heads.header,
+                        iter_builder: |reader, header| -> Result<CramRecordIter> {
+                            let query = reader
+                                .query(header, &region)
+                                .with_context(|| format!("failed to query CRAM tid {tid}"))?;
+                            Ok(Box::new(query))
+                        },
+                    }
+                    .try_build()?,
+                );
                 Ok(())
             }
         }
@@ -444,26 +463,21 @@ impl IndexedReader {
                 *cursor = BamCursor::Unmapped;
                 Ok(())
             }
-            IndexedBackend::Cram {
-                reader,
-                header,
-                query_records,
-                query_idx,
-                unmapped_records,
-                unmapped_idx,
-                ..
-            } => {
-                query_records.clear();
-                *query_idx = 0;
-                let mut fetched = Vec::new();
-                for result in reader
-                    .query_unmapped(header.noodles_header())
-                    .context("failed to query unmapped CRAM reads")?
-                {
-                    fetched.push(result.context("failed to read unmapped CRAM record")?);
-                }
-                *unmapped_records = fetched;
-                *unmapped_idx = 0;
+            IndexedBackend::Cram { cursor, .. } => {
+                let heads = cursor.take().expect("CRAM cursor present").into_heads();
+                *cursor = Some(
+                    CramIndexedCursorTryBuilder {
+                        reader: heads.reader,
+                        header: heads.header,
+                        iter_builder: |reader, header| -> Result<CramRecordIter> {
+                            let query = reader
+                                .query_unmapped(header)
+                                .context("failed to query unmapped CRAM reads")?;
+                            Ok(Box::new(query))
+                        },
+                    }
+                    .try_build()?,
+                );
                 Ok(())
             }
         }
@@ -564,30 +578,13 @@ impl Read for IndexedReader {
                     },
                 }
             },
-            IndexedBackend::Cram {
-                query_records,
-                query_idx,
-                unmapped_records,
-                unmapped_idx,
-                ..
-            } => {
-                if *unmapped_idx < unmapped_records.len() {
-                    let idx = *unmapped_idx;
-                    *unmapped_idx += 1;
-                    return Some(store_record(
-                        record,
-                        Record::from_buf(unmapped_records[idx].clone(), None),
-                    ));
+            IndexedBackend::Cram { cursor, .. } => {
+                let cursor = cursor.as_mut()?;
+                match cursor.with_iter_mut(|iter| iter.next()) {
+                    Some(Ok(buf)) => Some(store_record(record, Record::from_buf(buf, None))),
+                    Some(Err(e)) => Some(Err(e.into())),
+                    None => None,
                 }
-                if *query_idx >= query_records.len() {
-                    return None;
-                }
-                let idx = *query_idx;
-                *query_idx += 1;
-                Some(store_record(
-                    record,
-                    Record::from_buf(query_records[idx].clone(), None),
-                ))
             }
         }
     }
@@ -599,4 +596,101 @@ fn region_for_tid(header: &Header, tid: u32) -> Region {
     // reference names that contain `:` or `-` (e.g. HLA contigs) and preserves
     // non-UTF-8 names byte-for-byte.
     Region::new(header.tid2name(tid).to_vec(), ..)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZero;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use noodles::core::Position;
+    use noodles::fasta;
+    use noodles::sam::alignment::io::Write as _;
+    use noodles::sam::alignment::record::cigar::{op::Kind, Op};
+    use noodles::sam::alignment::record::Flags;
+    use noodles::sam::alignment::RecordBuf;
+    use noodles::sam::header::record::value::map::ReferenceSequence;
+    use noodles::sam::header::record::value::Map;
+    use noodles::{cram, sam};
+
+    use super::{Read, Reader};
+    use crate::rna::bam::Record;
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_path(suffix: &str) -> std::path::PathBuf {
+        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "rustqc_cram_test_{}_{id}_{suffix}",
+            std::process::id()
+        ))
+    }
+
+    // Writes a tiny reference-backed CRAM file and streams it back through the
+    // ouroboros-backed sequential `Reader`, verifying the records come through in
+    // order rather than being buffered or dropped.
+    #[test]
+    fn streams_cram_records_sequentially() {
+        let reference = b"ACGTACGTACGT".to_vec();
+        let cram_path = temp_path("seq.cram");
+        let fasta_path = temp_path("ref.fa");
+
+        std::fs::write(&fasta_path, b">ref0\nACGTACGTACGT\n").unwrap();
+
+        let repository = fasta::Repository::new(vec![fasta::Record::new(
+            fasta::record::Definition::new("ref0", None),
+            fasta::record::Sequence::from(reference.clone()),
+        )]);
+
+        let header = sam::Header::builder()
+            .add_reference_sequence(
+                "ref0",
+                Map::<ReferenceSequence>::new(NonZero::new(reference.len()).unwrap()),
+            )
+            .build();
+
+        let expected = [(b"r1".to_vec(), 0i64), (b"r2".to_vec(), 4i64)];
+        let records: Vec<RecordBuf> = expected
+            .iter()
+            .map(|(name, start_zero)| {
+                let start = Position::new(*start_zero as usize + 1).unwrap();
+                RecordBuf::builder()
+                    .set_name(&name[..])
+                    .set_flags(Flags::empty())
+                    .set_reference_sequence_id(0)
+                    .set_alignment_start(start)
+                    .set_cigar([Op::new(Kind::Match, 4)].into_iter().collect())
+                    .set_sequence(b"ACGT".to_vec().into())
+                    .set_quality_scores(vec![30u8; 4].into())
+                    .build()
+            })
+            .collect();
+
+        {
+            let mut writer = cram::io::writer::Builder::default()
+                .set_reference_sequence_repository(repository)
+                .build_from_path(&cram_path)
+                .unwrap();
+            writer.write_header(&header).unwrap();
+            for record in &records {
+                writer.write_alignment_record(&header, record).unwrap();
+            }
+            writer.try_finish(&header).unwrap();
+        }
+
+        let mut reader = Reader::from_path(&cram_path).unwrap();
+        reader.set_reference(&fasta_path).unwrap();
+
+        let mut record = Record::new();
+        let mut got = Vec::new();
+        while let Some(result) = reader.read(&mut record) {
+            result.unwrap();
+            got.push((record.qname().to_vec(), record.pos()));
+        }
+
+        let _ = std::fs::remove_file(&cram_path);
+        let _ = std::fs::remove_file(&fasta_path);
+
+        assert_eq!(got, expected.to_vec());
+    }
 }
