@@ -157,7 +157,9 @@ pub struct BamStatAccum {
     // --- samtools flagstat additional fields ---
     /// Secondary alignments (0x100) — counted independently of QC/dup.
     pub secondary: u64,
-    /// Supplementary alignments (0x800) — counted independently of QC/dup.
+    /// Supplementary alignments (0x800) that are *not* also secondary —
+    /// counted independently of QC/dup. Matches samtools, which gives the
+    /// SECONDARY flag priority over SUPPLEMENTARY.
     pub supplementary: u64,
     /// All mapped records (not 0x4), regardless of QC/dup.
     pub mapped: u64,
@@ -409,10 +411,15 @@ impl BamStatAccum {
         // =================================================================
         // samtools flagstat counters (count ALL records, no early returns)
         // =================================================================
+        // samtools gives the SECONDARY flag priority: a record carrying both
+        // 0x100 and 0x800 is counted as secondary only, never as supplementary
+        // (bam_stat.c flagstat_loop / stats.c both return early on secondary).
+        // Counting the two bits independently would inflate the supplementary
+        // total and break the `primary + secondary + supplementary == total`
+        // invariant.
         if is_secondary {
             self.secondary += 1;
-        }
-        if is_supplementary {
+        } else if is_supplementary {
             self.supplementary += 1;
         }
         if is_mapped {

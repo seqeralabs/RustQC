@@ -195,4 +195,68 @@ mod tests {
             "Missing mapped line in flagstat output"
         );
     }
+
+    /// A record carrying both SECONDARY (0x100) and SUPPLEMENTARY (0x800) must
+    /// be counted as secondary only, matching `samtools flagstat`. Counting it
+    /// in both totals inflates the supplementary count and breaks the
+    /// `primary + secondary + supplementary == total` invariant.
+    #[test]
+    fn test_dual_flagged_reads_count_as_secondary_only() {
+        // 4 primary pairs (8 records), 2 secondary-only, 3 supplementary-only,
+        // 5 secondary+supplementary. Reference values come from
+        // `samtools flagstat` 1.24 on the same records:
+        //   18 in total / 8 primary / 7 secondary / 3 supplementary
+        let mut sam = String::from("@HD\tVN:1.6\tSO:coordinate\n@SQ\tSN:chr1\tLN:20000\n");
+        // Records are emitted in ascending coordinate order (the accumulators
+        // assume coordinate-sorted input).
+        let mut pos = 100u64;
+        let push = |sam: &mut String, name: String, flag: u16, pos: &mut u64| {
+            sam.push_str(&format!(
+                "{name}\t{flag}\tchr1\t{pos}\t30\t10M\t*\t0\t0\tACGTACGTAC\tIIIIIIIIII\n"
+            ));
+            *pos += 20;
+        };
+        for i in 0..4 {
+            push(&mut sam, format!("p{i}"), 99, &mut pos);
+            push(&mut sam, format!("p{i}"), 147, &mut pos);
+        }
+        for i in 0..2 {
+            push(&mut sam, format!("s{i}"), 256, &mut pos);
+        }
+        for i in 0..3 {
+            push(&mut sam, format!("u{i}"), 2048, &mut pos);
+        }
+        for i in 0..5 {
+            push(&mut sam, format!("d{i}"), 2304, &mut pos);
+        }
+
+        let tmp_path = std::env::temp_dir().join("rustqc_test_flagstat_dual_flags.sam");
+        std::fs::write(&tmp_path, sam).expect("Failed to write test SAM");
+
+        let mut reader = bam::Reader::from_path(&tmp_path).expect("Failed to open test SAM");
+        let mut accum = BamStatAccum::default();
+        let mut record = bam::Record::new();
+        while let Some(res) = reader.read(&mut record) {
+            res.expect("Error reading SAM record");
+            accum.process_read(&record, 30);
+        }
+        let _ = std::fs::remove_file(&tmp_path);
+
+        let result = accum.into_result();
+        assert_eq!(result.total_records, 18, "total records");
+        assert_eq!(result.primary_count, 8, "primary count");
+        assert_eq!(
+            result.secondary, 7,
+            "secondary must include dual-flagged records"
+        );
+        assert_eq!(
+            result.supplementary, 3,
+            "supplementary must exclude dual-flagged records"
+        );
+        assert_eq!(
+            result.primary_count + result.secondary + result.supplementary,
+            result.total_records,
+            "primary + secondary + supplementary must equal total"
+        );
+    }
 }

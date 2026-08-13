@@ -57,7 +57,9 @@ pub struct BamStatResult {
     // --- samtools flagstat fields ---
     /// Secondary alignments (0x100).
     pub secondary: u64,
-    /// Supplementary alignments (0x800).
+    /// Supplementary alignments (0x800) that are not also secondary (0x100).
+    /// samtools gives the SECONDARY flag priority, so dual-flagged records
+    /// count only towards `secondary`.
     pub supplementary: u64,
     /// All mapped records (not 0x4).
     pub mapped: u64,
