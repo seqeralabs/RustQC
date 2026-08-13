@@ -65,6 +65,7 @@
 use clap::ValueEnum;
 use serde::Deserialize;
 
+pub mod bamqc;
 pub mod config;
 pub mod cpu;
 pub mod gtf;

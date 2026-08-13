@@ -32,6 +32,99 @@ pub enum Commands {
     /// analyses in one pass. Requires a GTF annotation and duplicate-marked
     /// (not removed) alignments.
     Rna(RnaArgs),
+
+    /// Generic BAM/CRAM QC — coverage, GC, insert size, mapping quality.
+    ///
+    /// The `bamqc` equivalent of Qualimap: genomic QC that needs no
+    /// annotation. Use `rustqc rna` for RNA-seq specific analyses.
+    Bamqc(BamqcArgs),
+}
+
+/// Arguments for the `bamqc` subcommand.
+#[derive(Parser, Debug)]
+#[command(
+    next_line_help = false,
+    term_width = 120,
+    help_template = "\
+{about-with-newline}
+{usage-heading} {usage}
+
+{all-args}"
+)]
+pub struct BamqcArgs {
+    /// Coordinate-sorted alignment file (BAM/SAM/CRAM)
+    #[arg(value_name = "INPUT", required = true, help_heading = "Input / Output")]
+    pub input: String,
+
+    /// Reference FASTA (required for CRAM)
+    #[arg(
+        short,
+        long,
+        value_name = "FASTA",
+        env = "RUSTQC_REFERENCE",
+        help_heading = "Input / Output"
+    )]
+    pub reference: Option<String>,
+
+    /// Output directory [default: .]
+    #[arg(
+        short,
+        long,
+        default_value = ".",
+        hide_default_value = true,
+        env = "RUSTQC_OUTDIR",
+        help_heading = "Input / Output"
+    )]
+    pub outdir: String,
+
+    /// Override sample name (default: derived from the input filename)
+    #[arg(
+        long,
+        value_name = "NAME",
+        env = "RUSTQC_SAMPLE_NAME",
+        help_heading = "Input / Output"
+    )]
+    pub sample_name: Option<String>,
+
+    /// Number of htslib decompression threads [default: 1]
+    #[arg(
+        short,
+        long,
+        default_value_t = 1,
+        hide_default_value = true,
+        env = "RUSTQC_THREADS",
+        help_heading = "General"
+    )]
+    pub threads: usize,
+
+    /// Exclude duplicate-flagged reads from all metrics (Qualimap --skip-duplicated)
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "RUSTQC_SKIP_DUPLICATED",
+        help_heading = "General"
+    )]
+    pub skip_duplicated: bool,
+
+    /// Suppress output except warnings/errors
+    #[arg(
+        short = 'q',
+        long,
+        conflicts_with = "verbose",
+        env = "RUSTQC_QUIET",
+        help_heading = "General"
+    )]
+    pub quiet: bool,
+
+    /// Show additional detail
+    #[arg(
+        short = 'v',
+        long,
+        conflicts_with = "quiet",
+        env = "RUSTQC_VERBOSE",
+        help_heading = "General"
+    )]
+    pub verbose: bool,
 }
 
 /// Arguments for the `rna` subcommand.
