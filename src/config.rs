@@ -165,6 +165,14 @@ pub struct RnaConfig {
     /// Qualimap RNA-Seq QC configuration.
     #[serde(default)]
     pub qualimap: QualimapConfig,
+
+    /// Gene body coverage (RSeQC geneBody_coverage) configuration.
+    #[serde(default)]
+    pub gene_body_coverage: GeneBodyCoverageConfig,
+
+    /// Read GC distribution (RSeQC read_GC) configuration.
+    #[serde(default)]
+    pub read_gc: ReadGcConfig,
 }
 
 // ============================================================================
@@ -595,6 +603,49 @@ pub struct QualimapConfig {
 }
 
 impl Default for QualimapConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+/// Configuration for gene body coverage profiling (RSeQC `geneBody_coverage.py`).
+///
+/// Profiles read coverage along the gene body from 5' to 3' in 100 percentile
+/// bins — the standard signal for RNA degradation and 3'-end bias.
+///
+/// Example:
+/// ```yaml
+/// gene_body_coverage:
+///   enabled: true
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct GeneBodyCoverageConfig {
+    /// Whether to profile gene body coverage. Defaults to true.
+    pub enabled: bool,
+}
+
+impl Default for GeneBodyCoverageConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+/// Configuration for the read GC distribution (RSeQC `read_GC.py`).
+///
+/// Example:
+/// ```yaml
+/// read_gc:
+///   enabled: true
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct ReadGcConfig {
+    /// Whether to compute the read GC distribution. Defaults to true.
+    pub enabled: bool,
+}
+
+impl Default for ReadGcConfig {
     fn default() -> Self {
         Self { enabled: true }
     }

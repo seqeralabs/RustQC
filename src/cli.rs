@@ -305,6 +305,24 @@ pub struct RnaArgs {
     )]
     pub skip_tin: bool,
 
+    /// Skip gene body coverage profiling
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "RUSTQC_SKIP_GENE_BODY_COVERAGE",
+        help_heading = "Tool parameters"
+    )]
+    pub skip_gene_body_coverage: bool,
+
+    /// Skip read GC distribution
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "RUSTQC_SKIP_READ_GC",
+        help_heading = "Tool parameters"
+    )]
+    pub skip_read_gc: bool,
+
     /// Skip read duplication analysis
     #[arg(
         long,

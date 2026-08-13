@@ -9,6 +9,7 @@ pub mod plots;
 
 pub mod bam_stat;
 pub mod flagstat;
+pub mod gene_body_coverage;
 pub mod idxstats;
 pub mod infer_experiment;
 pub mod inner_distance;
@@ -16,5 +17,6 @@ pub mod junction_annotation;
 pub mod junction_saturation;
 pub mod read_distribution;
 pub mod read_duplication;
+pub mod read_gc;
 pub mod stats;
 pub mod tin;

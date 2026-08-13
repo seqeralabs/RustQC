@@ -97,7 +97,9 @@ src/
       junction_saturation.rs — junction_saturation.py reimplementation
       plots.rs              — RSeQC plot generation (duplication, junctions, etc.)
       read_distribution.rs  — read_distribution.py reimplementation
+      gene_body_coverage.rs — geneBody_coverage.py reimplementation (5'->3' profile)
       read_duplication.rs   — read_duplication.py reimplementation
+      read_gc.rs            — read_GC.py reimplementation (GC distribution)
       stats.rs              — samtools stats full output (SN + all histogram sections)
       tin.rs                — TIN (Transcript Integrity Number) analysis
 tests/
@@ -294,6 +296,12 @@ forwarded to `count_reads()` as the `skip_dup_check: bool` parameter).
   `infer_experiment:`, `read_duplication:`, `read_distribution:`, `junction_annotation:`,
   `junction_saturation:`, `inner_distance:`, `tin:`). Each has an `enabled: bool` toggle
   and tool-specific parameter overrides. CLI flags take precedence over config values.
+- `gene_body_coverage` samples 100 percentile positions per representative transcript
+  using a direct port of RSeQC's `mystat.percentile_list`, including Python's
+  round-half-to-even. Do not replace that with `f64::round` — it shifts sampled
+  positions by a base and changes bin counts.
+- `read_gc` follows upstream `readGC` filters: skip unmapped/QC-fail/below-MAPQ,
+  but keep secondary alignments and duplicates.
 - Under `rna:`, there are also sections for `preseq:`, `qualimap:`,
   `flagstat:`, `idxstats:`, and `samtools_stats:`. Each has an `enabled: bool` toggle.
   Preseq has additional parameters: `max_extrap`, `step_size`, `n_bootstraps`,
