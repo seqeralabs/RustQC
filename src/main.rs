@@ -76,6 +76,8 @@ fn main() -> Result<()> {
     let verbosity = match &cli.command {
         cli::Commands::Rna(args) if args.quiet => Verbosity::Quiet,
         cli::Commands::Rna(args) if args.verbose => Verbosity::Verbose,
+        cli::Commands::Align(args) if args.quiet => Verbosity::Quiet,
+        cli::Commands::Align(args) if args.verbose => Verbosity::Verbose,
         _ => Verbosity::Normal,
     };
 
@@ -94,7 +96,154 @@ fn main() -> Result<()> {
 
     match cli.command {
         cli::Commands::Rna(args) => run_rna(args, &ui),
+        cli::Commands::Align(args) => run_align(args, &ui),
     }
+}
+
+/// Run the `align` subcommand: samtools stats, mosdepth-equivalent depth and
+/// NGSCheckMate genotyping from a single streaming pass.
+///
+/// # Arguments
+/// * `args` - Parsed CLI arguments
+/// * `ui` - Terminal UI handle
+fn run_align(args: cli::AlignArgs, ui: &Ui) -> Result<()> {
+    use rustqc::align;
+
+    let start = Instant::now();
+    let sample_name = args.sample_name.clone().unwrap_or_else(|| {
+        Path::new(&args.input)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("sample")
+            .to_string()
+    });
+    let outdir = Path::new(&args.outdir);
+    std::fs::create_dir_all(outdir)
+        .with_context(|| format!("Failed to create output directory: {}", outdir.display()))?;
+
+    // SNP panel for NGSCheckMate genotyping (optional)
+    let panel = match args.snp_bed.as_deref() {
+        Some(path) => {
+            let panel = align::parse_snp_bed(path)?;
+            ui.detail(&format!(
+                "Loaded {} SNP sites for genotyping",
+                format_count(panel.num_sites as u64)
+            ));
+            Some(panel)
+        }
+        None => None,
+    };
+
+    ui.blank();
+    ui.step(&format!("Processing {}", args.input));
+
+    let mut reader = rust_htslib::bam::Reader::from_path(&args.input)
+        .with_context(|| format!("Failed to open alignment file: {}", args.input))?;
+    if let Some(ref_path) = args.reference.as_deref() {
+        reader
+            .set_reference(ref_path)
+            .with_context(|| format!("Failed to set reference FASTA: {}", ref_path))?;
+    }
+    if args.threads > 1 {
+        reader
+            .set_threads(args.threads.saturating_sub(1))
+            .context("Failed to set htslib decompression threads")?;
+    }
+
+    let header = reader.header().clone();
+    let contigs: Vec<(String, u64)> = (0..header.target_count())
+        .map(|tid| {
+            (
+                String::from_utf8_lossy(header.tid2name(tid)).to_string(),
+                header.target_len(tid).unwrap_or(0),
+            )
+        })
+        .collect();
+    ensure!(
+        !contigs.is_empty(),
+        "Alignment file has no reference sequences in its header: {}",
+        args.input
+    );
+
+    let mut stats_accum = rna::rseqc::accumulators::BamStatAccum::default();
+    let mut depth_accum = align::DepthAccum::new(contigs.clone(), args.by);
+    let mut snp_accum = panel
+        .as_ref()
+        .map(|p| align::SnpAccum::new(p, args.mapq_cut, args.min_base_quality));
+
+    let mut record = rust_htslib::bam::Record::new();
+    let mut n = 0u64;
+    while let Some(res) = reader.read(&mut record) {
+        res.context("Error reading alignment record")?;
+        n += 1;
+
+        stats_accum.process_read(&record, args.mapq_cut);
+        depth_accum.process_read(&record);
+
+        if let (Some(accum), Some(panel)) = (&mut snp_accum, panel.as_ref()) {
+            let tid = record.tid();
+            if tid >= 0 && (tid as usize) < contigs.len() {
+                accum.process_read(&record, &contigs[tid as usize].0, panel);
+            }
+        }
+    }
+
+    let stats_result = stats_accum.into_result();
+    let (contig_depth, windows) = depth_accum.finish();
+
+    // --- samtools-compatible outputs ---
+    let stats_path = outdir.join(format!("{sample_name}.stats"));
+    rna::rseqc::stats::write_stats(&stats_result, &stats_path)?;
+    let flagstat_path = outdir.join(format!("{sample_name}.flagstat"));
+    rna::rseqc::flagstat::write_flagstat(&stats_result, &flagstat_path)?;
+    let bam_header_refs: Vec<(String, u64)> = contigs.clone();
+    let idxstats_path = outdir.join(format!("{sample_name}.idxstats"));
+    rna::rseqc::idxstats::write_idxstats(&stats_result, &bam_header_refs, &idxstats_path)?;
+
+    // --- mosdepth-compatible outputs ---
+    let summary_path = outdir.join(format!("{sample_name}.mosdepth.summary.txt"));
+    align::output::write_summary(&contig_depth, &summary_path)?;
+    let dist_path = outdir.join(format!("{sample_name}.mosdepth.global.dist.txt"));
+    align::output::write_global_dist(&contig_depth, &dist_path)?;
+    let regions_path = outdir.join(format!("{sample_name}.regions.bed.gz"));
+    align::output::write_regions(&windows, &regions_path)?;
+
+    ui.output_group("samtools");
+    for path in [&stats_path, &flagstat_path, &idxstats_path] {
+        ui.output_item("samtools", &path.display().to_string());
+    }
+    ui.output_group("mosdepth");
+    for path in [&summary_path, &dist_path, &regions_path] {
+        ui.output_item("mosdepth", &path.display().to_string());
+    }
+
+    // --- NGSCheckMate VCF ---
+    if let (Some(panel), Some(accum)) = (panel.as_ref(), snp_accum.as_ref()) {
+        let vcf_path = outdir.join(format!("{sample_name}.ngscheckmate.vcf.gz"));
+        align::output::write_ngscheckmate_vcf(panel, accum, &sample_name, &contigs, &vcf_path)?;
+        ui.output_group("ngscheckmate");
+        ui.output_item("ngscheckmate", &vcf_path.display().to_string());
+        ui.output_detail(&format!(
+            "{} of {} SNP sites covered",
+            format_count(accum.covered_sites() as u64),
+            format_count(panel.num_sites as u64),
+        ));
+    }
+
+    let total_length: u64 = contigs.iter().map(|(_, len)| len).sum();
+    let total_bases: u64 = contig_depth.iter().map(|c| c.total_bases).sum();
+    ui.blank();
+    ui.detail(&format!(
+        "{} records, mean depth {:.2}X, finished in {}",
+        format_count(n),
+        if total_length == 0 {
+            0.0
+        } else {
+            total_bases as f64 / total_length as f64
+        },
+        format_duration(start.elapsed())
+    ));
+    Ok(())
 }
 
 /// Reconstruct the command line for the featureCounts-compatible header comment.

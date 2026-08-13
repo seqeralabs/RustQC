@@ -1,0 +1,112 @@
+---
+title: align
+description: Single-pass alignment QC for DNA pipelines — samtools stats, mosdepth-compatible depth, and NGSCheckMate genotyping from one pass over a CRAM/BAM.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+`rustqc align` computes in **one streaming pass** what DNA pipelines currently
+get from three independent passes over the same CRAM/BAM:
+
+- `samtools stats` (plus `flagstat` and `idxstats`)
+- `mosdepth` per-contig and per-window depth
+- the `bcftools mpileup` genotyping step that feeds NGSCheckMate
+
+```bash
+rustqc align sample.cram \
+  --reference genome.fa \
+  --snp-bed SNP_GRCh38_hg38_wChr.bed \
+  --by 500 \
+  --outdir results/
+```
+
+Input must be coordinate-sorted.
+
+## Why the genotyping is nearly free
+
+The NGSCheckMate panel is ~10,000 positions across ~3 Gb. With a
+coordinate-sorted file the panel is a sorted array, so the check for the vast
+majority of reads is a single comparison; only the ~0.003% of reads that
+actually overlap a site need CIGAR-resolved base extraction. `bcftools mpileup`
+instead builds complete pileup columns genome-wide and runs a genotype
+likelihood model, which is where the hours go.
+
+## Options
+
+| Flag              | Description                                                          |
+| ----------------- | -------------------------------------------------------------------- |
+| `-r, --reference` | Reference FASTA (required for CRAM)                                  |
+| `--snp-bed`       | NGSCheckMate SNP BED; enables genotyping                             |
+| `--by`            | Depth window size in bases (default 500)                             |
+| `-Q, --mapq`      | MAPQ cutoff for stats and genotyping (default 30)                    |
+| `--min-bq`        | Minimum base quality for genotyping (default 13)                     |
+| `-t, --threads`   | htslib decompression threads                                         |
+
+## Output files
+
+| File                              | Equivalent to                    | Consumer  |
+| --------------------------------- | -------------------------------- | --------- |
+| `{sample}.stats`                  | `samtools stats`                 | MultiQC   |
+| `{sample}.flagstat`               | `samtools flagstat`              | MultiQC   |
+| `{sample}.idxstats`               | `samtools idxstats`              | MultiQC   |
+| `{sample}.mosdepth.summary.txt`   | `mosdepth` summary               | MultiQC   |
+| `{sample}.mosdepth.global.dist.txt` | `mosdepth` global distribution | MultiQC   |
+| `{sample}.regions.bed.gz`         | `mosdepth` per-window depth      | MultiQC   |
+| `{sample}.ngscheckmate.vcf.gz`    | `bcftools mpileup \| call`       | `ncm.py`  |
+
+### SNP BED format
+
+The 6-column NGSCheckMate layout, as shipped with NGSCheckMate:
+
+```
+chr17	46549406	46549407	rs201103889	A	C
+chr1	152308305	152308306	rs2184953	T	C
+```
+
+Reference and alternate alleles are **required** — without them, per-sample
+VCFs could not be compared against a common set of alleles. A BED without them
+is rejected with an explicit error rather than guessed at.
+
+### Genotypes
+
+`ncm.py` only needs to tell hom-ref, het and hom-alt apart, so genotypes come
+from the alternate allele fraction rather than a likelihood model:
+
+| Alt fraction  | GT    |
+| ------------- | ----- |
+| `< 0.15`      | `0/0` |
+| `0.15 – 0.85` | `0/1` |
+| `> 0.85`      | `1/1` |
+| no coverage   | `./.` |
+
+`FORMAT` is `GT:AD:DP`.
+
+## Depth semantics
+
+Depth is exact, computed from CIGAR-aware start/end delta events: `M`/`=`/`X`/`D`
+contribute, `N` skips leave a gap. Because input is coordinate-sorted, depth is
+finalised as the file streams past, so memory scales with pile-up depth rather
+than genome size.
+
+Records excluded from depth: unmapped, secondary, QC-fail and duplicate —
+mosdepth's default `--flag 1796`.
+
+## Validation
+
+Against `mosdepth 0.3.x` on the test dataset, all three depth outputs are
+**byte-identical**: `mosdepth.summary.txt`, `mosdepth.global.dist.txt` and the
+decompressed `regions.bed.gz`. This includes mosdepth's quirks — the
+`<chrom>_region` summary rows emitted when `--by` is used, and the sparse tail
+skipped from the distribution when the cumulative fraction is below `8e-5`.
+
+The `samtools stats` output comes from the same accumulator the `rna` command
+uses, which is validated against samtools separately.
+
+<Aside type="caution" title="Not covered">
+`--by` takes a fixed window size only; a BED of target regions
+(mosdepth's `--by <bed>`) is not supported yet, so WES target-restricted
+coverage still needs mosdepth. There is no `per-base.bed.gz` output and no
+`.csi` index for `regions.bed.gz`. Genotyping applies flag, MAPQ and base
+quality filters but no BAQ recalculation, so allele counts can differ slightly
+from `bcftools mpileup` in repetitive regions.
+</Aside>

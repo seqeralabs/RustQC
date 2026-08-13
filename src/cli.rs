@@ -32,6 +32,130 @@ pub enum Commands {
     /// analyses in one pass. Requires a GTF annotation and duplicate-marked
     /// (not removed) alignments.
     Rna(RnaArgs),
+
+    /// Single-pass alignment QC — samtools stats, mosdepth and NGSCheckMate
+    /// genotyping from one pass over a CRAM/BAM.
+    Align(AlignArgs),
+}
+
+/// Arguments for the `align` subcommand.
+#[derive(Parser, Debug)]
+#[command(
+    next_line_help = false,
+    term_width = 120,
+    help_template = "\
+{about-with-newline}
+{usage-heading} {usage}
+
+{all-args}"
+)]
+pub struct AlignArgs {
+    /// Coordinate-sorted alignment file (BAM/SAM/CRAM)
+    #[arg(value_name = "INPUT", required = true, help_heading = "Input / Output")]
+    pub input: String,
+
+    /// Reference FASTA (required for CRAM)
+    #[arg(
+        short,
+        long,
+        value_name = "FASTA",
+        env = "RUSTQC_REFERENCE",
+        help_heading = "Input / Output"
+    )]
+    pub reference: Option<String>,
+
+    /// NGSCheckMate SNP BED (6 columns: chrom, start, end, id, ref, alt)
+    #[arg(
+        long = "snp-bed",
+        value_name = "BED",
+        env = "RUSTQC_SNP_BED",
+        help_heading = "Input / Output"
+    )]
+    pub snp_bed: Option<String>,
+
+    /// Output directory [default: .]
+    #[arg(
+        short,
+        long,
+        default_value = ".",
+        hide_default_value = true,
+        env = "RUSTQC_OUTDIR",
+        help_heading = "Input / Output"
+    )]
+    pub outdir: String,
+
+    /// Override sample name (default: derived from the input filename)
+    #[arg(
+        long,
+        value_name = "NAME",
+        env = "RUSTQC_SAMPLE_NAME",
+        help_heading = "Input / Output"
+    )]
+    pub sample_name: Option<String>,
+
+    /// Depth window size in bases [default: 500]
+    #[arg(
+        long = "by",
+        value_name = "N",
+        default_value_t = 500,
+        hide_default_value = true,
+        env = "RUSTQC_DEPTH_WINDOW",
+        help_heading = "General"
+    )]
+    pub by: u64,
+
+    /// MAPQ cutoff for genotyping and stats [default: 30]
+    #[arg(
+        short = 'Q',
+        long = "mapq",
+        default_value_t = 30,
+        hide_default_value = true,
+        env = "RUSTQC_MAPQ",
+        help_heading = "General"
+    )]
+    pub mapq_cut: u8,
+
+    /// Minimum base quality for genotyping [default: 13]
+    #[arg(
+        long = "min-bq",
+        value_name = "N",
+        default_value_t = 13,
+        hide_default_value = true,
+        env = "RUSTQC_MIN_BQ",
+        help_heading = "General"
+    )]
+    pub min_base_quality: u8,
+
+    /// Number of htslib decompression threads [default: 1]
+    #[arg(
+        short,
+        long,
+        default_value_t = 1,
+        hide_default_value = true,
+        env = "RUSTQC_THREADS",
+        help_heading = "General"
+    )]
+    pub threads: usize,
+
+    /// Suppress output except warnings/errors
+    #[arg(
+        short = 'q',
+        long,
+        conflicts_with = "verbose",
+        env = "RUSTQC_QUIET",
+        help_heading = "General"
+    )]
+    pub quiet: bool,
+
+    /// Show additional detail
+    #[arg(
+        short = 'v',
+        long,
+        conflicts_with = "quiet",
+        env = "RUSTQC_VERBOSE",
+        help_heading = "General"
+    )]
+    pub verbose: bool,
 }
 
 /// Arguments for the `rna` subcommand.
