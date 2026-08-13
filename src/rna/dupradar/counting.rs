@@ -1652,6 +1652,18 @@ pub fn count_reads(
     if merged.total_mapped > 0 && genes_with_reads == 0 {
         let bam_chroms: Vec<&str> = tid_to_name.iter().take(5).map(|s| s.as_str()).collect();
         let gtf_chroms: Vec<&str> = index.keys().take(5).map(|s| s.as_str()).collect();
+        // An empty annotation index is not a naming mismatch — there is nothing
+        // on the GTF side to match against. Say so instead of suggesting a
+        // chromosome_mapping that cannot possibly help.
+        anyhow::ensure!(
+            !gtf_chroms.is_empty(),
+            "No reads could be assigned to any gene because the annotation is empty: \
+             the parsed GTF contains no genes on any chromosome.\n\
+             \n\
+             This is an annotation problem, not a chromosome naming mismatch. Check that the \
+             GTF file is uncorrupted, tab-separated GTF (not GFF3) with 'exon' features carrying \
+             'gene_id' attributes."
+        );
         anyhow::bail!(
             "Chromosome name mismatch: no reads could be assigned to any gene.\n\
              \n\

@@ -8,7 +8,7 @@
 
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::io::BufRead;
 
 /// Represents a single exon interval.
@@ -157,6 +157,80 @@ struct TranscriptBuilder {
     stop_codons: Vec<(u64, u64)>,
 }
 
+/// Counters collected while scanning a GTF, used to explain an empty parse.
+#[derive(Debug, Default)]
+struct GtfParseDiagnostics {
+    /// Non-comment, non-empty lines seen.
+    data_lines: u64,
+    /// Lines with fewer than the 9 mandatory tab-separated columns.
+    short_lines: u64,
+    /// Well-formed `exon` lines seen (before the gene_id check).
+    exon_lines: u64,
+    /// Feature lines of a type we consume that carried no `gene_id` attribute.
+    missing_gene_id: u64,
+    /// Distinct values seen in column 3 (the feature-type column).
+    feature_types: BTreeSet<String>,
+}
+
+/// Build the fatal error raised when a GTF yields no genes.
+///
+/// The message names the most likely root cause based on what the scan saw,
+/// so the failure is actionable instead of surfacing later as an unrelated
+/// "chromosome name mismatch".
+fn empty_gtf_error(path: &str, diag: &GtfParseDiagnostics) -> anyhow::Error {
+    let cause = if diag.data_lines == 0 {
+        "the file contains no annotation lines (it is empty, or every line is a comment)"
+            .to_string()
+    } else if diag.short_lines == diag.data_lines {
+        format!(
+            "all {} annotation lines have fewer than the 9 mandatory tab-separated GTF columns \
+             (truncated file, or space- instead of tab-separated)",
+            diag.data_lines
+        )
+    } else if diag.exon_lines == 0 {
+        let types: Vec<&str> = diag
+            .feature_types
+            .iter()
+            .take(8)
+            .map(|s| s.as_str())
+            .collect();
+        format!(
+            "no 'exon' features were found; feature types present: {}{}. \
+             GFF3 files (which use 'ID='/'Parent=' attributes) are not supported — convert to GTF",
+            if types.is_empty() {
+                "none".to_string()
+            } else {
+                types.join(", ")
+            },
+            if diag.feature_types.len() > 8 {
+                ", ..."
+            } else {
+                ""
+            }
+        )
+    } else if diag.missing_gene_id > 0 {
+        format!(
+            "{} feature lines were found but none carried a 'gene_id' attribute \
+             (GFF3 files use 'ID='/'Parent=' instead — convert to GTF)",
+            diag.missing_gene_id
+        )
+    } else {
+        "the file has exon features with gene_id attributes, but none could be assembled into a \
+         gene"
+            .to_string()
+    };
+
+    anyhow::anyhow!(
+        "No genes could be extracted from GTF file '{}': {}.\n\
+         \n\
+         Every RustQC analysis needs a usable gene annotation, so processing cannot continue.\n\
+         Check that the file is uncorrupted, tab-separated GTF (not GFF3) with 'exon' features \
+         carrying 'gene_id' attributes.",
+        path,
+        cause
+    )
+}
+
 /// Parse a GTF file and return a map of gene_id -> Gene.
 ///
 /// Extracts all exon and CDS features, groups them by gene_id, and builds
@@ -180,6 +254,10 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
     // Use IndexMap to preserve insertion order within each gene
     let mut tx_builders: IndexMap<(String, String), TranscriptBuilder> = IndexMap::new();
 
+    // Diagnostics, used to explain *why* nothing was extracted if the file
+    // turns out to yield no genes (see `empty_gtf_error`).
+    let mut diag = GtfParseDiagnostics::default();
+
     for line in reader.lines() {
         let line = line.context("Failed to read line from GTF file")?;
 
@@ -187,13 +265,19 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
         if line.starts_with('#') || line.is_empty() {
             continue;
         }
+        diag.data_lines += 1;
 
         let fields: Vec<&str> = line.split('\t').collect();
         if fields.len() < 9 {
+            diag.short_lines += 1;
             continue;
         }
 
         let feature_type = fields[2];
+        if feature_type == "exon" {
+            diag.exon_lines += 1;
+        }
+        diag.feature_types.insert(feature_type.to_string());
 
         // We care about exon, CDS, start_codon, and stop_codon features
         if feature_type != "exon"
@@ -224,7 +308,11 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
         let attr_str = fields[8];
         let gene_id = match get_attribute(attr_str, "gene_id") {
             Some(id) => id,
-            None => continue, // Skip features without gene_id
+            None => {
+                // Skip features without gene_id (GFF3 uses ID=/Parent= instead)
+                diag.missing_gene_id += 1;
+                continue;
+            }
         };
 
         // For exon features, update the gene-level data (unchanged from original)
@@ -290,13 +378,11 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
         }
     }
 
-    // Warn if no genes were extracted — likely indicates a format problem
+    // A GTF that yields no genes is unusable for every downstream analysis.
+    // Fail here, where the root cause is still known, rather than letting the
+    // empty annotation surface later as a bogus chromosome-name mismatch.
     if genes.is_empty() {
-        log::warn!(
-            "No genes extracted from GTF file '{}'. Check that the file is in GTF (not GFF3) \
-             format and contains exon features with gene_id attributes.",
-            path
-        );
+        return Err(empty_gtf_error(path, &diag));
     }
 
     // Build Transcript structs from accumulated data and attach to genes
@@ -606,6 +692,78 @@ chr1\ttest\tCDS\t500\t600\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T_orphan\";\
         // T_orphan should be skipped because it has no exons
         assert_eq!(gene.transcripts.len(), 1);
         assert_eq!(gene.transcripts[0].transcript_id, "T1");
+    }
+
+    #[test]
+    fn test_parse_gtf_truncated_file_reports_column_count() {
+        // A GTF truncated to the first 5 of the 9 mandatory columns: the parser
+        // must name the truncation rather than let the empty annotation surface
+        // downstream as a bogus chromosome-name mismatch.
+        let (path, _f) = write_temp_gtf(
+            "\
+chr1\ttest\texon\t100\t200\n\
+chr1\ttest\texon\t300\t400\n",
+        );
+
+        let err = parse_gtf(path.to_str().unwrap(), &[]).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("No genes could be extracted"),
+            "unexpected error: {msg}"
+        );
+        assert!(
+            msg.contains("9 mandatory tab-separated GTF columns"),
+            "error should name the truncation as the cause: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_parse_gtf_gff3_reports_missing_exon_features() {
+        // GFF3 uses ID=/Parent= and 'gene'/'mRNA' feature types.
+        let (path, _f) = write_temp_gtf(
+            "\
+chr1\ttest\tgene\t100\t400\t.\t+\t.\tID=gene:G1\n\
+chr1\ttest\tmRNA\t100\t400\t.\t+\t.\tID=transcript:T1;Parent=gene:G1\n",
+        );
+
+        let err = parse_gtf(path.to_str().unwrap(), &[]).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("no 'exon' features were found"),
+            "error should name the missing exon features: {msg}"
+        );
+        assert!(
+            msg.contains("gene") && msg.contains("mRNA"),
+            "error should list the feature types present: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_parse_gtf_exons_without_gene_id() {
+        // Exon features present, but no gene_id attribute to group them by.
+        let (path, _f) = write_temp_gtf(
+            "\
+chr1\ttest\texon\t100\t200\t.\t+\t.\tID=exon:E1;Parent=transcript:T1\n",
+        );
+
+        let err = parse_gtf(path.to_str().unwrap(), &[]).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("'gene_id' attribute"),
+            "error should name the missing gene_id attribute: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_parse_gtf_empty_file() {
+        let (path, _f) = write_temp_gtf("# only a comment\n");
+
+        let err = parse_gtf(path.to_str().unwrap(), &[]).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("no annotation lines"),
+            "error should report an empty annotation: {msg}"
+        );
     }
 
     #[test]
