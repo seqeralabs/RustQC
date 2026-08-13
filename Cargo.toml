@@ -48,8 +48,10 @@ rayon = "1.11"
 rand = "0.10"
 rand_chacha = "0.10"
 
-# Gzip decompression for .gz annotation files
-flate2 = "1"
+# Gzip decompression for .gz annotation files.
+# zlib-rs is a pure-Rust zlib rewrite: ~2.3x faster than flate2's default
+# miniz_oxide backend on GTF data, with no C toolchain requirement.
+flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
 
 # General utilities
 anyhow = "1"
