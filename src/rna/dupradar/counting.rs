@@ -301,6 +301,20 @@ pub struct CountResult {
     pub qualimap: Option<crate::rna::qualimap::QualimapResult>,
 }
 
+/// featureCounts counting-mode options (`-M` / `-O` equivalents).
+///
+/// These affect only the featureCounts-compatible gene-level and biotype-level
+/// counts. dupRadar's own duplicate-rate matrix keeps its established
+/// semantics, where multi-mappers are tracked separately by design.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FeatureCountsOptions {
+    /// Count multi-mapping reads (`NH` > 1), one count per reported alignment.
+    pub count_multi_mapping: bool,
+    /// Count a read once for every feature it overlaps instead of calling it
+    /// ambiguous.
+    pub count_multi_overlapping: bool,
+}
+
 /// Metadata stored with each interval in the cache-oblivious interval tree.
 #[derive(Debug, Clone, Copy, Default)]
 struct IvMeta {
@@ -677,8 +691,13 @@ impl ChromResult {
 /// When multiple genes are hit, the read is Unassigned_Ambiguity
 /// (matching default featureCounts `-g gene_id` behaviour where each
 /// gene is its own meta-feature).
-fn classify_read_fc(is_multi: bool, gene_hits: &[GeneIdx], result: &mut ChromResult) {
-    if is_multi {
+fn classify_read_fc(
+    is_multi: bool,
+    gene_hits: &[GeneIdx],
+    options: FeatureCountsOptions,
+    result: &mut ChromResult,
+) {
+    if is_multi && !options.count_multi_mapping {
         result.fc_multimapping += 1;
     } else if gene_hits.is_empty() {
         result.fc_no_features += 1;
@@ -687,6 +706,16 @@ fn classify_read_fc(is_multi: bool, gene_hits: &[GeneIdx], result: &mut ChromRes
         let idx = gene_hits[0] as usize;
         if idx < result.gene_counts.len() {
             result.gene_counts[idx].fc_reads += 1;
+        }
+    } else if options.count_multi_overlapping {
+        // featureCounts -O: the read is Assigned once and counted for every
+        // feature it overlaps.
+        result.fc_assigned += 1;
+        for &gidx in gene_hits {
+            let idx = gidx as usize;
+            if idx < result.gene_counts.len() {
+                result.gene_counts[idx].fc_reads += 1;
+            }
         }
     } else {
         // Multiple gene hits → Ambiguous (default featureCounts behaviour)
@@ -714,10 +743,12 @@ fn classify_read_fc_biotype(
     gene_hits: &[GeneIdx],
     gene_to_biotype: &[u16],
     biotype_hits_buf: &mut Vec<u16>,
+    options: FeatureCountsOptions,
     result: &mut ChromResult,
 ) {
-    // Multi-mapped reads are excluded from biotype counting (same as gene-level)
-    if is_multi {
+    // Multi-mapped reads are excluded from biotype counting (same as
+    // gene-level) unless -M is in effect.
+    if is_multi && !options.count_multi_mapping {
         return;
     }
     if gene_hits.is_empty() {
@@ -756,6 +787,16 @@ fn classify_read_fc_biotype(
             // meta-feature), but not tracked in named biotype counts
             result.fc_biotype_assigned += 1;
         }
+    } else if options.count_multi_overlapping {
+        // featureCounts -O at the biotype level: count the read once for each
+        // distinct known biotype meta-feature it overlaps.
+        result.fc_biotype_assigned += 1;
+        for &bidx in biotype_hits_buf.iter() {
+            let idx = bidx as usize;
+            if idx < result.biotype_reads.len() {
+                result.biotype_reads[idx] += 1;
+            }
+        }
     } else {
         // Multiple distinct meta-features → Ambiguous at biotype level
         result.fc_biotype_ambiguous += 1;
@@ -781,6 +822,7 @@ fn process_counting_record(
     stranded: Strandedness,
     paired: bool,
     gene_to_biotype: &[u16],
+    fc_options: FeatureCountsOptions,
     aligned_blocks_buf: &mut Vec<(u64, u64)>,
     gene_hits: &mut Vec<GeneIdx>,
     biotype_hits_buf: &mut Vec<u16>,
@@ -847,12 +889,13 @@ fn process_counting_record(
     }
 
     // --- Per-read featureCounts counting (independent of mate pairing) ---
-    classify_read_fc(is_multi, gene_hits, result);
+    classify_read_fc(is_multi, gene_hits, fc_options, result);
     classify_read_fc_biotype(
         is_multi,
         gene_hits,
         gene_to_biotype,
         biotype_hits_buf,
+        fc_options,
         result,
     );
 
@@ -981,6 +1024,7 @@ fn process_chromosome_batch(
     qualimap_index: Option<&crate::rna::qualimap::QualimapIndex>,
     gene_to_biotype: &[u16],
     num_biotypes: usize,
+    fc_options: FeatureCountsOptions,
     progress: Option<&ProgressBar>,
 ) -> Result<(ChromResult, Option<RseqcAccumulators>)> {
     let mut result = ChromResult::new(num_genes, num_biotypes);
@@ -1090,6 +1134,7 @@ fn process_chromosome_batch(
                 stranded,
                 paired,
                 gene_to_biotype,
+                fc_options,
                 &mut aligned_blocks_buf,
                 &mut gene_hits,
                 &mut biotype_hits_buf,
@@ -1152,6 +1197,7 @@ pub fn count_reads(
     rseqc_config: Option<&RseqcConfig>,
     rseqc_annotations: Option<&RseqcAnnotations>,
     qualimap_index: Option<&crate::rna::qualimap::QualimapIndex>,
+    fc_options: FeatureCountsOptions,
     progress: Option<&ProgressBar>,
 ) -> Result<CountResult> {
     // Build gene ID interner for allocation-free lookups in the hot loop
@@ -1302,6 +1348,7 @@ pub fn count_reads(
                         qualimap_index,
                         &gene_to_biotype,
                         num_biotypes,
+                        fc_options,
                         progress,
                     )
                 })
@@ -1433,6 +1480,7 @@ pub fn count_reads(
                 stranded,
                 paired,
                 &gene_to_biotype,
+                fc_options,
                 &mut aligned_blocks_buf,
                 &mut gene_hits,
                 &mut biotype_hits_buf,
@@ -1783,7 +1831,12 @@ mod tests {
         let mut result = make_test_chrom_result(3);
         let gene_hits: Vec<GeneIdx> = vec![0]; // has a hit, but is_multi=true
 
-        classify_read_fc(true, &gene_hits, &mut result);
+        classify_read_fc(
+            true,
+            &gene_hits,
+            FeatureCountsOptions::default(),
+            &mut result,
+        );
 
         assert_eq!(
             result.fc_multimapping, 1,
@@ -1803,7 +1856,12 @@ mod tests {
         let mut result = make_test_chrom_result(3);
         let gene_hits: Vec<GeneIdx> = vec![];
 
-        classify_read_fc(false, &gene_hits, &mut result);
+        classify_read_fc(
+            false,
+            &gene_hits,
+            FeatureCountsOptions::default(),
+            &mut result,
+        );
 
         assert_eq!(
             result.fc_no_features, 1,
@@ -1819,7 +1877,12 @@ mod tests {
         let mut result = make_test_chrom_result(3);
         let gene_hits: Vec<GeneIdx> = vec![1];
 
-        classify_read_fc(false, &gene_hits, &mut result);
+        classify_read_fc(
+            false,
+            &gene_hits,
+            FeatureCountsOptions::default(),
+            &mut result,
+        );
 
         assert_eq!(
             result.fc_assigned, 1,
@@ -1841,7 +1904,12 @@ mod tests {
         let mut result = make_test_chrom_result(4);
         let gene_hits: Vec<GeneIdx> = vec![0, 1];
 
-        classify_read_fc(false, &gene_hits, &mut result);
+        classify_read_fc(
+            false,
+            &gene_hits,
+            FeatureCountsOptions::default(),
+            &mut result,
+        );
 
         assert_eq!(
             result.fc_ambiguous, 1,
@@ -1861,7 +1929,12 @@ mod tests {
         let mut result = make_test_chrom_result(5);
         let gene_hits: Vec<GeneIdx> = vec![0, 1, 2];
 
-        classify_read_fc(false, &gene_hits, &mut result);
+        classify_read_fc(
+            false,
+            &gene_hits,
+            FeatureCountsOptions::default(),
+            &mut result,
+        );
 
         assert_eq!(
             result.fc_ambiguous, 1,
@@ -1879,15 +1952,15 @@ mod tests {
         let mut result = make_test_chrom_result(3);
 
         // First call: single hit to gene 0
-        classify_read_fc(false, &[0], &mut result);
+        classify_read_fc(false, &[0], FeatureCountsOptions::default(), &mut result);
         // Second call: single hit to gene 0 again
-        classify_read_fc(false, &[0], &mut result);
+        classify_read_fc(false, &[0], FeatureCountsOptions::default(), &mut result);
         // Third call: multi-mapped
-        classify_read_fc(true, &[0], &mut result);
+        classify_read_fc(true, &[0], FeatureCountsOptions::default(), &mut result);
         // Fourth call: no features
-        classify_read_fc(false, &[], &mut result);
+        classify_read_fc(false, &[], FeatureCountsOptions::default(), &mut result);
         // Fifth call: ambiguous (multiple genes)
-        classify_read_fc(false, &[0, 1], &mut result);
+        classify_read_fc(false, &[0, 1], FeatureCountsOptions::default(), &mut result);
 
         assert_eq!(result.fc_assigned, 2);
         assert_eq!(result.fc_multimapping, 1);
@@ -1895,6 +1968,85 @@ mod tests {
         assert_eq!(result.fc_ambiguous, 1);
         assert_eq!(result.gene_counts[0].fc_reads, 2);
         assert_eq!(result.gene_counts[1].fc_reads, 0);
+    }
+
+    #[test]
+    fn test_fc_classify_count_multi_mapping_option() {
+        // -M: multi-mapping reads are counted instead of being reported as
+        // Unassigned_MultiMapping.
+        let options = FeatureCountsOptions {
+            count_multi_mapping: true,
+            count_multi_overlapping: false,
+        };
+        let mut result = make_test_chrom_result(3);
+
+        classify_read_fc(true, &[0], options, &mut result);
+        classify_read_fc(true, &[1], options, &mut result);
+
+        assert_eq!(result.fc_multimapping, 0, "no read left unassigned");
+        assert_eq!(result.fc_assigned, 2);
+        assert_eq!(result.gene_counts[0].fc_reads, 1);
+        assert_eq!(result.gene_counts[1].fc_reads, 1);
+    }
+
+    #[test]
+    fn test_fc_classify_count_multi_overlapping_option() {
+        // -O: a read overlapping several genes is counted once per gene and
+        // reported as Assigned rather than Ambiguous.
+        let options = FeatureCountsOptions {
+            count_multi_mapping: false,
+            count_multi_overlapping: true,
+        };
+        let mut result = make_test_chrom_result(3);
+
+        classify_read_fc(false, &[0, 1, 2], options, &mut result);
+
+        assert_eq!(result.fc_ambiguous, 0);
+        assert_eq!(result.fc_assigned, 1, "the read is assigned once");
+        assert_eq!(result.gene_counts[0].fc_reads, 1);
+        assert_eq!(result.gene_counts[1].fc_reads, 1);
+        assert_eq!(result.gene_counts[2].fc_reads, 1);
+    }
+
+    #[test]
+    fn test_fc_biotype_count_multi_overlapping_option() {
+        // -O at the biotype level: one count per distinct biotype meta-feature.
+        let options = FeatureCountsOptions {
+            count_multi_mapping: false,
+            count_multi_overlapping: true,
+        };
+        let mut result = make_test_chrom_result(3);
+        result.biotype_reads = vec![0; 2];
+        // gene 0 → biotype 0, gene 1 → biotype 1, gene 2 → biotype 0
+        let gene_to_biotype: Vec<u16> = vec![0, 1, 0];
+        let mut buf: Vec<u16> = Vec::new();
+
+        classify_read_fc_biotype(
+            false,
+            &[0, 1],
+            &gene_to_biotype,
+            &mut buf,
+            options,
+            &mut result,
+        );
+
+        assert_eq!(result.fc_biotype_ambiguous, 0);
+        assert_eq!(result.fc_biotype_assigned, 1);
+        assert_eq!(result.biotype_reads[0], 1);
+        assert_eq!(result.biotype_reads[1], 1);
+
+        // Two genes of the SAME biotype remain a single meta-feature hit
+        classify_read_fc_biotype(
+            false,
+            &[0, 2],
+            &gene_to_biotype,
+            &mut buf,
+            options,
+            &mut result,
+        );
+        assert_eq!(result.fc_biotype_assigned, 2);
+        assert_eq!(result.biotype_reads[0], 2);
+        assert_eq!(result.biotype_reads[1], 1);
     }
 
     // --- Chromosome partitioning tests ---

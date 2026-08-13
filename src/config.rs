@@ -165,6 +165,10 @@ pub struct RnaConfig {
     /// Qualimap RNA-Seq QC configuration.
     #[serde(default)]
     pub qualimap: QualimapConfig,
+
+    /// split_bam BED-interval classification configuration (rRNA quantification).
+    #[serde(default)]
+    pub split_bam: SplitBamConfig,
 }
 
 // ============================================================================
@@ -275,6 +279,24 @@ pub struct FeatureCountsConfig {
     /// Defaults to `"gene_biotype"` (Ensembl convention).
     /// Use `"gene_type"` for GENCODE GTF files.
     pub biotype_attribute: String,
+
+    /// Count multi-mapping reads (featureCounts `-M`).
+    ///
+    /// By default multi-mapping reads (`NH` > 1) are reported as
+    /// `Unassigned_MultiMapping` and never counted. When enabled, every
+    /// reported alignment of a multi-mapping read is counted, as
+    /// `featureCounts -M` does. Matters for high-copy repeat families such as
+    /// rDNA, where most reads multi-map.
+    /// **Default:** `false`.
+    pub count_multi_mapping: bool,
+
+    /// Count reads overlapping several features (featureCounts `-O`).
+    ///
+    /// By default a read overlapping more than one gene is reported as
+    /// `Unassigned_Ambiguity`. When enabled, the read is counted once for
+    /// every feature it overlaps, as `featureCounts -O` does.
+    /// **Default:** `false`.
+    pub count_multi_overlapping: bool,
 }
 
 impl Default for FeatureCountsConfig {
@@ -287,6 +309,8 @@ impl Default for FeatureCountsConfig {
             biotype_counts_mqc: true,
             biotype_rrna_mqc: true,
             biotype_attribute: "gene_biotype".to_string(),
+            count_multi_mapping: false,
+            count_multi_overlapping: false,
         }
     }
 }
@@ -598,6 +622,33 @@ impl Default for QualimapConfig {
     fn default() -> Self {
         Self { enabled: true }
     }
+}
+
+/// Configuration for split_bam BED-interval read classification.
+///
+/// Reimplements the counting side of RSeQC's `split_bam.py`: every alignment
+/// is classified as overlapping (`in`) or not overlapping (`ex`) a set of BED
+/// intervals, with unmapped/QC-failed records reported as `junk`. The usual
+/// use is rRNA quantification, which the GTF/biotype route under-reports on
+/// stock GRCh38/GENCODE builds.
+///
+/// Disabled unless a BED file is supplied (`--rrna-bed` or `bed:` here).
+///
+/// Example:
+/// ```yaml
+/// split_bam:
+///   enabled: true
+///   bed: /refs/GRCh38_rRNA.bed
+/// ```
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+pub struct SplitBamConfig {
+    /// Whether to run the BED-interval classification. Requires `bed`.
+    pub enabled: bool,
+    /// Path to the BED file of intervals (plain or gzip-compressed).
+    ///
+    /// The CLI `--rrna-bed` flag takes precedence over this setting.
+    pub bed: Option<String>,
 }
 
 /// Configuration for samtools idxstats-compatible output.

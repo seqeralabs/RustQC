@@ -609,6 +609,65 @@ RustQC produces gene-level TIN scores (one row per gene, using the longest
 transcript as representative), while RSeQC's `tin.py` produces transcript-level
 scores. Both formats are compatible with MultiQC.
 
+## split_bam (BED-interval classification)
+
+Reimplements the counting side of RSeQC's `split_bam.py`: every alignment is
+classified against a BED file of genomic intervals. The usual use is **rRNA
+quantification**, where interval overlap is far more robust than the GTF/biotype
+route (see the [featureCounts page](../featurecounts/#counting-multi-mapping-and-multi-overlapping-reads)
+for why biotype %rRNA under-reports on stock GRCh38/GENCODE builds).
+
+Disabled unless a BED file is supplied:
+
+```bash
+rustqc rna sample.bam --gtf genes.gtf --rrna-bed GRCh38_rRNA.bed
+```
+
+| File                      | Description                                            |
+| ------------------------- | ------------------------------------------------------ |
+| `{stem}.split_bam.tsv` | Per-category counts and percentages                    |
+
+Categories follow `split_bam.py`:
+
+| Category | Meaning                                                     |
+| -------- | ----------------------------------------------------------- |
+| `in`     | Alignment (or its mate) starts inside a BED interval        |
+| `ex`     | Mapped, QC-passing alignment that does not                  |
+| `junk`   | Unmapped or QC-failed record                                |
+
+```
+category	count	percent_of_total	percent_of_usable
+in	107	21.9262	22.1532
+ex	376	77.0492	77.8468
+junk	5	1.0246	NA
+total	488	100.0000	NA
+```
+
+`percent_of_usable` excludes `junk` records from the denominator, so it answers
+"what fraction of usable alignments fall inside the intervals?".
+
+<Aside type="note" title="Multi-mappers are included on purpose">
+Unlike the featureCounts pass, split_bam does **not** filter secondary or
+supplementary alignments. That is what lets it see the rDNA multi-mappers that
+featureCounts' default single-hit rule discards.
+</Aside>
+
+<Aside type="caution" title="No split BAM files are written">
+RSeQC's `split_bam.py` writes three BAM files (`.in.bam`, `.ex.bam`,
+`.junk.bam`). RustQC reports the counts only — writing three extra BAM copies
+would defeat the point of the single-pass design. If you need the reads
+themselves, use `samtools view -L`.
+</Aside>
+
+In the YAML config:
+
+```yaml
+rna:
+  split_bam:
+    enabled: true
+    bed: /refs/GRCh38_rRNA.bed
+```
+
 ## Compatibility with RSeQC
 
 All output files are designed to be drop-in replacements for the corresponding

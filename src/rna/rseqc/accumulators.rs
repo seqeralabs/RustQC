@@ -50,6 +50,8 @@ pub struct RseqcAnnotations<'a> {
 
     /// TIN index for transcript integrity number calculation.
     pub tin_index: Option<&'a super::tin::TinIndex>,
+    /// BED intervals for split_bam interval-based classification.
+    pub bed_intervals: Option<&'a super::split_bam::BedIntervals>,
 }
 
 /// Per-tool configuration parameters.
@@ -97,6 +99,8 @@ pub struct RseqcConfig {
     pub inner_distance_enabled: bool,
     /// Whether TIN analysis is enabled.
     pub tin_enabled: bool,
+    /// Whether split_bam BED-interval classification is enabled.
+    pub split_bam_enabled: bool,
     /// Number of equally-spaced sampling positions per transcript for TIN.
     pub tin_sample_size: usize,
     /// Minimum number of read starts for a transcript to compute TIN.
@@ -2123,6 +2127,8 @@ pub struct RseqcAccumulators {
     pub tin: Option<TinAccum>,
     /// preseq library complexity accumulator (`None` when disabled).
     pub preseq: Option<PreseqAccum>,
+    /// split_bam BED-interval classification accumulator (`None` when disabled).
+    pub split_bam: Option<super::split_bam::SplitBamAccum>,
 }
 
 impl RseqcAccumulators {
@@ -2138,6 +2144,7 @@ impl RseqcAccumulators {
             inner_dist: None,
             tin: None,
             preseq: None,
+            split_bam: None,
         }
     }
 
@@ -2193,6 +2200,11 @@ impl RseqcAccumulators {
             },
             preseq: if config.preseq_enabled {
                 Some(PreseqAccum::new(config.preseq_max_segment_length))
+            } else {
+                None
+            },
+            split_bam: if config.split_bam_enabled {
+                Some(super::split_bam::SplitBamAccum::default())
             } else {
                 None
             },
@@ -2283,6 +2295,14 @@ impl RseqcAccumulators {
         if let Some(ref mut accum) = self.preseq {
             accum.process_read(record);
         }
+
+        // split_bam: classifies every record (including secondary and
+        // supplementary alignments) against the BED intervals.
+        if let (Some(ref mut accum), Some(intervals)) =
+            (&mut self.split_bam, annotations.bed_intervals)
+        {
+            accum.process_read(record, chrom, intervals);
+        }
     }
 
     /// Merge another set of accumulators into this one.
@@ -2312,6 +2332,9 @@ impl RseqcAccumulators {
             a.merge(b);
         }
         if let (Some(ref mut a), Some(b)) = (&mut self.preseq, other.preseq) {
+            a.merge(b);
+        }
+        if let (Some(ref mut a), Some(b)) = (&mut self.split_bam, other.split_bam) {
             a.merge(b);
         }
     }

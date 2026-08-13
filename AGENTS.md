@@ -98,6 +98,7 @@ src/
       plots.rs              — RSeQC plot generation (duplication, junctions, etc.)
       read_distribution.rs  — read_distribution.py reimplementation
       read_duplication.rs   — read_duplication.py reimplementation
+      split_bam.rs          — split_bam.py-style BED-interval classification (rRNA quantification)
       stats.rs              — samtools stats full output (SN + all histogram sections)
       tin.rs                — TIN (Transcript Integrity Number) analysis
 tests/
@@ -294,6 +295,15 @@ forwarded to `count_reads()` as the `skip_dup_check: bool` parameter).
   `infer_experiment:`, `read_duplication:`, `read_distribution:`, `junction_annotation:`,
   `junction_saturation:`, `inner_distance:`, `tin:`). Each has an `enabled: bool` toggle
   and tool-specific parameter overrides. CLI flags take precedence over config values.
+- `split_bam` (`src/rna/rseqc/split_bam.rs`) classifies every alignment against a BED
+  file of intervals (`--rrna-bed` or `rna.split_bam.bed`) into in/ex/junk counts, the
+  counting side of RSeQC's `split_bam.py`. It is disabled unless a BED file is given,
+  and deliberately does not filter secondary/supplementary alignments so rDNA
+  multi-mappers are visible. No split BAM files are written.
+- featureCounts `-M` / `-O` equivalents are exposed as `--count-multi-mapping` /
+  `--count-multi-overlapping` (and `rna.featurecounts.count_multi_mapping` /
+  `count_multi_overlapping`). They affect only the featureCounts gene-level and
+  biotype-level counts, not the dupRadar matrix.
 - Under `rna:`, there are also sections for `preseq:`, `qualimap:`,
   `flagstat:`, `idxstats:`, and `samtools_stats:`. Each has an `enabled: bool` toggle.
   Preseq has additional parameters: `max_extrap`, `step_size`, `n_bootstraps`,

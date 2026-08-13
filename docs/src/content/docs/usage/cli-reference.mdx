@@ -134,6 +134,26 @@ If not specified, RustQC defaults to `gene_biotype` and auto-detects the
 attribute. If the specified attribute is not found in the GTF, a warning is
 printed and biotype counting is skipped.
 
+#### `--rrna-bed <BED>`
+
+BED file of genomic intervals (plain or gzip-compressed) used by the
+[`split_bam`](../../rna/rseqc/#split_bam-bed-interval-classification) analysis.
+Supplying this flag enables the analysis, which reports how many alignments fall
+inside the intervals. The usual use is rRNA quantification, which is more
+reliable than the biotype route on stock GRCh38/GENCODE builds.
+
+#### `-M, --count-multi-mapping`
+
+Count multi-mapping reads (`NH` > 1) in the featureCounts gene-level and
+biotype-level outputs, one count per reported alignment. Equivalent to
+`featureCounts -M`. By default such reads are reported as
+`Unassigned_MultiMapping`.
+
+#### `-O, --count-multi-overlapping`
+
+Count a read once for every feature it overlaps instead of reporting it as
+`Unassigned_Ambiguity`. Equivalent to `featureCounts -O`.
+
 #### `--sample-name <NAME>`
 
 Override the sample name used for output filenames. By default, the sample name

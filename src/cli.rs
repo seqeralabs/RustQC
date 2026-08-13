@@ -155,6 +155,33 @@ pub struct RnaArgs {
     )]
     pub biotype_attribute: Option<String>,
 
+    /// BED file of intervals (e.g. rRNA regions) for split_bam classification
+    #[arg(
+        long = "rrna-bed",
+        value_name = "BED",
+        env = "RUSTQC_RRNA_BED",
+        help_heading = "General"
+    )]
+    pub rrna_bed: Option<String>,
+
+    /// Count multi-mapping reads (featureCounts -M)
+    #[arg(
+        short = 'M',
+        long = "count-multi-mapping",
+        env = "RUSTQC_COUNT_MULTI_MAPPING",
+        help_heading = "General"
+    )]
+    pub count_multi_mapping: bool,
+
+    /// Count reads overlapping several features (featureCounts -O)
+    #[arg(
+        short = 'O',
+        long = "count-multi-overlapping",
+        env = "RUSTQC_COUNT_MULTI_OVERLAPPING",
+        help_heading = "General"
+    )]
+    pub count_multi_overlapping: bool,
+
     /// Skip duplicate-marking check
     #[arg(
         long,

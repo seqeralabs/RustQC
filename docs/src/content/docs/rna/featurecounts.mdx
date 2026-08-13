@@ -115,6 +115,47 @@ The biotype is extracted from the GTF attribute specified by `biotype_attribute`
 - `<sample>.biotype_counts_mqc.tsv` -- Biotype counts formatted as a MultiQC bargraph data file, suitable for visualizing the distribution of reads across biotypes.
 - `<sample>.biotype_counts_rrna_mqc.tsv` -- rRNA percentage formatted as a MultiQC general statistics value, reporting the fraction of assigned reads mapping to rRNA genes.
 
+## Counting multi-mapping and multi-overlapping reads
+
+By default RustQC follows featureCounts' defaults: a read with `NH` > 1 is
+reported as `Unassigned_MultiMapping`, and a read overlapping more than one
+feature is reported as `Unassigned_Ambiguity`. Two flags relax those rules:
+
+| Flag                        | featureCounts equivalent | Effect                                                           |
+| --------------------------- | ------------------------ | ---------------------------------------------------------------- |
+| `-M`, `--count-multi-mapping` | `-M`                     | Count every reported alignment of a multi-mapping read            |
+| `-O`, `--count-multi-overlapping` | `-O`               | Count a read once for each feature it overlaps                    |
+
+Both apply to the gene-level and biotype-level featureCounts outputs. dupRadar's
+duplicate-rate matrix is unaffected: it tracks multi-mappers separately by design.
+
+In the YAML config:
+
+```yaml
+rna:
+  featurecounts:
+    count_multi_mapping: true
+    count_multi_overlapping: true
+```
+
+<Aside type="caution" title="Biotype %rRNA under-reports on stock GRCh38/GENCODE">
+Biotype counting can only see rRNA that is annotated in the GTF and captured by
+the counting rules, and on a stock GRCh38 / GENCODE setup neither holds for the
+bulk of rRNA reads:
+
+- The 45S rDNA repeat (18S / 5.8S / 28S) is **not annotated** in GENCODE GRCh38 —
+  it lives on the unassembled acrocentric short arms. Uniquely-mapped rRNA reads
+  therefore land in `Unassigned_NoFeatures`.
+- rDNA is a high-copy repeat, so most rRNA reads multi-map and are dropped as
+  `Unassigned_MultiMapping` under the default rules.
+
+The result is a biotype %rRNA close to zero even when true residual rRNA is
+several percent, so it cannot be used to judge depletion. Use `-M` (and
+optionally `-O`) to stop discarding those reads, and prefer the interval-based
+[`split_bam`](../rseqc/#split_bam-bed-interval-classification) route with an
+rRNA BED file for a robust rRNA fraction.
+</Aside>
+
 ## Biotype attribute detection
 
 RustQC auto-detects whether your GTF uses `gene_biotype` (Ensembl) or `gene_type` (GENCODE). You can override this with `--biotype-attribute`. See the [CLI reference](../usage/cli-reference/) for details.

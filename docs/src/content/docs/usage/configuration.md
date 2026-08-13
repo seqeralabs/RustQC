@@ -131,6 +131,9 @@ Run `rustqc rna --help` to see the associated environment variable for each flag
 | `RUSTQC_THREADS` | `--threads` | Number of threads |
 | `RUSTQC_MAPQ` | `--mapq` | MAPQ quality cutoff |
 | `RUSTQC_BIOTYPE_ATTRIBUTE` | `--biotype-attribute` | GTF biotype attribute name |
+| `RUSTQC_RRNA_BED` | `--rrna-bed` | BED intervals for split_bam classification |
+| `RUSTQC_COUNT_MULTI_MAPPING` | `--count-multi-mapping` | Count multi-mapping reads (featureCounts `-M`) |
+| `RUSTQC_COUNT_MULTI_OVERLAPPING` | `--count-multi-overlapping` | Count multi-overlapping reads (featureCounts `-O`) |
 | `RUSTQC_SKIP_DUP_CHECK` | `--skip-dup-check` | Skip duplicate-marking check |
 | `RUSTQC_QUIET` | `--quiet` | Suppress output |
 | `RUSTQC_VERBOSE` | `--verbose` | Show additional detail |
@@ -389,7 +392,23 @@ rna:
     biotype_counts_mqc: true # Biotype counts MultiQC bargraph file
     biotype_rrna_mqc: true # Biotype rRNA percentage MultiQC file
     biotype_attribute: "gene_biotype" # GTF attribute for biotype grouping
+    count_multi_mapping: false # featureCounts -M: count multi-mapping reads
+    count_multi_overlapping: false # featureCounts -O: count reads once per overlapping feature
 ```
+
+### `count_multi_mapping` / `count_multi_overlapping`
+
+By default a read with `NH` > 1 is reported as `Unassigned_MultiMapping`, and a
+read overlapping several features as `Unassigned_Ambiguity`. These toggles are
+the featureCounts `-M` and `-O` equivalents and also have CLI flags (`-M` /
+`--count-multi-mapping`, `-O` / `--count-multi-overlapping`), which take
+precedence over the config file.
+
+They matter for high-copy repeat families such as rDNA, where most reads
+multi-map and are otherwise discarded — see
+[split_bam](#split_bam) for the interval-based alternative.
+
+**Default:** `false` for both.
 
 ### `biotype_attribute`
 
@@ -536,6 +555,23 @@ gene body coverage profiling (100 percentile bins, 5' to 3'), 5'/3' bias metrics
 read origin classification (exonic/intronic/intergenic), strand-specificity
 estimation, and splice junction motif counting. Produces Qualimap-compatible
 output files parseable by MultiQC.
+
+## split_bam
+
+```yaml
+rna:
+  split_bam:
+    enabled: true
+    bed: /refs/GRCh38_rRNA.bed # BED intervals (plain or .gz)
+```
+
+Classifies every alignment as inside (`in`) or outside (`ex`) the BED intervals,
+with unmapped/QC-failed records reported as `junk` — the counting side of
+RSeQC's `split_bam.py`. Typically used for rRNA quantification, which is more
+robust than biotype counting on stock GRCh38/GENCODE builds.
+
+Disabled unless a BED file is supplied. The `--rrna-bed` CLI flag takes
+precedence over the config file value and enables the tool on its own.
 
 ## preseq
 

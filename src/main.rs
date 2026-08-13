@@ -471,6 +471,32 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         None
     };
 
+    // Load BED intervals for split_bam classification (rRNA quantification).
+    // CLI --rrna-bed takes precedence over the config file's split_bam.bed.
+    let bed_path: Option<String> = args
+        .rrna_bed
+        .clone()
+        .or_else(|| config.split_bam.bed.clone())
+        .filter(|_| args.rrna_bed.is_some() || config.split_bam.enabled);
+    let bed_intervals = match bed_path.as_deref() {
+        Some(path) => {
+            ui.detail(&format!("Loading BED intervals from {}...", path));
+            let intervals = rna::rseqc::split_bam::parse_bed(path)?;
+            ui.detail(&format!(
+                "Loaded {} intervals for split_bam classification",
+                format_count(intervals.num_intervals as u64)
+            ));
+            Some(intervals)
+        }
+        None => None,
+    };
+
+    let fc_options = rna::dupradar::counting::FeatureCountsOptions {
+        count_multi_mapping: args.count_multi_mapping || config.featurecounts.count_multi_mapping,
+        count_multi_overlapping: args.count_multi_overlapping
+            || config.featurecounts.count_multi_overlapping,
+    };
+
     let chrom_mapping = config.alignment_to_gtf_mapping();
     let chrom_prefix = config.chromosome_prefix().map(|s| s.to_owned());
 
@@ -570,6 +596,9 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         tin_min_coverage: config.tin.min_coverage.unwrap_or(10),
         gtf_path: &args.gtf,
         sample_name_override: effective_sample_name,
+        bed_intervals: bed_intervals.as_ref(),
+        bed_path: bed_path.as_deref(),
+        fc_options,
     };
 
     // Step 2: Process all alignment files (in parallel when multiple)
@@ -815,6 +844,12 @@ struct SharedParams<'a> {
     tin_min_coverage: u32,
     /// Path to GTF file (for Qualimap report output).
     gtf_path: &'a str,
+    /// Pre-parsed BED intervals for split_bam classification (from --rrna-bed).
+    bed_intervals: Option<&'a rna::rseqc::split_bam::BedIntervals>,
+    /// BED file path the intervals came from (recorded in the output header).
+    bed_path: Option<&'a str>,
+    /// featureCounts counting-mode options (-M / -O).
+    fc_options: rna::dupradar::counting::FeatureCountsOptions,
 }
 
 // ============================================================================
@@ -988,6 +1023,7 @@ fn process_single_bam(
         junction_saturation_seed: config.junction_saturation.seed.unwrap_or(42),
         preseq_enabled: config.preseq.enabled,
         preseq_max_segment_length: config.preseq.max_segment_length,
+        split_bam_enabled: params.bed_intervals.is_some(),
     };
 
     let rseqc_annotations = RseqcAnnotations {
@@ -997,6 +1033,7 @@ fn process_single_bam(
         exon_bitset: params.exon_bitset,
         transcript_tree: params.transcript_tree,
         tin_index: params.tin_index,
+        bed_intervals: params.bed_intervals,
     };
 
     let any_rseqc_enabled = rseqc_config.bam_stat_enabled
@@ -1007,7 +1044,8 @@ fn process_single_bam(
         || rseqc_config.junction_saturation_enabled
         || rseqc_config.inner_distance_enabled
         || rseqc_config.preseq_enabled
-        || rseqc_config.tin_enabled;
+        || rseqc_config.tin_enabled
+        || rseqc_config.split_bam_enabled;
 
     // === Build Qualimap exon index (if enabled) ===
     let qualimap_index = if params.config.qualimap.enabled {
@@ -1043,6 +1081,7 @@ fn process_single_bam(
             None
         },
         qualimap_index.as_ref(),
+        params.fc_options,
         Some(&pb),
     )?;
     let count_duration = count_start.elapsed();
@@ -1869,6 +1908,26 @@ fn write_rseqc_outputs(
                 ui.warn(&format!("preseq: skipped — {}", e));
             }
         }
+    }
+
+    // --- split_bam (BED-interval classification, e.g. rRNA) ---
+    if let (Some(accum), Some(bed_path)) = (accums.split_bam, params.bed_path) {
+        let split_dir = if flat {
+            outdir.to_path_buf()
+        } else {
+            outdir.join("rseqc").join("split_bam")
+        };
+        std::fs::create_dir_all(&split_dir)?;
+        let output_path = split_dir.join(format!("{}.split_bam.tsv", sample_name));
+        let result = accum.into_result();
+        rna::rseqc::split_bam::write_split_bam_summary(&result, bed_path, &output_path)?;
+        let p = output_path.display().to_string();
+        ui.output_item("split_bam", &p);
+        ui.output_detail(&format!(
+            "{:.2}% of usable alignments inside intervals",
+            result.percent_in()
+        ));
+        written.push(("split_bam".into(), p));
     }
 
     Ok(RseqcOutputs {
