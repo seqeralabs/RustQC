@@ -21,7 +21,17 @@ path = "src/lib.rs"
 name = "rustqc"
 path = "src/main.rs"
 
+[features]
+default = ["mimalloc"]
+# Use mimalloc as the global allocator in the `rustqc` binary. Enabled by
+# default; disable with `--no-default-features` to fall back to the system
+# allocator (e.g. when profiling with an external heap profiler).
+mimalloc = ["dep:mimalloc"]
+
 [dependencies]
+# Allocator for the binary (see the `#[global_allocator]` in src/main.rs)
+mimalloc = { version = "0.1", optional = true }
+
 # CLI argument parsing
 clap = { version = "4", features = ["derive", "env"] }
 

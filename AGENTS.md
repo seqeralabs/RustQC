@@ -255,6 +255,7 @@ To prepare a release:
 | `rayon`                | Data parallelism                      |
 | `rand` / `rand_chacha` | Reproducible random sampling          |
 | `flate2`               | Gzip decompression (annotation files) |
+| `mimalloc`             | Global allocator for the binary (default feature `mimalloc`, binary only) |
 
 ## Duplicate Marking Validation
 

@@ -13,6 +13,20 @@ mod citations;
 mod cli;
 mod ui;
 
+/// Global allocator for the `rustqc` binary.
+///
+/// The pipeline is allocation-heavy (per-read buffers, mate-pair maps, growing
+/// per-chromosome vectors) and runs those allocations from several rayon worker
+/// threads at once, which makes it sensitive to allocator contention. mimalloc's
+/// per-thread free lists avoid that contention.
+///
+/// This is deliberately declared in the binary and not in `lib.rs`: a
+/// `#[global_allocator]` is process-wide, so a library must not impose one on
+/// its dependents. Library users who want mimalloc can declare it themselves.
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use anyhow::{ensure, Context, Result};
 use indexmap::IndexMap;
 use log::debug;
