@@ -128,8 +128,9 @@ fn format_chrom(chrom: &str) -> String {
 ///
 /// Format matches RSeQC's `.junction.xls` output.
 pub fn write_junction_xls(results: &JunctionResults, path: &Path) -> Result<()> {
-    let mut f = std::fs::File::create(path)
+    let f = std::fs::File::create(path)
         .with_context(|| format!("Failed to create file: {}", path.display()))?;
+    let mut f = std::io::BufWriter::new(f);
 
     writeln!(
         f,
@@ -151,6 +152,7 @@ pub fn write_junction_xls(results: &JunctionResults, path: &Path) -> Result<()> 
         )?;
     }
 
+    f.flush()?;
     Ok(())
 }
 
@@ -159,8 +161,9 @@ pub fn write_junction_xls(results: &JunctionResults, path: &Path) -> Result<()> 
 /// Each junction is represented with 1bp exon blocks flanking the intron,
 /// matching the reference output format.
 pub fn write_junction_bed(results: &JunctionResults, path: &Path) -> Result<()> {
-    let mut f = std::fs::File::create(path)
+    let f = std::fs::File::create(path)
         .with_context(|| format!("Failed to create file: {}", path.display()))?;
+    let mut f = std::io::BufWriter::new(f);
 
     // Output junctions in BAM encounter order (IndexMap preserves insertion order)
     for (junction, (count, class)) in &results.junctions {
@@ -185,6 +188,7 @@ pub fn write_junction_bed(results: &JunctionResults, path: &Path) -> Result<()> 
         )?;
     }
 
+    f.flush()?;
     Ok(())
 }
 
@@ -197,8 +201,9 @@ pub fn write_junction_interact_bed(
     bam_file: &str,
     path: &Path,
 ) -> Result<()> {
-    let mut f = std::fs::File::create(path)
+    let f = std::fs::File::create(path)
         .with_context(|| format!("Failed to create file: {}", path.display()))?;
+    let mut f = std::io::BufWriter::new(f);
 
     // Track header
     writeln!(
@@ -238,6 +243,7 @@ pub fn write_junction_interact_bed(
         )?;
     }
 
+    f.flush()?;
     Ok(())
 }
 
@@ -245,8 +251,9 @@ pub fn write_junction_interact_bed(
 ///
 /// Generates two pie charts: splice events and splice junctions.
 pub fn write_junction_plot_r(results: &JunctionResults, prefix: &str, path: &Path) -> Result<()> {
-    let mut f = std::fs::File::create(path)
+    let f = std::fs::File::create(path)
         .with_context(|| format!("Failed to create file: {}", path.display()))?;
+    let mut f = std::io::BufWriter::new(f);
 
     // Event-level percentages — denominator includes filtered events to match RSeQC
     let (e_known_pct, e_partial_pct, e_novel_pct) = if results.total_events > 0 {
@@ -303,6 +310,7 @@ pub fn write_junction_plot_r(results: &JunctionResults, prefix: &str, path: &Pat
     )?;
     writeln!(f, "dev.off()")?;
 
+    f.flush()?;
     Ok(())
 }
 
@@ -312,8 +320,9 @@ pub fn write_junction_plot_r(results: &JunctionResults, prefix: &str, path: &Pat
 /// header lines ("Reading reference gene model …", "Load BAM file …") and
 /// footer lines ("Create BED file …", "Create Interact file …").
 pub fn write_summary(results: &JunctionResults, path: &Path, gtf_path: &str) -> Result<()> {
-    let mut f = std::fs::File::create(path)
+    let f = std::fs::File::create(path)
         .with_context(|| format!("Failed to create file: {}", path.display()))?;
+    let mut f = std::io::BufWriter::new(f);
 
     // Header lines matching RSeQC's junction_annotation.py log output
     let gtf_filename = Path::new(gtf_path)
@@ -336,6 +345,7 @@ pub fn write_summary(results: &JunctionResults, path: &Path, gtf_path: &str) -> 
     writeln!(f, "Create BED file ...")?;
     writeln!(f, "Create Interact file ...")?;
 
+    f.flush()?;
     Ok(())
 }
 

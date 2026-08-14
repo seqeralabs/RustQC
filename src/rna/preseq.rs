@@ -1258,8 +1258,9 @@ pub fn write_output(
     output_path: &Path,
     confidence_level: f64,
 ) -> Result<()> {
-    let mut f = std::fs::File::create(output_path)
+    let f = std::fs::File::create(output_path)
         .with_context(|| format!("Failed to create preseq output: {}", output_path.display()))?;
+    let mut f = std::io::BufWriter::new(f);
 
     // Write header
     writeln!(
@@ -1285,6 +1286,7 @@ pub fn write_output(
     }
 
     debug!("Wrote preseq output to {}", output_path.display());
+    f.flush()?;
     Ok(())
 }
 

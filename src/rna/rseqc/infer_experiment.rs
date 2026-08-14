@@ -156,8 +156,9 @@ pub fn write_infer_experiment<P: AsRef<Path>>(
     output_path: P,
 ) -> Result<()> {
     let output_path = output_path.as_ref();
-    let mut writer = fs::File::create(output_path)
+    let writer = fs::File::create(output_path)
         .with_context(|| format!("Failed to create output file: {}", output_path.display()))?;
+    let mut writer = std::io::BufWriter::new(writer);
 
     match result.library_type.as_str() {
         "PairEnd" => {
@@ -207,6 +208,7 @@ pub fn write_infer_experiment<P: AsRef<Path>>(
         }
     }
 
+    writer.flush()?;
     Ok(())
 }
 

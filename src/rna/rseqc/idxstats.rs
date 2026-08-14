@@ -33,8 +33,9 @@ pub fn write_idxstats(
 ) -> Result<()> {
     use std::io::Write;
 
-    let mut out = std::fs::File::create(output_path)
+    let out = std::fs::File::create(output_path)
         .with_context(|| format!("Failed to create idxstats file: {}", output_path.display()))?;
+    let mut out = std::io::BufWriter::new(out);
 
     // One line per reference from the BAM header
     for (tid, (name, length)) in header_refs.iter().enumerate() {
@@ -50,6 +51,7 @@ pub fn write_idxstats(
     writeln!(out, "*\t0\t0\t{}", result.unplaced_unmapped)?;
 
     debug!("Wrote idxstats output to {}", output_path.display());
+    out.flush()?;
     Ok(())
 }
 

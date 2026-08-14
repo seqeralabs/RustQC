@@ -277,8 +277,9 @@ impl Default for BamStatResult {
 /// * `result` - The computed statistics
 /// * `output_path` - Path to write the output file
 pub fn write_bam_stat(result: &BamStatResult, output_path: &Path) -> Result<()> {
-    let mut out = std::fs::File::create(output_path)
+    let out = std::fs::File::create(output_path)
         .with_context(|| format!("Failed to create output file: {}", output_path.display()))?;
+    let mut out = std::io::BufWriter::new(out);
 
     // Header — matches RSeQC's exact format (50-char separator)
     writeln!(out, "\n#==================================================")?;
@@ -317,6 +318,7 @@ pub fn write_bam_stat(result: &BamStatResult, output_path: &Path) -> Result<()> 
     )?;
 
     debug!("Wrote bam_stat output to {}", output_path.display());
+    out.flush()?;
     Ok(())
 }
 
