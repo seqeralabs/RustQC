@@ -1491,6 +1491,7 @@ dependencies = [
  "indexmap",
  "indicatif",
  "log",
+ "memchr",
  "number_prefix",
  "plotters",
  "plotters-backend",

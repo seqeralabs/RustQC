@@ -56,6 +56,8 @@ anyhow = "1"
 log = "0.4"
 env_logger = "0.11"
 indexmap = "2"
+# SIMD byte search for the GTF field splitter
+memchr = "2"
 crc32fast = "1.5.0"
 
 # Terminal UI
