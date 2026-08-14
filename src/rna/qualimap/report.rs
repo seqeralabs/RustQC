@@ -491,7 +491,10 @@ fn write_summary_section(html: &mut String, data: &ReportData) {
     // Top junction motifs sorted by count descending — Qualimap shows motif / percentage
     // Use reads_at_junctions as denominator (matches text file output and upstream Qualimap)
     let mut motifs: Vec<(&String, &u64)> = data.junction_motifs.iter().collect();
-    motifs.sort_by(|a, b| b.1.cmp(a.1));
+    // Tie-break on the motif: `junction_motifs` is a HashMap and `sort_by` is
+    // stable, so equal counts would otherwise be ordered by HashMap iteration
+    // order and the report would differ between runs.
+    motifs.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
     let total_junctions = data.reads_at_junctions;
     for (motif, &count) in motifs.iter().take(11) {
         let pct = if total_junctions > 0 {

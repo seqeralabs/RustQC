@@ -15,6 +15,12 @@ use plotters::prelude::*;
 use plotters_svg::SVGBackend;
 use std::collections::HashMap;
 
+/// One deduplicated scatter point: `(pixel coordinate, (data x, data y, density))`.
+///
+/// The pixel coordinate is kept alongside the data so the draw order can be
+/// tie-broken deterministically when two points share a density.
+type PixelPoint = ((i32, i32), (f64, f64, f64));
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -597,13 +603,22 @@ where
             .or_insert((x, y, d));
     }
 
-    // Sort by density ascending so high-density points draw on top
-    let mut deduped: Vec<(f64, f64, f64)> = pixel_map.into_values().collect();
-    deduped.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+    // Sort by density ascending so high-density points draw on top.
+    // Points of equal density would otherwise keep `pixel_map`'s iteration
+    // order (stable sort over a HashMap), which varies per process and makes
+    // the SVG/PNG differ between runs on identical input. Tie-break on the
+    // pixel coordinate so the draw order is reproducible.
+    let mut deduped: Vec<PixelPoint> = pixel_map.into_iter().collect();
+    deduped.sort_by(|a, b| {
+        a.1 .2
+            .partial_cmp(&b.1 .2)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.0.cmp(&b.0))
+    });
 
-    let max_dens = deduped.iter().map(|d| d.2).fold(0.0f64, f64::max);
+    let max_dens = deduped.iter().map(|d| d.1 .2).fold(0.0f64, f64::max);
 
-    for (x, y, d) in deduped {
+    for (_, (x, y, d)) in deduped {
         let t = if max_dens > 0.0 { d / max_dens } else { 0.0 };
         let c = density_color(t);
         chart.draw_series(std::iter::once(Circle::new(
