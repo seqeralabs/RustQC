@@ -76,7 +76,7 @@ for line in reader.lines() {
 # Ok::<(), anyhow::Error>(())
 ```
 
-Use the `Strandedness` enum (it derives `serde::Deserialize` and clap's
+Use the `Strandedness` enum (it derives `serde::Deserialize` and usage's
 `ValueEnum`, so it integrates with both YAML configs and CLI parsers):
 
 ```rust

@@ -22,8 +22,8 @@ name = "rustqc"
 path = "src/main.rs"
 
 [dependencies]
-# CLI argument parsing
-clap = { version = "4", features = ["derive", "env"] }
+# CLI argument parsing (usage-rs is experimental; pin a concrete version)
+usage = { package = "usage-rs", version = "6.1.1", features = ["completions"] }
 
 # BAM file reading
 rust-htslib = { version = "1", features = ["static"] }
