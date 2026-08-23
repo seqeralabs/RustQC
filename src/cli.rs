@@ -10,21 +10,32 @@
 //!
 //! A GTF gene annotation file is required for all analyses.
 
-use clap::{CommandFactory, Parser, Subcommand};
-
 use rustqc::Strandedness;
+use usage::{Args, Cli, Subcommands};
 
 /// Fast quality control tools for sequencing data, written in Rust.
-#[derive(Parser, Debug)]
-#[command(name = "rustqc", version, about, long_about = None)]
+#[derive(Cli, Debug)]
+#[usage(
+    bin = "rustqc",
+    version,
+    long_version = rustqc_long_version(),
+    long_version_spec = "0.2.1",
+    author = "Phil Ewels <phil.ewels@seqera.io>, Jon Manning <jonathan.manning@seqera.io>",
+    license = "GPL-3.0-or-later",
+    repository = "https://github.com/seqeralabs/RustQC",
+    unknown_flags = "error",
+    args_override_self = false,
+    completion,
+    term_width = 120
+)]
 pub struct Cli {
     /// The analysis subcommand to run.
-    #[command(subcommand)]
+    #[usage(subcommand)]
     pub command: Commands,
 }
 
 /// Available analysis subcommands.
-#[derive(Subcommand, Debug)]
+#[derive(Subcommands, Debug)]
 pub enum Commands {
     /// RNA-Seq QC — single-pass analysis of BAM/SAM/CRAM files.
     ///
@@ -35,25 +46,17 @@ pub enum Commands {
 }
 
 /// Arguments for the `rna` subcommand.
-#[derive(Parser, Debug)]
-#[command(
-    next_line_help = false,
-    term_width = 120,
-    help_template = "\
-{about-with-newline}
-{usage-heading} {usage}
-
-{all-args}"
-)]
+#[derive(Args, Debug)]
+#[usage(unknown_flags = "error", args_override_self = false, term_width = 120)]
 pub struct RnaArgs {
     // ── Input / Output ──────────────────────────────────────────────────
     /// Duplicate-marked alignment file(s)
-    #[arg(value_name = "INPUT", num_args = 1.., required = true, help_heading = "Input / Output")]
+    #[usage(arg, required, value_name = "INPUT", help_heading = "Input / Output")]
     pub input: Vec<String>,
 
     /// GTF gene annotation (plain or .gz)
-    #[arg(
-        short,
+    #[usage(
+        short = 'g',
         long,
         value_name = "GTF",
         env = "RUSTQC_GTF",
@@ -62,8 +65,8 @@ pub struct RnaArgs {
     pub gtf: String,
 
     /// Reference FASTA (required for CRAM)
-    #[arg(
-        short,
+    #[usage(
+        short = 'r',
         long,
         value_name = "FASTA",
         env = "RUSTQC_REFERENCE",
@@ -72,18 +75,18 @@ pub struct RnaArgs {
     pub reference: Option<String>,
 
     /// Output directory [default: .]
-    #[arg(
-        short,
+    #[usage(
+        short = 'o',
         long,
-        default_value = ".",
-        hide_default_value = true,
+        default = ".",
+        hide_default_value,
         env = "RUSTQC_OUTDIR",
         help_heading = "Input / Output"
     )]
     pub outdir: String,
 
     /// Override sample name for output filenames (default: derived from BAM filename)
-    #[arg(
+    #[usage(
         long,
         value_name = "NAME",
         env = "RUSTQC_SAMPLE_NAME",
@@ -92,26 +95,34 @@ pub struct RnaArgs {
     pub sample_name: Option<String>,
 
     /// Write outputs to a flat directory (no subdirs)
-    #[arg(
-        long,
-        default_value_t = false,
-        env = "RUSTQC_FLAT_OUTPUT",
-        help_heading = "Input / Output"
-    )]
+    #[usage(long, env = "RUSTQC_FLAT_OUTPUT", help_heading = "Input / Output")]
     pub flat_output: bool,
 
     /// YAML configuration file (see also: RUSTQC_CONFIG env var)
-    #[arg(short, long, value_name = "CONFIG", help_heading = "Input / Output")]
+    #[usage(
+        short = 'c',
+        long,
+        value_name = "CONFIG",
+        help_heading = "Input / Output"
+    )]
     pub config: Option<String>,
 
     /// JSON summary path (use "-" for stdout)
-    #[arg(short = 'j', long = "json-summary", value_name = "PATH", num_args = 0..=1, default_missing_value = "", env = "RUSTQC_JSON_SUMMARY", help_heading = "Input / Output")]
+    #[usage(
+        short = 'j',
+        long = "json-summary",
+        value_name = "PATH",
+        default_missing = "",
+        allow_hyphen_values,
+        env = "RUSTQC_JSON_SUMMARY",
+        help_heading = "Input / Output"
+    )]
     pub json_summary: Option<String>,
 
     // ── Library ─────────────────────────────────────────────────────────
     /// Strandedness: unstranded, forward, reverse
-    #[arg(
-        short,
+    #[usage(
+        short = 's',
         long,
         value_enum,
         env = "RUSTQC_STRANDED",
@@ -120,34 +131,34 @@ pub struct RnaArgs {
     pub stranded: Option<Strandedness>,
 
     /// Paired-end reads
-    #[arg(short, long, env = "RUSTQC_PAIRED", help_heading = "Library")]
+    #[usage(short = 'p', long, env = "RUSTQC_PAIRED", help_heading = "Library")]
     pub paired: bool,
 
     // ── General ─────────────────────────────────────────────────────────
     /// Number of threads [default: 1]
-    #[arg(
-        short,
+    #[usage(
+        short = 't',
         long,
-        default_value_t = 1,
-        hide_default_value = true,
+        default = "1",
+        hide_default_value,
         env = "RUSTQC_THREADS",
         help_heading = "General"
     )]
     pub threads: usize,
 
     /// MAPQ cutoff for quality filtering [default: 30]
-    #[arg(
+    #[usage(
         short = 'Q',
         long = "mapq",
-        default_value_t = 30,
-        hide_default_value = true,
+        default = "30",
+        hide_default_value,
         env = "RUSTQC_MAPQ",
         help_heading = "General"
     )]
     pub mapq_cut: u8,
 
     /// GTF attribute for biotype grouping
-    #[arg(
+    #[usage(
         long,
         value_name = "ATTR",
         env = "RUSTQC_BIOTYPE_ATTRIBUTE",
@@ -156,29 +167,24 @@ pub struct RnaArgs {
     pub biotype_attribute: Option<String>,
 
     /// Skip duplicate-marking check
-    #[arg(
-        long,
-        default_value_t = false,
-        env = "RUSTQC_SKIP_DUP_CHECK",
-        help_heading = "General"
-    )]
+    #[usage(long, env = "RUSTQC_SKIP_DUP_CHECK", help_heading = "General")]
     pub skip_dup_check: bool,
 
     /// Suppress output except warnings/errors
-    #[arg(
+    #[usage(
         short = 'q',
         long,
-        conflicts_with = "verbose",
+        conflicts("--verbose"),
         env = "RUSTQC_QUIET",
         help_heading = "General"
     )]
     pub quiet: bool,
 
     /// Show additional detail
-    #[arg(
+    #[usage(
         short = 'v',
         long,
-        conflicts_with = "quiet",
+        conflicts("--quiet"),
         env = "RUSTQC_VERBOSE",
         help_heading = "General"
     )]
@@ -186,7 +192,7 @@ pub struct RnaArgs {
 
     // ── Tool parameters ─────────────────────────────────────────────────
     /// infer_experiment: sample size [default: 200000]
-    #[arg(
+    #[usage(
         long = "infer-experiment-sample-size",
         value_name = "N",
         env = "RUSTQC_INFER_EXPERIMENT_SAMPLE_SIZE",
@@ -195,7 +201,7 @@ pub struct RnaArgs {
     pub infer_experiment_sample_size: Option<u64>,
 
     /// junction_annotation: min intron size [default: 50]
-    #[arg(
+    #[usage(
         long = "min-intron",
         value_name = "N",
         env = "RUSTQC_MIN_INTRON",
@@ -204,7 +210,7 @@ pub struct RnaArgs {
     pub min_intron: Option<u64>,
 
     /// junction_saturation: random seed for reproducible results
-    #[arg(
+    #[usage(
         long = "junction-saturation-seed",
         value_name = "N",
         env = "RUSTQC_JUNCTION_SATURATION_SEED",
@@ -213,7 +219,7 @@ pub struct RnaArgs {
     pub junction_saturation_seed: Option<u64>,
 
     /// junction_saturation: min coverage [default: 1]
-    #[arg(
+    #[usage(
         long = "junction-saturation-min-coverage",
         value_name = "N",
         env = "RUSTQC_JUNCTION_SATURATION_MIN_COVERAGE",
@@ -222,7 +228,7 @@ pub struct RnaArgs {
     pub junction_saturation_min_coverage: Option<u64>,
 
     /// junction_saturation: start % [default: 5]
-    #[arg(
+    #[usage(
         long = "junction-saturation-percentile-floor",
         value_name = "N",
         env = "RUSTQC_JUNCTION_SATURATION_PERCENTILE_FLOOR",
@@ -231,7 +237,7 @@ pub struct RnaArgs {
     pub junction_saturation_percentile_floor: Option<u64>,
 
     /// junction_saturation: end % [default: 100]
-    #[arg(
+    #[usage(
         long = "junction-saturation-percentile-ceiling",
         value_name = "N",
         env = "RUSTQC_JUNCTION_SATURATION_PERCENTILE_CEILING",
@@ -240,7 +246,7 @@ pub struct RnaArgs {
     pub junction_saturation_percentile_ceiling: Option<u64>,
 
     /// junction_saturation: step % [default: 5]
-    #[arg(
+    #[usage(
         long = "junction-saturation-percentile-step",
         value_name = "N",
         env = "RUSTQC_JUNCTION_SATURATION_PERCENTILE_STEP",
@@ -249,7 +255,7 @@ pub struct RnaArgs {
     pub junction_saturation_percentile_step: Option<u64>,
 
     /// inner_distance: sample size [default: 1000000]
-    #[arg(
+    #[usage(
         long = "inner-distance-sample-size",
         value_name = "N",
         env = "RUSTQC_INNER_DISTANCE_SAMPLE_SIZE",
@@ -258,37 +264,37 @@ pub struct RnaArgs {
     pub inner_distance_sample_size: Option<u64>,
 
     /// inner_distance: lower bound [default: -250]
-    #[arg(
+    #[usage(
         long = "inner-distance-lower-bound",
         value_name = "N",
-        allow_hyphen_values = true,
+        allow_negative_numbers,
         env = "RUSTQC_INNER_DISTANCE_LOWER_BOUND",
         help_heading = "Tool parameters"
     )]
     pub inner_distance_lower_bound: Option<i64>,
 
     /// inner_distance: upper bound [default: 250]
-    #[arg(
+    #[usage(
         long = "inner-distance-upper-bound",
         value_name = "N",
-        allow_hyphen_values = true,
+        allow_negative_numbers,
         env = "RUSTQC_INNER_DISTANCE_UPPER_BOUND",
         help_heading = "Tool parameters"
     )]
     pub inner_distance_upper_bound: Option<i64>,
 
     /// inner_distance: bin width [default: 5]
-    #[arg(
+    #[usage(
         long = "inner-distance-step",
         value_name = "N",
-        allow_hyphen_values = true,
+        allow_negative_numbers,
         env = "RUSTQC_INNER_DISTANCE_STEP",
         help_heading = "Tool parameters"
     )]
     pub inner_distance_step: Option<i64>,
 
     /// TIN: random seed for reproducible results
-    #[arg(
+    #[usage(
         long = "tin-seed",
         value_name = "N",
         env = "RUSTQC_TIN_SEED",
@@ -297,34 +303,23 @@ pub struct RnaArgs {
     pub tin_seed: Option<u64>,
 
     /// Skip TIN analysis
-    #[arg(
-        long,
-        default_value_t = false,
-        env = "RUSTQC_SKIP_TIN",
-        help_heading = "Tool parameters"
-    )]
+    #[usage(long, env = "RUSTQC_SKIP_TIN", help_heading = "Tool parameters")]
     pub skip_tin: bool,
 
     /// Skip read duplication analysis
-    #[arg(
+    #[usage(
         long,
-        default_value_t = false,
         env = "RUSTQC_SKIP_READ_DUPLICATION",
         help_heading = "Tool parameters"
     )]
     pub skip_read_duplication: bool,
 
     /// Skip preseq library complexity analysis
-    #[arg(
-        long,
-        default_value_t = false,
-        env = "RUSTQC_SKIP_PRESEQ",
-        help_heading = "Tool parameters"
-    )]
+    #[usage(long, env = "RUSTQC_SKIP_PRESEQ", help_heading = "Tool parameters")]
     pub skip_preseq: bool,
 
     /// preseq: random seed for bootstrap CIs
-    #[arg(
+    #[usage(
         long = "preseq-seed",
         value_name = "N",
         env = "RUSTQC_PRESEQ_SEED",
@@ -333,7 +328,7 @@ pub struct RnaArgs {
     pub preseq_seed: Option<u64>,
 
     /// preseq: max extrapolation depth
-    #[arg(
+    #[usage(
         long = "preseq-max-extrap",
         value_name = "N",
         env = "RUSTQC_PRESEQ_MAX_EXTRAP",
@@ -342,7 +337,7 @@ pub struct RnaArgs {
     pub preseq_max_extrap: Option<f64>,
 
     /// preseq: step size between points
-    #[arg(
+    #[usage(
         long = "preseq-step-size",
         value_name = "N",
         env = "RUSTQC_PRESEQ_STEP_SIZE",
@@ -351,7 +346,7 @@ pub struct RnaArgs {
     pub preseq_step_size: Option<f64>,
 
     /// preseq: bootstrap replicates for CIs
-    #[arg(
+    #[usage(
         long = "preseq-n-bootstraps",
         value_name = "N",
         env = "RUSTQC_PRESEQ_N_BOOTSTRAPS",
@@ -360,7 +355,7 @@ pub struct RnaArgs {
     pub preseq_n_bootstraps: Option<u32>,
 
     /// preseq: max segment length for PE merging
-    #[arg(
+    #[usage(
         long = "preseq-seg-len",
         value_name = "N",
         env = "RUSTQC_PRESEQ_SEG_LEN",
@@ -369,14 +364,12 @@ pub struct RnaArgs {
     pub preseq_seg_len: Option<i64>,
 }
 
-/// Parse command-line arguments and return the Cli struct.
+/// Extended `--version` text: crate version, git commit, build time, and CPU info.
 ///
-/// Sets a `long_version` that includes the git commit, build timestamp,
-/// and CPU info line, shown when the user runs `rustqc --version`.
-pub fn parse_args() -> Cli {
-    use clap::FromArgMatches;
-
-    let long_version: &'static str = Box::leak(
+/// Leaked so the usage derive can treat it as `&'static str` next to
+/// `env!("CARGO_PKG_VERSION")` in the generated `-V` / `--version` arms.
+fn rustqc_long_version() -> &'static str {
+    Box::leak(
         format!(
             "{} ({}, built {})\n{}",
             env!("CARGO_PKG_VERSION"),
@@ -385,20 +378,39 @@ pub fn parse_args() -> Cli {
             rustqc::cpu::cpu_info_line(),
         )
         .into_boxed_str(),
-    );
-    let cmd = Cli::command().long_version(long_version);
-    let matches = cmd.get_matches();
-    Cli::from_arg_matches(&matches).expect("clap arg matching failed")
+    )
+}
+
+/// Parse process argv, printing help/version and exiting the way `usage` does.
+///
+/// `--version` includes the git commit, build timestamp, and CPU info line.
+pub fn parse_args() -> Cli {
+    Cli::parse()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsStr;
+
+    /// Convert clap-shaped string argv (including argv0) into the `&OsStr` slice usage expects.
+    fn os_args<'a>(args: &'a [&'a str]) -> Vec<&'a OsStr> {
+        args.iter().copied().map(OsStr::new).collect()
+    }
+
+    fn parse_cli(args: &[&str]) -> Cli {
+        Cli::try_parse_from(&os_args(args))
+            .unwrap_or_else(|err| panic!("expected a successful parse for {args:?}, got {err:?}"))
+    }
+
+    fn parse_cli_err(args: &[&str]) -> bool {
+        Cli::try_parse_from(&os_args(args)).is_err()
+    }
 
     #[test]
     fn test_rna_default_args_gtf() {
         // Test that defaults are sensible with a GTF annotation
-        let cli = Cli::parse_from(["rustqc", "rna", "test.bam", "--gtf", "genes.gtf"]);
+        let cli = parse_cli(&["rustqc", "rna", "test.bam", "--gtf", "genes.gtf"]);
         match cli.command {
             Commands::Rna(args) => {
                 assert_eq!(args.input, vec!["test.bam"]);
@@ -421,7 +433,7 @@ mod tests {
     #[test]
     fn test_rna_multiple_bams() {
         // Test that multiple BAM files are accepted
-        let cli = Cli::parse_from([
+        let cli = parse_cli(&[
             "rustqc",
             "rna",
             "a.bam",
@@ -442,7 +454,7 @@ mod tests {
 
     #[test]
     fn test_rna_gtf_all_args() {
-        let cli = Cli::parse_from([
+        let cli = parse_cli(&[
             "rustqc",
             "rna",
             "test.bam",
@@ -478,13 +490,15 @@ mod tests {
     #[test]
     fn test_rna_missing_gtf() {
         // --gtf is required, so omitting it should fail
-        let result = Cli::try_parse_from(["rustqc", "rna", "test.bam"]);
-        assert!(result.is_err(), "Expected error when --gtf is not provided");
+        assert!(
+            parse_cli_err(&["rustqc", "rna", "test.bam"]),
+            "Expected error when --gtf is not provided"
+        );
     }
 
     #[test]
     fn test_rna_rseqc_params() {
-        let cli = Cli::parse_from([
+        let cli = parse_cli(&[
             "rustqc",
             "rna",
             "test.bam",
@@ -519,7 +533,7 @@ mod tests {
 
     #[test]
     fn test_rna_preseq_params() {
-        let cli = Cli::parse_from([
+        let cli = parse_cli(&[
             "rustqc",
             "rna",
             "test.bam",
@@ -549,7 +563,7 @@ mod tests {
 
     #[test]
     fn test_rna_tool_seeds() {
-        let cli = Cli::parse_from([
+        let cli = parse_cli(&[
             "rustqc",
             "rna",
             "test.bam",
@@ -575,7 +589,7 @@ mod tests {
 
     #[test]
     fn test_rna_skip_preseq() {
-        let cli = Cli::parse_from([
+        let cli = parse_cli(&[
             "rustqc",
             "rna",
             "test.bam",
@@ -586,6 +600,53 @@ mod tests {
         match cli.command {
             Commands::Rna(args) => {
                 assert!(args.skip_preseq);
+            }
+            #[allow(unreachable_patterns)]
+            _ => panic!("Expected Rna subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_rna_unknown_flag_is_rejected() {
+        assert!(
+            parse_cli_err(&["rustqc", "rna", "test.bam", "--gtf", "genes.gtf", "--wat"]),
+            "Expected error for an unknown flag"
+        );
+    }
+
+    #[test]
+    fn test_rna_json_summary_bare_flag() {
+        let cli = parse_cli(&[
+            "rustqc",
+            "rna",
+            "test.bam",
+            "--gtf",
+            "genes.gtf",
+            "--json-summary",
+        ]);
+        match cli.command {
+            Commands::Rna(args) => {
+                assert_eq!(args.json_summary.as_deref(), Some(""));
+            }
+            #[allow(unreachable_patterns)]
+            _ => panic!("Expected Rna subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_rna_json_summary_stdout() {
+        let cli = parse_cli(&[
+            "rustqc",
+            "rna",
+            "test.bam",
+            "--gtf",
+            "genes.gtf",
+            "--json-summary",
+            "-",
+        ]);
+        match cli.command {
+            Commands::Rna(args) => {
+                assert_eq!(args.json_summary.as_deref(), Some("-"));
             }
             #[allow(unreachable_patterns)]
             _ => panic!("Expected Rna subcommand"),

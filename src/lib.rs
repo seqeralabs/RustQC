@@ -62,7 +62,6 @@
 //! assert_eq!(s.to_string(), "reverse");
 //! ```
 
-use clap::ValueEnum;
 use serde::Deserialize;
 
 pub mod config;
@@ -76,7 +75,7 @@ pub mod summary;
 ///
 /// Determines how read strand is interpreted relative to the gene annotation
 /// strand during counting. Accepted CLI values: `unstranded`, `forward`, `reverse`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, usage::ValueEnum, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Strandedness {
     /// Count reads on either strand (library is not strand-specific).

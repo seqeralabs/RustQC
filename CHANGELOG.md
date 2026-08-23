@@ -1,5 +1,11 @@
 # RustQC Changelog
 
+## Unreleased
+
+### Other changes
+
+- Replace clap with [usage-rs](https://usage.jdx.dev/rust/) 6.1.1 for CLI parsing. Flags, shorts, env vars, and defaults are unchanged; help text is rendered by usage rather than clap's template. MSRV is 1.91 (usage-rs's requirement).
+
 ## [Version 0.2.1](https://github.com/seqeralabs/RustQC/releases/tag/v0.2.1) - 2026-04-09
 
 ### Bug fixes

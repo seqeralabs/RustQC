@@ -58,7 +58,7 @@ cargo test --test integration_test test_intercept_slope_match
 ```
 src/
   main.rs           — Entry point, dispatches subcommands
-  cli.rs            — CLI argument parsing (clap derive, subcommand structure)
+  cli.rs            — CLI argument parsing (usage-rs derive, subcommand structure)
   config.rs         — YAML configuration loading (serde), nested tool configs
   io.rs             — Shared I/O utilities (gzip-transparent file reading)
   gtf.rs            — GTF annotation file parser (with configurable attribute extraction)
@@ -243,7 +243,7 @@ To prepare a release:
 
 | Crate                  | Purpose                               |
 | ---------------------- | ------------------------------------- |
-| `clap` v4              | CLI argument parsing (derive)         |
+| `usage-rs` 6.1.1       | CLI argument parsing (derive; experimental) |
 | `rust-htslib`          | BAM file I/O (statically linked)      |
 | `plotters`             | Chart generation (PNG + SVG)          |
 | `serde`                | YAML config deserialization           |

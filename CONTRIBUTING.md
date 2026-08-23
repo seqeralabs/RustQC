@@ -73,6 +73,27 @@ To run all hooks manually:
 prek run --all-files
 ```
 
+## Completions, manpages, and CLI docs
+
+The CLI is declared with [usage-rs](https://usage.jdx.dev/rust/) (pinned to
+6.1.1). The binary prints its portable spec, and [usage-cli](https://usage.jdx.dev/)
+at the same version turns that spec into completions, manpages, and markdown:
+
+```bash
+# Dump the spec (also available in-process as `Cli::to_kdl()`)
+cargo run --quiet -- __usage_spec__ > rustqc.usage.kdl
+
+# Generate artifacts with usage-cli 6.1.1
+usage g markdown -f rustqc.usage.kdl --out-dir docs
+usage g manpage -f rustqc.usage.kdl > rustqc.1
+usage g completion bash rustqc --file rustqc.usage.kdl
+```
+
+Install `usage-cli` from the same release as the `usage-rs` crate so the KDL
+round-trips. Completions are also served at runtime: with the `completions`
+feature, `rustqc` answers hidden `__complete_word__` requests from generated
+shell scripts (`Cli::completion_script`).
+
 ## Project structure
 
 RustQC is a **binary crate** with a nested module structure. All top-level modules are declared in `main.rs` (no `lib.rs`).
@@ -80,7 +101,7 @@ RustQC is a **binary crate** with a nested module structure. All top-level modul
 ```
 src/
   main.rs                        Entry point, dispatches subcommands
-  cli.rs                         CLI argument parsing (clap derive)
+  cli.rs                         CLI argument parsing (usage-rs derive)
   config.rs                      YAML configuration loading (serde)
   io.rs                          Shared I/O utilities (gzip-transparent file reading)
   gtf.rs                         GTF annotation file parser
