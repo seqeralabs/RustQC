@@ -73,6 +73,15 @@ export default defineConfig({
           ],
         },
         {
+          label: "DNA",
+          items: [
+            { label: "Overview", slug: "dna/overview" },
+            { label: "mosdepth", slug: "dna/mosdepth" },
+            { label: "Picard metrics", slug: "dna/picard" },
+            { label: "Qualimap bamqc", slug: "dna/qualimap" },
+          ],
+        },
+        {
           label: "About",
           items: [
             {
