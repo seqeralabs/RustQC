@@ -1,0 +1,3 @@
+mosdepth	0.3.14
+samtools	1.24
+picard	3.4.0
