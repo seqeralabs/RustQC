@@ -30,6 +30,10 @@ pub struct Config {
     /// RNA-Seq QC configuration (matches the `rna` subcommand).
     #[serde(default)]
     pub rna: RnaConfig,
+
+    /// DNA QC configuration (matches the `dna` subcommand).
+    #[serde(default)]
+    pub dna: DnaConfig,
 }
 
 /// RNA-Seq QC configuration.
@@ -908,6 +912,278 @@ impl RnaConfig {
     }
 }
 
+// ===================================================================
+// DNA QC configuration
+// ===================================================================
+
+/// DNA QC configuration.
+///
+/// Contains all settings for the `rustqc dna` subcommand. Tool-specific
+/// settings are nested under their tool name (e.g. `mosdepth:`, `samtools:`,
+/// `preseq:`).
+///
+/// The shared settings are declared here rather than inherited from the root
+/// [`Config`], mirroring [`RnaConfig`], so the two pipelines can be configured
+/// independently in one file.
+///
+/// Example:
+/// ```yaml
+/// dna:
+///   flat_output: true
+///   mosdepth:
+///     window_size: 500
+///     thresholds: [1, 10, 30]
+/// ```
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+pub struct DnaConfig {
+    /// Prefix to prepend to alignment file chromosome names before matching
+    /// interval-file names (for example a targets BED using `chr1` against an
+    /// alignment using `1`).
+    #[serde(default)]
+    pub chromosome_prefix: Option<String>,
+
+    /// Chromosome name mapping from interval-file names to alignment file names.
+    ///
+    /// Applied after `chromosome_prefix`, so explicit mappings override it.
+    #[serde(default)]
+    pub chromosome_mapping: HashMap<String, String>,
+
+    /// Override the sample name used in output filenames.
+    ///
+    /// The CLI `--sample-name` flag takes precedence over this setting.
+    #[serde(default)]
+    pub sample_name: Option<String>,
+
+    /// Write all output files to a flat directory (no subdirectories).
+    ///
+    /// By default (`false`), outputs are organised by tool: `mosdepth/`,
+    /// `samtools/`, `preseq/`. The CLI `--flat-output` flag enables flat
+    /// output regardless of this setting (either source being `true` produces
+    /// flat output).
+    #[serde(default)]
+    pub flat_output: bool,
+
+    /// mosdepth-compatible depth of coverage configuration.
+    #[serde(default)]
+    pub mosdepth: MosdepthConfig,
+
+    /// samtools-compatible output configuration (stats, flagstat, idxstats).
+    #[serde(default)]
+    pub samtools: SamtoolsConfig,
+
+    /// Picard CollectWgsMetrics configuration.
+    #[serde(default)]
+    pub wgs_metrics: WgsMetricsConfig,
+
+    /// Picard CollectInsertSizeMetrics configuration.
+    #[serde(default)]
+    pub insert_size: InsertSizeConfig,
+
+    /// Picard CollectGcBiasMetrics configuration.
+    #[serde(default)]
+    pub gc_bias: GcBiasConfig,
+
+    /// Picard CollectHsMetrics configuration, used in targeted mode.
+    #[serde(default)]
+    pub hs_metrics: HsMetricsConfig,
+
+    /// preseq lc_extrap library complexity extrapolation configuration.
+    ///
+    /// Reuses the same type as the `rna` pipeline; the implementation is shared.
+    #[serde(default)]
+    pub preseq: PreseqConfig,
+}
+
+/// Configuration for the Picard-compatible whole-genome coverage metrics.
+///
+/// Requires a reference FASTA: `GENOME_TERRITORY` counts the reference's
+/// non-N bases, so without one the analysis is skipped.
+///
+/// Example:
+/// ```yaml
+/// wgs_metrics:
+///   enabled: true
+///   coverage_cap: 250
+///   min_base_quality: 20
+///   min_mapping_quality: 20
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct WgsMetricsConfig {
+    /// Whether to compute whole-genome coverage metrics. Defaults to true.
+    pub enabled: bool,
+    /// Depth beyond this is reported as excluded rather than counted.
+    pub coverage_cap: u32,
+    /// Bases below this quality are excluded.
+    pub min_base_quality: u8,
+    /// Reads below this mapping quality are excluded.
+    pub min_mapping_quality: u8,
+}
+
+impl Default for WgsMetricsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            coverage_cap: 250,
+            min_base_quality: 20,
+            min_mapping_quality: 20,
+        }
+    }
+}
+
+/// Configuration for the Picard-compatible GC bias metrics.
+///
+/// Requires a reference FASTA: the analysis bins reference windows by GC.
+///
+/// Example:
+/// ```yaml
+/// gc_bias:
+///   enabled: true
+///   window_size: 100
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct GcBiasConfig {
+    /// Whether to compute GC bias metrics. Defaults to true.
+    pub enabled: bool,
+    /// Width of the sliding reference windows GC is computed over.
+    pub window_size: usize,
+}
+
+impl Default for GcBiasConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            window_size: 100,
+        }
+    }
+}
+
+/// Configuration for the Picard-compatible targeted sequencing metrics.
+///
+/// Only takes effect when `--targets` is given.
+///
+/// Example:
+/// ```yaml
+/// hs_metrics:
+///   enabled: true
+///   min_base_quality: 20
+///   min_mapping_quality: 20
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct HsMetricsConfig {
+    /// Whether to compute targeted metrics. Defaults to true.
+    pub enabled: bool,
+    /// Bases below this quality are excluded.
+    pub min_base_quality: u8,
+    /// Reads below this mapping quality are excluded.
+    pub min_mapping_quality: u8,
+}
+
+impl Default for HsMetricsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            min_base_quality: 20,
+            min_mapping_quality: 20,
+        }
+    }
+}
+
+/// Configuration for the Picard-compatible insert size metrics.
+///
+/// Example:
+/// ```yaml
+/// insert_size:
+///   enabled: true
+///   deviations: 10.0
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct InsertSizeConfig {
+    /// Whether to compute insert size metrics. Defaults to true.
+    pub enabled: bool,
+    /// Median absolute deviations either side of the median that survive
+    /// trimming before the mean and standard deviation are computed.
+    pub deviations: f64,
+}
+
+impl Default for InsertSizeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            deviations: 10.0,
+        }
+    }
+}
+
+/// Configuration for the mosdepth-compatible depth of coverage analysis.
+///
+/// Example:
+/// ```yaml
+/// mosdepth:
+///   enabled: true
+///   window_size: 500
+///   thresholds: [1, 10, 30]
+///   skip_per_base: false
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct MosdepthConfig {
+    /// Whether to compute depth of coverage. Defaults to true.
+    pub enabled: bool,
+
+    /// Fixed-width window size for the per-window depth output.
+    ///
+    /// `None` (the default) means no `regions` output is written, matching
+    /// mosdepth run without `--by`.
+    pub window_size: Option<u32>,
+
+    /// Coverage thresholds reported in the thresholds output and used for the
+    /// percent-of-bases-at-least-NX summary figures.
+    pub thresholds: Vec<u32>,
+
+    /// Skip the per-base depth output, by far the largest file produced.
+    pub skip_per_base: bool,
+}
+
+impl Default for MosdepthConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            window_size: None,
+            thresholds: vec![1, 5, 10, 15, 20, 30, 50],
+            skip_per_base: false,
+        }
+    }
+}
+
+/// Configuration for the samtools-compatible outputs of the DNA pipeline.
+///
+/// A single toggle covers `stats`, `flagstat` and `idxstats` because all three
+/// are produced from one accumulator in the same pass; disabling them
+/// individually would save no work.
+///
+/// Example:
+/// ```yaml
+/// samtools:
+///   enabled: true
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct SamtoolsConfig {
+    /// Whether to write the samtools-compatible outputs. Defaults to true.
+    pub enabled: bool,
+}
+
+impl Default for SamtoolsConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1293,5 +1569,45 @@ preseq:
         if let Some(val) = saved {
             std::env::set_var("RUSTQC_CONFIG", val);
         }
+    }
+
+    #[test]
+    fn test_dna_config_defaults() {
+        let config = Config::default();
+        assert!(config.dna.mosdepth.enabled);
+        assert!(config.dna.samtools.enabled);
+        assert!(config.dna.preseq.enabled);
+        assert!(!config.dna.flat_output);
+        assert_eq!(
+            config.dna.mosdepth.thresholds,
+            vec![1, 5, 10, 15, 20, 30, 50]
+        );
+        assert_eq!(config.dna.mosdepth.window_size, None);
+    }
+
+    #[test]
+    fn test_dna_config_from_yaml() {
+        let yaml = "dna:\n  flat_output: true\n  mosdepth:\n    window_size: 500\n    thresholds: [1, 30]\n  preseq:\n    enabled: false\n";
+        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        assert!(config.dna.flat_output);
+        assert_eq!(config.dna.mosdepth.window_size, Some(500));
+        assert_eq!(config.dna.mosdepth.thresholds, vec![1, 30]);
+        assert!(!config.dna.preseq.enabled);
+        // A dna-only config leaves the rna side untouched.
+        assert!(config.rna.preseq.enabled);
+    }
+
+    #[test]
+    fn test_dna_config_deep_merge() {
+        let mut merged: Value = serde_yaml_ng::from_str(
+            "dna:\n  mosdepth:\n    window_size: 100\n    thresholds: [1]\n",
+        )
+        .unwrap();
+        let overlay: Value =
+            serde_yaml_ng::from_str("dna:\n  mosdepth:\n    window_size: 500\n").unwrap();
+        deep_merge(&mut merged, overlay);
+        let config: Config = serde_yaml_ng::from_value(merged).unwrap();
+        assert_eq!(config.dna.mosdepth.window_size, Some(500));
+        assert_eq!(config.dna.mosdepth.thresholds, vec![1]);
     }
 }
