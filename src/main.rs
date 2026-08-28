@@ -22,7 +22,7 @@ use std::path::Path;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use rustqc::io::{format_count, format_duration, format_pct};
-use rustqc::{config, cpu, gtf, rna, summary};
+use rustqc::{common, config, cpu, gtf, rna, summary};
 
 use ui::{Ui, Verbosity};
 
@@ -1562,7 +1562,7 @@ fn write_rseqc_outputs(
         if params.config.flagstat.enabled {
             std::fs::create_dir_all(&samtools_dir)?;
             let flagstat_path = samtools_dir.join(format!("{}.flagstat", sample_name));
-            rna::rseqc::flagstat::write_flagstat(result, &flagstat_path)?;
+            common::samtools::flagstat::write_flagstat(result, &flagstat_path)?;
             let p = flagstat_path.display().to_string();
             ui.output_item("flagstat", &p);
             written.push(("flagstat".into(), p));
@@ -1572,7 +1572,7 @@ fn write_rseqc_outputs(
         if params.config.idxstats.enabled {
             std::fs::create_dir_all(&samtools_dir)?;
             let idxstats_path = samtools_dir.join(format!("{}.idxstats", sample_name));
-            rna::rseqc::idxstats::write_idxstats(result, bam_header_refs, &idxstats_path)?;
+            common::samtools::idxstats::write_idxstats(result, bam_header_refs, &idxstats_path)?;
             let p = idxstats_path.display().to_string();
             ui.output_item("idxstats", &p);
             written.push(("idxstats".into(), p));
@@ -1582,7 +1582,7 @@ fn write_rseqc_outputs(
         if params.config.samtools_stats.enabled {
             std::fs::create_dir_all(&samtools_dir)?;
             let stats_path = samtools_dir.join(format!("{}.stats", sample_name));
-            rna::rseqc::stats::write_stats(result, &stats_path)?;
+            common::samtools::stats::write_stats(result, &stats_path)?;
             let p = stats_path.display().to_string();
             ui.output_item("stats", &p);
             written.push(("samtools stats".into(), p));

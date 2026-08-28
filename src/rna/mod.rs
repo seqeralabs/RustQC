@@ -3,10 +3,12 @@
 //! Contains dupRadar duplication rate analysis, featureCounts-compatible output,
 //! and RSeQC tool reimplementations.
 
-pub mod bam_flags;
-pub mod cpp_rng;
 pub mod dupradar;
 pub mod featurecounts;
-pub mod preseq;
 pub mod qualimap;
 pub mod rseqc;
+
+// These analyses are not RNA-specific and now live in `crate::common`.
+// Re-exported here so existing `crate::rna::...` paths and the published
+// 0.2.x library surface keep resolving. Drop the shims at 1.0.
+pub use crate::common::{bam_flags, cpp_rng, preseq};
