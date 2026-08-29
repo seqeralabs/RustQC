@@ -1026,3 +1026,135 @@ fn test_dup_check_parallel_uses_global_duplicate_state() {
 
     let _ = fs::remove_dir_all(root);
 }
+
+// ===================================================================
+// RSeQC geneBody_coverage
+// ===================================================================
+
+/// Read the BED12 gene model the fixture was generated from.
+fn read_bed12(path: &std::path::Path) -> Vec<(String, bool, Vec<(i64, i64)>)> {
+    std::fs::read_to_string(path)
+        .unwrap()
+        .lines()
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(|line| {
+            let f: Vec<&str> = line.split('\t').collect();
+            let chrom = f[0].to_string();
+            let start: i64 = f[1].parse().unwrap();
+            let reverse = f[5] == "-";
+            let sizes: Vec<i64> = f[10]
+                .trim_end_matches(',')
+                .split(',')
+                .map(|v| v.parse().unwrap())
+                .collect();
+            let starts: Vec<i64> = f[11]
+                .trim_end_matches(',')
+                .split(',')
+                .map(|v| v.parse().unwrap())
+                .collect();
+            let exons = starts
+                .iter()
+                .zip(&sizes)
+                .map(|(offset, size)| (start + offset, start + offset + size))
+                .collect();
+            (chrom, reverse, exons)
+        })
+        .collect()
+}
+
+/// The aggregated gene body coverage curve, against RSeQC's own output.
+///
+/// RSeQC reads coverage at 100 interpolated positions per transcript and sums
+/// them 5' to 3'. A read counts unless it is deleted at that base, QC-failed,
+/// secondary, unmapped or duplicate-flagged.
+#[test]
+fn genebody_coverage_matches_rseqc() {
+    use rust_htslib::bam::{IndexedReader, Read as BamRead};
+    use rustqc::rna::rseqc::genebody_coverage::{
+        transcript_points, GeneBodyCoverage, DEFAULT_MIN_MRNA_LENGTH,
+    };
+    use std::collections::BTreeMap;
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let genes = read_bed12(&root.join("tests/data/test_genes.bed"));
+    let mut reader = IndexedReader::from_path(root.join("tests/data/test.bam")).unwrap();
+
+    let mut aggregate = GeneBodyCoverage::default();
+    for (chrom, reverse, exons) in &genes {
+        let Some(points) = transcript_points(chrom, *reverse, exons, DEFAULT_MIN_MRNA_LENGTH)
+        else {
+            continue;
+        };
+
+        // Count, at each percentile position, the reads covering it.
+        let mut coverage: BTreeMap<i64, u64> = points.positions.iter().map(|p| (*p, 0)).collect();
+        let first = points.positions.first().copied().unwrap_or(1) - 1;
+        let last = points.positions.last().copied().unwrap_or(1);
+        if reader.fetch((chrom.as_str(), first.max(0), last)).is_err() {
+            continue;
+        }
+        let mut record = rust_htslib::bam::Record::new();
+        while let Some(result) = reader.read(&mut record) {
+            result.unwrap();
+            let flags = record.flags();
+            // The exclusions RSeQC applies per read.
+            if flags & 0x4 != 0 || flags & 0x100 != 0 || flags & 0x200 != 0 || flags & 0x400 != 0 {
+                continue;
+            }
+            // Reference-covering blocks only, so a deletion does not count.
+            let mut reference = record.pos();
+            for op in record.cigar().iter() {
+                use rust_htslib::bam::record::Cigar;
+                match op {
+                    Cigar::Match(n) | Cigar::Equal(n) | Cigar::Diff(n) => {
+                        for k in 0..i64::from(*n) {
+                            // Positions are one-based.
+                            if let Some(count) = coverage.get_mut(&(reference + k + 1)) {
+                                *count += 1;
+                            }
+                        }
+                        reference += i64::from(*n);
+                    }
+                    // A deletion is skipped, but a reference skip is not:
+                    // pysam's pileup excludes `is_del` alone, so a read
+                    // spanning an intron still counts at the bases it skips.
+                    Cigar::RefSkip(n) => {
+                        for k in 0..i64::from(*n) {
+                            if let Some(count) = coverage.get_mut(&(reference + k + 1)) {
+                                *count += 1;
+                            }
+                        }
+                        reference += i64::from(*n);
+                    }
+                    Cigar::Del(n) => reference += i64::from(*n),
+                    _ => {}
+                }
+            }
+        }
+        aggregate.add_transcript(&points, &coverage);
+    }
+
+    let reference_line =
+        std::fs::read_to_string(root.join("tests/expected/rseqc/geneBodyCoverage.txt"))
+            .unwrap()
+            .lines()
+            .nth(1)
+            .unwrap()
+            .to_string();
+    let want: Vec<u64> = reference_line
+        .split('\t')
+        .skip(1)
+        .map(|v| v.parse::<f64>().unwrap() as u64)
+        .collect();
+
+    assert_eq!(want.len(), 100, "RSeQC reports 100 percentile points");
+    assert_eq!(aggregate.totals.len(), 100);
+    for (index, (got, expected)) in aggregate.totals.iter().zip(&want).enumerate() {
+        assert_eq!(
+            got,
+            expected,
+            "percentile {} differs: got {got}, want {expected}",
+            index + 1
+        );
+    }
+}
