@@ -1,0 +1,69 @@
+---
+title: mosdepth
+description: Depth of coverage outputs compatible with mosdepth, and the semantics RustQC reproduces.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+<Aside type="note" title="About mosdepth">
+mosdepth computes depth of coverage from BAM and CRAM files quickly and
+without a per-base pileup.
+
+[Source code](https://github.com/brentp/mosdepth) | Pedersen BS, Quinlan AR. *Bioinformatics*. 2018;34(5):867-868.
+</Aside>
+
+RustQC reproduces mosdepth's outputs exactly. On the project's test alignment
+every one of the six files is identical to mosdepth 0.3.14's, including the
+1094-line global distribution and the 721-interval per-base BED.
+
+## Files
+
+| File | Written when |
+| --- | --- |
+| `{sample}.mosdepth.summary.txt` | always |
+| `{sample}.mosdepth.global.dist.txt` | always |
+| `{sample}.per-base.bed.gz` (+ `.csi`) | unless `--skip-per-base` |
+| `{sample}.regions.bed.gz` (+ `.csi`) | with `--window-size` |
+| `{sample}.mosdepth.region.dist.txt` | with `--window-size` |
+| `{sample}.thresholds.bed.gz` (+ `.csi`) | with `--window-size` and thresholds |
+
+Compressed outputs are bgzf with a CSI companion index, so `tabix` can seek
+into them just as it can into mosdepth's own.
+
+## What counts towards depth
+
+RustQC applies mosdepth's default filters:
+
+- records carrying any of `UNMAP`, `SECONDARY`, `QCFAIL` or `DUP` are skipped,
+  which is mosdepth's `-F 1796`;
+- records below `--mapq` are skipped, defaulting to 0;
+- `M`, `=` and `X` cover the reference; `D` and `N` advance without covering;
+  `I`, `S`, `H` and `P` do not advance at all;
+- **a base covered by both mates of one pair counts once.**
+
+<Aside type="tip" title="Mate overlap is not a rounding detail">
+That last rule is what mosdepth's `--fast-mode` turns off, and it is often the
+largest single effect on a coverage figure. On the project's test data,
+correcting for it takes total covered bases from 469875 down to 247878. If your
+coverage looks about twice what you expect, this is the first thing to check in
+whatever produced it.
+</Aside>
+
+## Reading the distribution files
+
+`{sample}.mosdepth.global.dist.txt` holds `chrom`, `depth` and `proportion`
+rows in descending depth order, where the proportion is the fraction of that
+contig's bases at depth **at or above** the given value, ending at depth 0 with
+`1.00`.
+
+Which depths get a row is worth knowing, because it is not simply "every depth
+seen":
+
+- depths 0 through 300 always get a row, whether or not any base sits at that
+  exact depth;
+- above 300, only depths that actually occur;
+- the maximum observed depth gets a row when it falls inside that dense range,
+  and none when it does not.
+
+The region distribution follows the same rules but is computed over windows and
+their **rounded mean** depth, not over individual bases.

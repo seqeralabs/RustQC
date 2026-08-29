@@ -1,0 +1,2 @@
+file	format	type	num_seqs	sum_len	min_len	avg_len	max_len	Q1	Q2	Q3	sum_gap	N50	N50_num	Q20(%)	Q30(%)	AvgQual	GC(%)	sum_n
+protein_mini_with_cazymes.faa	FASTA	Protein	16	6757	199	422.3	757	294	376	516	0	430	6	0	0	0.00	0.00	0
