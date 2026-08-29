@@ -1,0 +1,2 @@
+seqkit	2.13.0
+pyteomics	5.0.1

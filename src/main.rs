@@ -18,14 +18,15 @@ use indexmap::IndexMap;
 use log::debug;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use rustqc::io::{format_count, format_duration, format_pct};
-use rustqc::{config, cpu, gtf, rna, summary};
+use rustqc::{common, config, cpu, gtf, rna, summary};
 
 use ui::{Ui, Verbosity};
 
+use rust_htslib::bam;
 use rust_htslib::bam::Read as BamRead;
 
 use rna::rseqc::accumulators::{RseqcAccumulators, RseqcAnnotations, RseqcConfig};
@@ -73,9 +74,19 @@ fn main() -> Result<()> {
     let cli = cli::parse_args();
 
     // Determine verbosity from CLI flags
-    let verbosity = match &cli.command {
-        cli::Commands::Rna(args) if args.quiet => Verbosity::Quiet,
-        cli::Commands::Rna(args) if args.verbose => Verbosity::Verbose,
+    let (quiet, verbose) = match &cli.command {
+        cli::Commands::Rna(args) => (args.quiet, args.verbose),
+        cli::Commands::Dna(args) => (args.quiet, args.verbose),
+        cli::Commands::Reads(args) => (args.quiet, args.verbose),
+        cli::Commands::Protein(args) => match &args.mode {
+            cli::ProteinMode::Sequence(args) => (args.quiet, args.verbose),
+            #[cfg(feature = "proteomics")]
+            cli::ProteinMode::Spectra(args) => (args.quiet, args.verbose),
+        },
+    };
+    let verbosity = match (quiet, verbose) {
+        (true, _) => Verbosity::Quiet,
+        (_, true) => Verbosity::Verbose,
         _ => Verbosity::Normal,
     };
 
@@ -94,7 +105,1264 @@ fn main() -> Result<()> {
 
     match cli.command {
         cli::Commands::Rna(args) => run_rna(args, &ui),
+        cli::Commands::Dna(args) => run_dna(args, &ui),
+        cli::Commands::Reads(args) => run_reads(args, &ui),
+        cli::Commands::Protein(args) => run_protein(args, &ui),
     }
+}
+
+/// Run `reads`: raw FASTQ quality control.
+///
+/// Records stream through the accumulator and are never all held at once, so
+/// memory does not grow with the file.
+fn run_reads(args: cli::ReadsArgs, ui: &Ui) -> Result<()> {
+    use rustqc::reads::{fastq, metrics::ReadMetrics, output};
+
+    let run_start = Instant::now();
+    let timestamp_start = format_utc_now();
+
+    let (_merged, config_paths) = config::load_merged_config(args.config.as_deref())?;
+    let outdir = Path::new(&args.outdir);
+    std::fs::create_dir_all(outdir)
+        .with_context(|| format!("Failed to create output directory: {}", outdir.display()))?;
+
+    ui.header(
+        env!("CARGO_PKG_VERSION"),
+        env!("GIT_SHORT_HASH"),
+        env!("BUILD_TIMESTAMP"),
+        Some(&rustqc::cpu::cpu_info_line()),
+    );
+    for (path, source) in &config_paths {
+        ui.config("Config", &format!("{} ({source})", path.display()));
+    }
+    ui.config("Output dir", &args.outdir);
+
+    let dir = if args.flat_output {
+        outdir.to_path_buf()
+    } else {
+        outdir.join("reads")
+    };
+    std::fs::create_dir_all(&dir)?;
+
+    let mut table_rows = Vec::new();
+    let mut inputs = Vec::new();
+
+    for path in &args.input {
+        let file_start = Instant::now();
+        let name = Path::new(path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(path.as_str())
+            .to_string();
+
+        let mut metrics = ReadMetrics::default();
+        match fastq::for_each_record(Path::new(path), |r| {
+            metrics.observe(&r.sequence, &r.quality)
+        }) {
+            Ok(()) => {
+                let sample_name = args.sample_name.clone().unwrap_or_else(|| {
+                    // Strip both extensions of a .fastq.gz, not just the last.
+                    let stem = Path::new(path)
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("sample");
+                    Path::new(stem)
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or(stem)
+                        .to_string()
+                });
+
+                let data = dir.join(format!("{sample_name}_fastqc_data.txt"));
+                output::write_fastqc_data(&name, &metrics, &data)?;
+                ui.output_item("reads", &data.display().to_string());
+
+                ui.detail(&format!(
+                    "{name}: {} reads, {} bases, mean quality {:.2}",
+                    metrics.reads,
+                    metrics.bases,
+                    metrics.average_quality()
+                ));
+
+                inputs.push(summary::InputSummary {
+                    bam_file: path.clone(),
+                    status: "success".to_string(),
+                    error: None,
+                    runtime_seconds: file_start.elapsed().as_secs_f64(),
+                    counting: None,
+                    dupradar: None,
+                    dna: None,
+                    outputs: vec![summary::OutputFile {
+                        tool: "reads".to_string(),
+                        path: data.display().to_string(),
+                    }],
+                });
+                table_rows.push((name, metrics));
+            }
+            Err(e) => {
+                ui.bam_result_err(&name, &format!("{e:#}"));
+                inputs.push(summary::InputSummary {
+                    bam_file: path.clone(),
+                    status: "failed".to_string(),
+                    error: Some(format!("{e:#}")),
+                    runtime_seconds: file_start.elapsed().as_secs_f64(),
+                    counting: None,
+                    dupradar: None,
+                    dna: None,
+                    outputs: Vec::new(),
+                });
+            }
+        }
+    }
+
+    if !table_rows.is_empty() {
+        let stats_path = dir.join("read_stats.tsv");
+        output::write_seqkit_stats(&table_rows, &stats_path)?;
+        ui.output_item("reads", &stats_path.display().to_string());
+    }
+
+    if let Some(ref json_path) = args.json_summary {
+        let summary = summary::RunSummary {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            commit: env!("GIT_SHORT_HASH").to_string(),
+            binary_target: cpu::binary_target().to_string(),
+            cpu_features: cpu::detected_features()
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            timestamp_start,
+            timestamp_end: format_utc_now(),
+            runtime_seconds: run_start.elapsed().as_secs_f64(),
+            inputs,
+        };
+        let json = serde_json::to_string_pretty(&summary)?;
+        if json_path == "-" {
+            println!("{json}");
+        } else {
+            let path = if json_path.is_empty() {
+                outdir.join("rustqc_summary.json")
+            } else {
+                PathBuf::from(json_path)
+            };
+            std::fs::write(&path, json)
+                .with_context(|| format!("Failed to write JSON summary: {}", path.display()))?;
+        }
+    }
+
+    ui.finish("Read QC", run_start.elapsed());
+    Ok(())
+}
+
+/// Run the protein QC pipeline, dispatching on the chosen mode.
+fn run_protein(args: cli::ProteinArgs, ui: &Ui) -> Result<()> {
+    match args.mode {
+        cli::ProteinMode::Sequence(args) => run_protein_sequence(args, ui),
+        #[cfg(feature = "proteomics")]
+        cli::ProteinMode::Spectra(args) => run_protein_spectra(args, ui),
+    }
+}
+
+/// Run `protein spectra`: mass spectrometry run QC from mzML.
+#[cfg(feature = "proteomics")]
+fn run_protein_spectra(args: cli::ProteinSpectraArgs, ui: &Ui) -> Result<()> {
+    use rustqc::protein::spectra;
+
+    let run_start = Instant::now();
+    let timestamp_start = format_utc_now();
+
+    let (merged, config_paths) = config::load_merged_config(args.config.as_deref())?;
+    let config = merged.protein;
+    let flat_output = args.flat_output || config.flat_output;
+
+    let outdir = Path::new(&args.outdir);
+    std::fs::create_dir_all(outdir)
+        .with_context(|| format!("Failed to create output directory: {}", outdir.display()))?;
+
+    ui.header(
+        env!("CARGO_PKG_VERSION"),
+        env!("GIT_SHORT_HASH"),
+        env!("BUILD_TIMESTAMP"),
+        Some(&rustqc::cpu::cpu_info_line()),
+    );
+    for (path, source) in &config_paths {
+        ui.config("Config", &format!("{} ({source})", path.display()));
+    }
+    ui.config("Output dir", &args.outdir);
+
+    let dir = if flat_output {
+        outdir.to_path_buf()
+    } else {
+        outdir.join("spectra")
+    };
+    std::fs::create_dir_all(&dir)?;
+
+    let mut inputs = Vec::new();
+    for path in &args.input {
+        let file_start = Instant::now();
+        let name = Path::new(path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(path.as_str())
+            .to_string();
+
+        match spectra::analyse(Path::new(path)) {
+            Ok(metrics) => {
+                let sample_name = args.sample_name.clone().unwrap_or_else(|| {
+                    Path::new(path)
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("sample")
+                        .to_string()
+                });
+                let report = dir.join(format!("{sample_name}.spectra_report.txt"));
+                spectra::output::write_report(&name, &metrics, &report)?;
+                ui.output_item("protein spectra", &report.display().to_string());
+                ui.detail(&format!(
+                    "{name}: {} spectra, {} peaks",
+                    metrics.total_spectra(),
+                    metrics.total_peaks()
+                ));
+                if metrics.precursors > 0 && metrics.precursors_without_charge == metrics.precursors
+                {
+                    ui.warn(&format!(
+                        "{name}: no precursor charge states are annotated, so charge metrics are unavailable"
+                    ));
+                }
+
+                inputs.push(summary::InputSummary {
+                    bam_file: path.clone(),
+                    status: "success".to_string(),
+                    error: None,
+                    runtime_seconds: file_start.elapsed().as_secs_f64(),
+                    counting: None,
+                    dupradar: None,
+                    dna: None,
+                    outputs: vec![summary::OutputFile {
+                        tool: "protein spectra".to_string(),
+                        path: report.display().to_string(),
+                    }],
+                });
+            }
+            Err(e) => {
+                ui.bam_result_err(&name, &format!("{e:#}"));
+                inputs.push(summary::InputSummary {
+                    bam_file: path.clone(),
+                    status: "failed".to_string(),
+                    error: Some(format!("{e:#}")),
+                    runtime_seconds: file_start.elapsed().as_secs_f64(),
+                    counting: None,
+                    dupradar: None,
+                    dna: None,
+                    outputs: Vec::new(),
+                });
+            }
+        }
+    }
+
+    if let Some(ref json_path) = args.json_summary {
+        let summary = summary::RunSummary {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            commit: env!("GIT_SHORT_HASH").to_string(),
+            binary_target: cpu::binary_target().to_string(),
+            cpu_features: cpu::detected_features()
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            timestamp_start,
+            timestamp_end: format_utc_now(),
+            runtime_seconds: run_start.elapsed().as_secs_f64(),
+            inputs,
+        };
+        let json = serde_json::to_string_pretty(&summary)?;
+        if json_path == "-" {
+            println!("{json}");
+        } else {
+            let path = if json_path.is_empty() {
+                outdir.join("rustqc_summary.json")
+            } else {
+                PathBuf::from(json_path)
+            };
+            std::fs::write(&path, json)
+                .with_context(|| format!("Failed to write JSON summary: {}", path.display()))?;
+        }
+    }
+
+    ui.finish("Protein spectra QC", run_start.elapsed());
+    Ok(())
+}
+
+/// Run `protein sequence`: FASTA statistics, composition and defects.
+///
+/// Each input file is summarised on its own, and the seqkit-compatible table
+/// carries one row per file, which is how seqkit reports several files too.
+fn run_protein_sequence(args: cli::ProteinSequenceArgs, ui: &Ui) -> Result<()> {
+    use rustqc::protein::sequence::output;
+
+    let run_start = Instant::now();
+    let timestamp_start = format_utc_now();
+
+    let (merged, config_paths) = config::load_merged_config(args.config.as_deref())?;
+    let config = merged.protein;
+    let flat_output = args.flat_output || config.flat_output;
+    let expect_stop = args.expect_stop || config.sequence.expect_stop;
+    let min_length = if args.min_length > 0 {
+        args.min_length
+    } else {
+        config.sequence.min_length
+    };
+
+    let outdir = Path::new(&args.outdir);
+    std::fs::create_dir_all(outdir)
+        .with_context(|| format!("Failed to create output directory: {}", outdir.display()))?;
+
+    ui.header(
+        env!("CARGO_PKG_VERSION"),
+        env!("GIT_SHORT_HASH"),
+        env!("BUILD_TIMESTAMP"),
+        Some(&rustqc::cpu::cpu_info_line()),
+    );
+    for (path, source) in &config_paths {
+        ui.config("Config", &format!("{} ({source})", path.display()));
+    }
+    ui.config("Output dir", &args.outdir);
+    if min_length > 0 {
+        ui.config("Min length", &min_length.to_string());
+    }
+
+    let dir = if flat_output {
+        outdir.to_path_buf()
+    } else {
+        outdir.join("sequence")
+    };
+    std::fs::create_dir_all(&dir)?;
+
+    let mut table_rows = Vec::new();
+    let mut inputs = Vec::new();
+
+    for path in &args.input {
+        let file_start = Instant::now();
+        let name = Path::new(path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(path.as_str())
+            .to_string();
+
+        match summarise_fasta(path, min_length, expect_stop) {
+            Ok((stats, found, kept, skipped)) => {
+                if skipped > 0 {
+                    ui.detail(&format!(
+                        "{name}: skipped {skipped} sequences shorter than {min_length}"
+                    ));
+                }
+                let sample_name = args.sample_name.clone().unwrap_or_else(|| {
+                    Path::new(path)
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("sample")
+                        .to_string()
+                });
+
+                let report = dir.join(format!("{sample_name}.sequence_report.txt"));
+                output::write_report(&name, &stats, &found, &report)?;
+                ui.output_item("protein sequence", &report.display().to_string());
+
+                if !found.is_clean() {
+                    ui.warn(&format!(
+                        "{name}: {} defective sequences, see the report",
+                        found.count()
+                    ));
+                }
+
+                inputs.push(summary::InputSummary {
+                    bam_file: path.clone(),
+                    status: "success".to_string(),
+                    error: None,
+                    runtime_seconds: file_start.elapsed().as_secs_f64(),
+                    counting: None,
+                    dupradar: None,
+                    dna: None,
+                    outputs: vec![summary::OutputFile {
+                        tool: "protein sequence".to_string(),
+                        path: report.display().to_string(),
+                    }],
+                });
+                ui.detail(&format!("{name}: {kept} sequences"));
+                table_rows.push((name, stats));
+            }
+            Err(e) => {
+                ui.bam_result_err(&name, &format!("{e:#}"));
+                inputs.push(summary::InputSummary {
+                    bam_file: path.clone(),
+                    status: "failed".to_string(),
+                    error: Some(format!("{e:#}")),
+                    runtime_seconds: file_start.elapsed().as_secs_f64(),
+                    counting: None,
+                    dupradar: None,
+                    dna: None,
+                    outputs: Vec::new(),
+                });
+            }
+        }
+    }
+
+    if !table_rows.is_empty() {
+        let stats_path = dir.join("sequence_stats.tsv");
+        output::write_seqkit_stats(&table_rows, &stats_path)?;
+        ui.output_item("protein sequence", &stats_path.display().to_string());
+    }
+
+    if let Some(ref json_path) = args.json_summary {
+        let summary = summary::RunSummary {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            commit: env!("GIT_SHORT_HASH").to_string(),
+            binary_target: cpu::binary_target().to_string(),
+            cpu_features: cpu::detected_features()
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            timestamp_start,
+            timestamp_end: format_utc_now(),
+            runtime_seconds: run_start.elapsed().as_secs_f64(),
+            inputs,
+        };
+        let json = serde_json::to_string_pretty(&summary)?;
+        if json_path == "-" {
+            println!("{json}");
+        } else {
+            let path = if json_path.is_empty() {
+                outdir.join("rustqc_summary.json")
+            } else {
+                PathBuf::from(json_path)
+            };
+            std::fs::write(&path, json)
+                .with_context(|| format!("Failed to write JSON summary: {}", path.display()))?;
+        }
+    }
+
+    ui.finish("Protein sequence QC", run_start.elapsed());
+    Ok(())
+}
+
+/// Read one FASTA and summarise it, returning the statistics, the defects, and
+/// how many sequences were kept and skipped by the length filter.
+fn summarise_fasta(
+    path: &str,
+    min_length: usize,
+    expect_stop: bool,
+) -> Result<(
+    rustqc::protein::sequence::stats::SequenceStats,
+    rustqc::protein::sequence::defects::Defects,
+    usize,
+    usize,
+)> {
+    use rustqc::protein::sequence::{self, defects, stats::SequenceStats};
+
+    let all = sequence::read_fasta(Path::new(path))?;
+    let total = all.len();
+    let kept: Vec<_> = all.into_iter().filter(|r| r.len() >= min_length).collect();
+    let skipped = total - kept.len();
+    let stats = SequenceStats::from_records(&kept);
+    let found = defects::inspect(&kept, expect_stop);
+    Ok((stats, found, kept.len(), skipped))
+}
+
+/// Run the DNA QC pipeline: depth of coverage, samtools-compatible outputs
+/// and library complexity estimation in a single pass over each input.
+///
+/// Contigs are processed in parallel, one worker per contig, each holding its
+/// own depth array. Input files are processed one after another so that the
+/// per-contig parallelism gets the whole thread budget.
+fn run_dna(args: cli::DnaArgs, ui: &Ui) -> Result<()> {
+    let run_start = Instant::now();
+    let timestamp_start = format_utc_now();
+
+    let (merged, config_paths) = config::load_merged_config(args.config.as_deref())?;
+    let mut config = merged.dna;
+
+    // CLI flags override the configuration file.
+    if !args.depth_thresholds.is_empty() {
+        config.mosdepth.thresholds = args.depth_thresholds.clone();
+    }
+    if let Some(window) = args.window_size {
+        config.mosdepth.window_size = Some(window);
+    }
+    if args.skip_per_base {
+        config.mosdepth.skip_per_base = true;
+    }
+    if args.skip_preseq {
+        config.preseq.enabled = false;
+    }
+    if let Some(seed) = args.preseq_seed {
+        config.preseq.seed = seed;
+    }
+    if let Some(val) = args.preseq_max_extrap {
+        config.preseq.max_extrap = val;
+    }
+    if let Some(val) = args.preseq_step_size {
+        config.preseq.step_size = val;
+    }
+    if let Some(val) = args.preseq_n_bootstraps {
+        config.preseq.n_bootstraps = val;
+    }
+    if let Some(val) = args.preseq_seg_len {
+        config.preseq.max_segment_length = val;
+    }
+
+    let flat_output = args.flat_output || config.flat_output;
+    let outdir = Path::new(&args.outdir);
+    std::fs::create_dir_all(outdir)
+        .with_context(|| format!("Failed to create output directory: {}", outdir.display()))?;
+
+    ui.header(
+        env!("CARGO_PKG_VERSION"),
+        env!("GIT_SHORT_HASH"),
+        env!("BUILD_TIMESTAMP"),
+        Some(&rustqc::cpu::cpu_info_line()),
+    );
+    for (path, source) in &config_paths {
+        ui.config("Config", &format!("{} ({source})", path.display()));
+    }
+    ui.config("Output dir", &args.outdir);
+    ui.config("Threads", &args.threads.to_string());
+    if let Some(ref targets) = args.targets {
+        ui.config("Targets", targets);
+    }
+    if let Some(ref baits) = args.baits {
+        ui.config("Baits", baits);
+    }
+
+    let mut inputs = Vec::new();
+    for bam_path in &args.input {
+        let bam_start = Instant::now();
+        let name = Path::new(bam_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(bam_path.as_str())
+            .to_string();
+
+        match process_single_dna_bam(bam_path, &args, &config, outdir, flat_output, ui) {
+            Ok(mut summary) => {
+                summary.runtime_seconds = bam_start.elapsed().as_secs_f64();
+                ui.bam_result_ok(&name, bam_start.elapsed());
+                inputs.push(summary);
+            }
+            Err(e) => {
+                ui.bam_result_err(&name, &format!("{e:#}"));
+                inputs.push(summary::InputSummary {
+                    bam_file: bam_path.clone(),
+                    status: "failed".to_string(),
+                    error: Some(format!("{e:#}")),
+                    runtime_seconds: bam_start.elapsed().as_secs_f64(),
+                    counting: None,
+                    dupradar: None,
+                    dna: None,
+                    outputs: Vec::new(),
+                });
+            }
+        }
+    }
+
+    if let Some(ref json_path) = args.json_summary {
+        let summary = summary::RunSummary {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            commit: env!("GIT_SHORT_HASH").to_string(),
+            binary_target: cpu::binary_target().to_string(),
+            cpu_features: cpu::detected_features()
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            timestamp_start,
+            timestamp_end: format_utc_now(),
+            runtime_seconds: run_start.elapsed().as_secs_f64(),
+            inputs,
+        };
+        let json = serde_json::to_string_pretty(&summary)?;
+        if json_path == "-" {
+            println!("{json}");
+        } else {
+            let path = if json_path.is_empty() {
+                outdir.join("rustqc_summary.json")
+            } else {
+                PathBuf::from(json_path)
+            };
+            std::fs::write(&path, json)
+                .with_context(|| format!("Failed to write JSON summary: {}", path.display()))?;
+        }
+    }
+
+    let citations_path = outdir.join("CITATIONS.md");
+    citations::write_dna_citations(
+        &citations_path,
+        &config,
+        env!("CARGO_PKG_VERSION"),
+        env!("GIT_SHORT_HASH"),
+    )?;
+    ui.output_item("citations", &citations_path.display().to_string());
+
+    ui.finish("DNA QC", run_start.elapsed());
+    Ok(())
+}
+
+/// Process one alignment file through the DNA pipeline.
+fn process_single_dna_bam(
+    bam_path: &str,
+    args: &cli::DnaArgs,
+    config: &config::DnaConfig,
+    outdir: &Path,
+    flat_output: bool,
+    ui: &Ui,
+) -> Result<summary::InputSummary> {
+    use rustqc::common::bam_stat_accum::BamStatAccum;
+    use rustqc::common::preseq::PreseqAccum;
+    use rustqc::dna::depth::{DepthAccum, MOSDEPTH_DEFAULT_EXCLUDE};
+    use rustqc::dna::gc_bias::{self, GcBiasAccum};
+    use rustqc::dna::hs_metrics::{self, HsAccum, HsCounters, HsMetricsResult};
+    use rustqc::dna::insert_size::{self, InsertSizeAccum};
+    use rustqc::dna::intervals::IntervalSet;
+    use rustqc::dna::mosdepth::{output as mos_out, ContigDepth, MosdepthResult};
+    use rustqc::dna::qualimap::{ContigQualimap, QualimapAccum};
+    use rustqc::dna::qualimap_output;
+    use rustqc::dna::wgs_metrics::{self, WgsAccum, WgsCounters, WgsMetricsResult};
+
+    let sample_name = args
+        .sample_name
+        .clone()
+        .or_else(|| config.sample_name.clone())
+        .unwrap_or_else(|| {
+            Path::new(bam_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("sample")
+                .to_string()
+        });
+
+    let is_cram = bam_path.ends_with(".cram");
+    ensure!(
+        !is_cram || args.reference.is_some(),
+        "CRAM input requires --reference"
+    );
+
+    // Read the header once to learn the contigs.
+    let header = {
+        let reader = bam::IndexedReader::from_path(bam_path)
+            .with_context(|| format!("Failed to open alignment file: {bam_path}"))?;
+        reader.header().to_owned()
+    };
+    let mut contigs: Vec<(u32, String, u64)> = (0..header.target_count())
+        .map(|tid| {
+            let name = String::from_utf8_lossy(header.tid2name(tid)).to_string();
+            let len = header.target_len(tid).unwrap_or(0);
+            (tid, name, len)
+        })
+        .collect();
+    // Longest first, so the biggest depth arrays are allocated while the pool
+    // is emptiest.
+    contigs.sort_by_key(|contig| std::cmp::Reverse(contig.2));
+
+    let largest = contigs.first().map(|c| c.2).unwrap_or(0);
+    let workers = depth_worker_budget(args.threads, args.max_depth_workers, largest);
+    ui.config("Depth workers", &workers.to_string());
+
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(workers)
+        .build()
+        .context("Failed to build rayon thread pool")?;
+
+    let thresholds = config.mosdepth.thresholds.clone();
+    let window_size = config.mosdepth.window_size;
+    let preseq_enabled = config.preseq.enabled;
+    let seg_len = config.preseq.max_segment_length;
+    let mapq_cut = args.mapq_cut;
+    // CollectWgsMetrics needs the reference to count non-N bases, so without
+    // one it is skipped rather than reported against a wrong territory.
+    let wgs_enabled = config.wgs_metrics.enabled && args.reference.is_some();
+    if config.wgs_metrics.enabled && args.reference.is_none() {
+        ui.warn("CollectWgsMetrics needs --reference to size the genome territory, skipping");
+    }
+    let insert_size_enabled = config.insert_size.enabled;
+    // GC bias bins reference windows, so it needs the reference just as the
+    // WGS metrics do.
+    let gc_bias_enabled = config.gc_bias.enabled && args.reference.is_some();
+    if config.gc_bias.enabled && args.reference.is_none() {
+        ui.warn("CollectGcBiasMetrics needs --reference to bin the genome, skipping");
+    }
+    let gc_window = config.gc_bias.window_size;
+
+    // Targeted mode is switched on by --targets alone; --baits defaults to it.
+    let targets = match args.targets.as_deref() {
+        Some(path) => Some(IntervalSet::from_bed(Path::new(path))?),
+        None => None,
+    };
+    let baits = match args.baits.as_deref() {
+        Some(path) => Some(IntervalSet::from_bed(Path::new(path))?),
+        None => targets.clone(),
+    };
+    let hs_enabled = config.hs_metrics.enabled && targets.is_some();
+    let hs_min_mapq = config.hs_metrics.min_mapping_quality;
+    let hs_min_baseq = config.hs_metrics.min_base_quality;
+    let qualimap_enabled = config.qualimap.enabled;
+    let qualimap_windows = config.qualimap.num_windows;
+    let wgs_min_mapq = config.wgs_metrics.min_mapping_quality;
+    let wgs_min_baseq = config.wgs_metrics.min_base_quality;
+    let coverage_cap = config.wgs_metrics.coverage_cap;
+
+    /// What one contig worker hands back: its depth summary, the read-level
+    /// counters, and the optional per-tool accumulators.
+    type ContigOutput = (
+        ContigDepth,
+        BamStatAccum,
+        Option<PreseqAccum>,
+        Option<(WgsCounters, Vec<u32>)>,
+        Option<InsertSizeAccum>,
+        Option<GcBiasAccum>,
+        Option<(HsCounters, Vec<u32>, Vec<bool>, String)>,
+        Option<ContigQualimap>,
+    );
+
+    let results: Vec<Result<ContigOutput>> = pool.install(|| {
+        contigs
+            .par_iter()
+            .map(|(tid, name, len)| -> Result<ContigOutput> {
+                let mut reader = bam::IndexedReader::from_path(bam_path)
+                    .with_context(|| format!("Failed to open alignment file: {bam_path}"))?;
+                if let Some(reference) = args.reference.as_deref() {
+                    reader
+                        .set_reference(reference)
+                        .with_context(|| format!("Failed to set reference: {reference}"))?;
+                }
+                reader
+                    .fetch(*tid)
+                    .with_context(|| format!("Failed to fetch contig {name}"))?;
+
+                let mut depth = DepthAccum::new(*len, mapq_cut, MOSDEPTH_DEFAULT_EXCLUDE);
+                let mut bam_stat = BamStatAccum::default();
+                let mut preseq = preseq_enabled.then(|| PreseqAccum::new(seg_len));
+                // Picard filters differently from mosdepth, so its coverage
+                // needs its own accumulator rather than a correction applied
+                // to a shared one.
+                let mut wgs = wgs_enabled.then(|| WgsAccum::new(*len, wgs_min_mapq, wgs_min_baseq));
+                let mut insert_sizes = insert_size_enabled.then(InsertSizeAccum::new);
+                let mut qualimap =
+                    qualimap_enabled.then(|| QualimapAccum::new(name, *len, qualimap_windows));
+
+                // GC bias and the targeted metrics both need per-contig
+                // context, fetched once here rather than per record.
+                let reference_bases: Option<Vec<u8>> = if gc_bias_enabled {
+                    let reader = rust_htslib::faidx::Reader::from_path(
+                        args.reference.as_deref().unwrap_or_default(),
+                    )
+                    .with_context(|| "Failed to open the reference FASTA index")?;
+                    let length = reader.fetch_seq_len(name) as usize;
+                    Some(
+                        reader
+                            .fetch_seq(name, 0, length.saturating_sub(1))
+                            .map(|s| s.to_vec())
+                            .with_context(|| format!("Failed to read reference for {name}"))?,
+                    )
+                } else {
+                    None
+                };
+                let mut gc = reference_bases
+                    .as_ref()
+                    .map(|bases| GcBiasAccum::new(bases, gc_window));
+                let mut hs = hs_enabled.then(|| {
+                    HsAccum::new(
+                        name,
+                        *len,
+                        baits.as_ref().unwrap_or_else(|| targets.as_ref().unwrap()),
+                        targets.as_ref().unwrap(),
+                        hs_min_mapq,
+                        hs_min_baseq,
+                    )
+                });
+
+                let mut record = bam::Record::new();
+                while let Some(result) = reader.read(&mut record) {
+                    result.context("Failed to read record")?;
+                    depth.process_read(&record);
+                    bam_stat.process_read(&record, mapq_cut);
+                    if let Some(accum) = preseq.as_mut() {
+                        accum.process_read(&record);
+                    }
+                    if let Some(accum) = wgs.as_mut() {
+                        accum.process_read(&record);
+                    }
+                    if let Some(accum) = insert_sizes.as_mut() {
+                        accum.process_read(&record);
+                    }
+                    if let (Some(accum), Some(bases)) = (gc.as_mut(), reference_bases.as_ref()) {
+                        accum.process_read(&record, bases);
+                    }
+                    if let Some(accum) = hs.as_mut() {
+                        accum.process_read(&record);
+                    }
+                    if let Some(accum) = qualimap.as_mut() {
+                        accum.process_read(&record);
+                    }
+                }
+
+                let depths = depth.into_depths();
+                let contig = ContigDepth::from_depths(name, &depths, window_size, &thresholds);
+                Ok((
+                    contig,
+                    bam_stat,
+                    preseq,
+                    wgs.map(|accum| accum.into_parts()),
+                    insert_sizes,
+                    gc,
+                    hs.map(|accum| {
+                        let (counters, depths, mask) = accum.into_parts();
+                        (counters, depths, mask, name.clone())
+                    }),
+                    qualimap.map(|accum| accum.into_result()),
+                ))
+            })
+            .collect()
+    });
+
+    let mut per_contig = Vec::new();
+    let mut bam_stat_total = BamStatAccum::default();
+    let mut preseq_total: Option<PreseqAccum> = None;
+    let mut wgs_counters = WgsCounters::default();
+    let mut wgs_depths: Vec<u32> = Vec::new();
+    let mut saw_wgs = false;
+    let mut insert_size_total: Option<InsertSizeAccum> = None;
+    let mut gc_total: Option<GcBiasAccum> = None;
+    let mut hs_counters = HsCounters::default();
+    let mut hs_target_depths: Vec<u32> = Vec::new();
+    let mut hs_target_count = 0u64;
+    let mut hs_zero_targets = 0u64;
+    let mut qualimap_contigs: Vec<ContigQualimap> = Vec::new();
+    for result in results {
+        let (contig, bam_stat, preseq, wgs, insert_sizes, gc, hs, qualimap) = result?;
+        per_contig.push(contig);
+        bam_stat_total.merge(bam_stat);
+        match (preseq_total.as_mut(), preseq) {
+            (Some(total), Some(part)) => total.merge(part),
+            (None, part) => preseq_total = part,
+            _ => {}
+        }
+        if let Some((counters, depths)) = wgs {
+            saw_wgs = true;
+            wgs_counters.merge(&counters);
+            // Depths concatenate rather than merge: each worker owns a
+            // distinct contig and the metrics span all of them.
+            wgs_depths.extend(depths);
+        }
+        match (insert_size_total.as_mut(), insert_sizes) {
+            (Some(total), Some(part)) => total.merge(part),
+            (None, part) => insert_size_total = part,
+            _ => {}
+        }
+        match (gc_total.as_mut(), gc) {
+            (Some(total), Some(part)) => total.merge(&part),
+            (None, part) => gc_total = part,
+            _ => {}
+        }
+        if let Some(part) = qualimap {
+            qualimap_contigs.push(part);
+        }
+        if let Some((counters, depths, mask, contig_name)) = hs {
+            hs_counters.merge(&counters);
+            for (depth, on_target) in depths.iter().zip(mask.iter()) {
+                if *on_target {
+                    hs_target_depths.push(*depth);
+                }
+            }
+            if let Some(set) = targets.as_ref() {
+                for interval in set.on(&contig_name) {
+                    hs_target_count += 1;
+                    if (interval.start..interval.end)
+                        .all(|p| depths.get(p as usize).copied().unwrap_or(0) == 0)
+                    {
+                        hs_zero_targets += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    // Unmapped records carry no contig, so they need their own pass; flagstat
+    // and idxstats both report them.
+    {
+        let mut reader = bam::IndexedReader::from_path(bam_path)
+            .with_context(|| format!("Failed to open alignment file: {bam_path}"))?;
+        if let Some(reference) = args.reference.as_deref() {
+            reader.set_reference(reference).ok();
+        }
+        if reader.fetch(bam::FetchDefinition::Unmapped).is_ok() {
+            // Unmapped records reach no contig worker, yet they still count
+            // towards several metrics: flagstat and idxstats report them, HS
+            // metrics count them in TOTAL_READS and PF_BASES, and GC bias
+            // counts them as clusters. Both accumulators short-circuit on an
+            // unmapped record, so an empty contig is enough context here.
+            let mut hs_unmapped = hs_enabled.then(|| {
+                HsAccum::new(
+                    "",
+                    0,
+                    baits.as_ref().unwrap_or_else(|| targets.as_ref().unwrap()),
+                    targets.as_ref().unwrap(),
+                    hs_min_mapq,
+                    hs_min_baseq,
+                )
+            });
+            let mut gc_unmapped = gc_bias_enabled.then(|| GcBiasAccum::new(&[], gc_window));
+            let mut qualimap_unmapped =
+                qualimap_enabled.then(|| QualimapAccum::new("", 0, qualimap_windows));
+
+            let mut record = bam::Record::new();
+            while let Some(result) = reader.read(&mut record) {
+                result.context("Failed to read unmapped record")?;
+                bam_stat_total.process_read(&record, mapq_cut);
+                if let Some(accum) = hs_unmapped.as_mut() {
+                    accum.process_read(&record);
+                }
+                if let Some(accum) = gc_unmapped.as_mut() {
+                    accum.process_read(&record, &[]);
+                }
+                if let Some(accum) = qualimap_unmapped.as_mut() {
+                    accum.process_read(&record);
+                }
+            }
+
+            if let Some(accum) = hs_unmapped {
+                let (counters, _, _) = accum.into_parts();
+                hs_counters.merge(&counters);
+            }
+            if let (Some(total), Some(part)) = (gc_total.as_mut(), gc_unmapped) {
+                total.merge(&part);
+            }
+            if let (Some(first), Some(part)) = (qualimap_contigs.first_mut(), qualimap_unmapped) {
+                // The unmapped pass only moves read counters, so folding it
+                // into the first contig keeps the totals right without
+                // inventing a contig for reads that have none.
+                first.counters.merge(&part.into_result().counters);
+            }
+        }
+    }
+
+    // Workers ran longest-contig-first; outputs go out in header order.
+    let order: Vec<String> = (0..header.target_count())
+        .map(|tid| String::from_utf8_lossy(header.tid2name(tid)).to_string())
+        .collect();
+    per_contig.sort_by_key(|contig| {
+        order
+            .iter()
+            .position(|name| name == &contig.name)
+            .unwrap_or(usize::MAX)
+    });
+
+    let result = MosdepthResult {
+        contigs: per_contig,
+        window_size,
+        thresholds: thresholds.clone(),
+    };
+
+    let bam_stat_result = bam_stat_total.into_result();
+    ensure!(
+        args.skip_dup_check || bam_stat_result.duplicates > 0,
+        "No duplicate-flagged reads found in {bam_path}. RustQC expects \
+         duplicate-marked (not removed) input. Pass --skip-dup-check to override."
+    );
+
+    let dir = |name: &str| -> PathBuf {
+        if flat_output {
+            outdir.to_path_buf()
+        } else {
+            outdir.join(name)
+        }
+    };
+    let mut written: Vec<summary::OutputFile> = Vec::new();
+    let mut record_output = |tool: &str, path: PathBuf| {
+        ui.output_item(tool, &path.display().to_string());
+        written.push(summary::OutputFile {
+            tool: tool.to_string(),
+            path: path.display().to_string(),
+        });
+    };
+
+    if config.mosdepth.enabled {
+        let mos_dir = dir("mosdepth");
+        std::fs::create_dir_all(&mos_dir)?;
+        // Built with format! rather than with_extension: a sample name that
+        // contains a dot (test.dna, say) would otherwise lose its last segment.
+        let prefix = |suffix: &str| mos_dir.join(format!("{sample_name}.{suffix}"));
+
+        let path = prefix("mosdepth.summary.txt");
+        mos_out::write_summary(&result, &path)?;
+        record_output("mosdepth", path);
+
+        let path = prefix("mosdepth.global.dist.txt");
+        mos_out::write_global_dist(&result, &path)?;
+        record_output("mosdepth", path);
+
+        if !config.mosdepth.skip_per_base {
+            let path = prefix("per-base.bed.gz");
+            mos_out::write_per_base(&result, &path)?;
+            record_output("mosdepth", path);
+        }
+
+        if window_size.is_some() {
+            let path = prefix("mosdepth.region.dist.txt");
+            mos_out::write_region_dist(&result, &path)?;
+            record_output("mosdepth", path);
+
+            let path = prefix("regions.bed.gz");
+            mos_out::write_regions(&result, &path)?;
+            record_output("mosdepth", path);
+
+            if !thresholds.is_empty() {
+                let path = prefix("thresholds.bed.gz");
+                mos_out::write_thresholds(&result, &path)?;
+                record_output("mosdepth", path);
+            }
+        }
+    }
+
+    if config.samtools.enabled {
+        let sam_dir = dir("samtools");
+        std::fs::create_dir_all(&sam_dir)?;
+
+        let path = sam_dir.join(format!("{sample_name}.stats.txt"));
+        common::samtools::stats::write_stats(&bam_stat_result, &path)?;
+        record_output("samtools stats", path);
+
+        let path = sam_dir.join(format!("{sample_name}.flagstat.txt"));
+        common::samtools::flagstat::write_flagstat(&bam_stat_result, &path)?;
+        record_output("samtools flagstat", path);
+
+        let refs: Vec<(String, u64)> = (0..header.target_count())
+            .map(|tid| {
+                (
+                    String::from_utf8_lossy(header.tid2name(tid)).to_string(),
+                    header.target_len(tid).unwrap_or(0),
+                )
+            })
+            .collect();
+        let path = sam_dir.join(format!("{sample_name}.idxstats.txt"));
+        common::samtools::idxstats::write_idxstats(&bam_stat_result, &refs, &path)?;
+        record_output("samtools idxstats", path);
+    }
+
+    if saw_wgs {
+        let territory = match args.reference.as_deref() {
+            Some(reference) => genome_territory(reference)?,
+            // Unreachable: saw_wgs implies a reference was given.
+            None => wgs_depths.len() as u64,
+        };
+        let result = WgsMetricsResult::new(&wgs_depths, wgs_counters, territory, coverage_cap);
+        let dir_path = dir("picard").join("wgs_metrics");
+        std::fs::create_dir_all(&dir_path)?;
+        let path = dir_path.join(format!("{sample_name}.wgs_metrics.txt"));
+        wgs_metrics::write_wgs_metrics(&result, &path)?;
+        record_output("picard CollectWgsMetrics", path);
+    }
+
+    if let Some(accum) = insert_size_total {
+        let result = accum.into_result(config.insert_size.deviations);
+        if result.rows.is_empty() {
+            ui.warn("no paired records with a usable insert size, skipping insert size metrics");
+        } else {
+            let dir_path = dir("picard").join("insert_size");
+            std::fs::create_dir_all(&dir_path)?;
+            let path = dir_path.join(format!("{sample_name}.insert_size_metrics.txt"));
+            insert_size::write_insert_size_metrics(&result, &path)?;
+            record_output("picard CollectInsertSizeMetrics", path);
+        }
+    }
+
+    if let Some(accum) = gc_total {
+        let result = accum.into_result(gc_window);
+        let dir_path = dir("picard").join("gc_bias");
+        std::fs::create_dir_all(&dir_path)?;
+        let detail = dir_path.join(format!("{sample_name}.gc_bias.detail_metrics.txt"));
+        gc_bias::write_detail_metrics(&result, &detail)?;
+        record_output("picard CollectGcBiasMetrics", detail);
+        let summary = dir_path.join(format!("{sample_name}.gc_bias.summary_metrics.txt"));
+        gc_bias::write_summary_metrics(&result, &summary)?;
+        record_output("picard CollectGcBiasMetrics", summary);
+    }
+
+    if hs_enabled {
+        let target_set = targets.as_ref().expect("hs_enabled implies --targets");
+        let bait_set = baits.as_ref().unwrap_or(target_set);
+        let library_size = hs_metrics::estimate_library_size(
+            hs_counters.selected_pairs,
+            hs_counters.selected_unique_pairs,
+        );
+        let result = HsMetricsResult {
+            bait_set: bait_set.name().to_string(),
+            bait_territory: bait_set.territory(),
+            target_territory: target_set.territory(),
+            genome_size: contigs.iter().map(|(_, _, len)| len).sum(),
+            counters: hs_counters,
+            target_depths: hs_target_depths,
+            zero_coverage_targets: hs_zero_targets,
+            target_count: hs_target_count,
+            library_size,
+        };
+        let dir_path = dir("picard").join("hs_metrics");
+        std::fs::create_dir_all(&dir_path)?;
+        let path = dir_path.join(format!("{sample_name}.hs_metrics.txt"));
+        hs_metrics::write_hs_metrics(&result, &path)?;
+        record_output("picard CollectHsMetrics", path);
+    }
+
+    if !qualimap_contigs.is_empty() {
+        // Restore header order, since the workers ran longest contig first.
+        qualimap_contigs.sort_by_key(|c| {
+            order
+                .iter()
+                .position(|name| *name == c.name)
+                .unwrap_or(usize::MAX)
+        });
+        let dir_path = dir("qualimap");
+        std::fs::create_dir_all(&dir_path)?;
+        let results = dir_path.join("genome_results.txt");
+        qualimap_output::write_genome_results(&qualimap_contigs, bam_path, &results)?;
+        record_output("qualimap", results);
+        qualimap_output::write_raw_data(
+            &qualimap_contigs,
+            &dir_path.join("raw_data_qualimapReport"),
+        )?;
+        record_output("qualimap", dir_path.join("raw_data_qualimapReport"));
+        let report = dir_path.join("qualimapReport.html");
+        qualimap_output::write_html_report(&qualimap_contigs, &sample_name, &report)?;
+        record_output("qualimap", report);
+    }
+
+    if let Some(mut accum) = preseq_total {
+        let preseq_dir = dir("preseq");
+        std::fs::create_dir_all(&preseq_dir)?;
+        accum.finalize();
+        let total_reads = accum.total_fragments;
+        let n_distinct = accum.n_distinct();
+        let histogram = accum.into_histogram();
+        match common::preseq::estimate_complexity(
+            &histogram,
+            total_reads,
+            n_distinct,
+            &config.preseq,
+        ) {
+            Ok(preseq_result) => {
+                let path = preseq_dir.join(format!("{sample_name}.lc_extrap.txt"));
+                common::preseq::write_output(
+                    &preseq_result,
+                    &path,
+                    config.preseq.confidence_level,
+                )?;
+                record_output("preseq", path);
+            }
+            Err(e) => ui.warn(&format!("preseq: {e:#}")),
+        }
+    }
+
+    Ok(summary::InputSummary {
+        bam_file: bam_path.to_string(),
+        status: "success".to_string(),
+        error: None,
+        runtime_seconds: 0.0,
+        counting: None,
+        dupradar: None,
+        dna: Some(dna_summary(&result, &bam_stat_result, &thresholds)),
+        outputs: written,
+    })
+}
+
+/// Build the JSON summary block for a `dna` run.
+fn dna_summary(
+    result: &rustqc::dna::mosdepth::MosdepthResult,
+    bam_stat: &rustqc::common::bam_stat::BamStatResult,
+    thresholds: &[u32],
+) -> summary::DnaSummary {
+    let genome_length = result.total_length();
+    let histogram =
+        rustqc::dna::mosdepth::merge_histograms(result.contigs.iter().map(|c| &c.histogram));
+
+    let coverage_thresholds = thresholds
+        .iter()
+        .map(|threshold| {
+            let at_or_above: u64 = histogram
+                .iter()
+                .filter(|(depth, _)| *depth >= threshold)
+                .map(|(_, count)| count)
+                .sum();
+            summary::CoverageThreshold {
+                threshold: *threshold,
+                pct_bases: if genome_length == 0 {
+                    0.0
+                } else {
+                    at_or_above as f64 * 100.0 / genome_length as f64
+                },
+            }
+        })
+        .collect();
+
+    // Median: walk the depth histogram until half the reference is behind us.
+    let mut seen = 0u64;
+    let mut median = 0u32;
+    for (depth, count) in &histogram {
+        seen += count;
+        if seen * 2 >= genome_length {
+            median = *depth;
+            break;
+        }
+    }
+
+    let duplicate_pct = if bam_stat.total_records == 0 {
+        0.0
+    } else {
+        bam_stat.duplicates as f64 * 100.0 / bam_stat.total_records as f64
+    };
+
+    summary::DnaSummary {
+        genome_length,
+        covered_bases: result.total_bases(),
+        mean_coverage: result.mean(),
+        median_coverage: median,
+        max_coverage: result.max(),
+        coverage_thresholds,
+        total_reads: bam_stat.total_records,
+        duplicates: bam_stat.duplicates,
+        duplicate_pct,
+    }
+}
+
+/// Count the reference's non-N bases, which is Picard's `GENOME_TERRITORY`.
+///
+/// The whole reference is read once. Picard does the same, and the figure
+/// cannot be taken from the alignment header, which records contig lengths
+/// including their N runs.
+fn genome_territory(reference: &str) -> Result<u64> {
+    use std::io::BufRead;
+
+    let reader = rustqc::io::open_reader(reference)
+        .with_context(|| format!("Failed to open reference FASTA: {reference}"))?;
+    let mut territory = 0u64;
+    for line in reader.lines() {
+        let line = line.with_context(|| format!("Failed to read reference FASTA: {reference}"))?;
+        if line.starts_with('>') {
+            continue;
+        }
+        territory += line.bytes().filter(|b| !matches!(b, b'N' | b'n')).count() as u64;
+    }
+    Ok(territory)
+}
+
+/// How many contig depth arrays may be live at once.
+///
+/// Each worker holds four bytes per base of its contig, so the largest contig
+/// sets the per-worker cost: about 1 GB for GRCh38 chr1. There is no portable
+/// way to ask the operating system how much memory is free, so the budget is a
+/// fixed 4 GB unless the user overrides it with `--max-depth-workers`.
+fn depth_worker_budget(threads: usize, override_value: Option<usize>, largest: u64) -> usize {
+    const BUDGET_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+    if let Some(value) = override_value {
+        return value.max(1);
+    }
+    let per_worker = largest.saturating_mul(4).max(1);
+    let affordable = (BUDGET_BYTES / per_worker).max(1) as usize;
+    threads.min(affordable).max(1)
 }
 
 /// Reconstruct the command line for the featureCounts-compatible header comment.
@@ -618,6 +1886,7 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
                     runtime_seconds: 0.0,
                     counting: None,
                     dupradar: None,
+                    dna: None,
                     outputs: vec![],
                 });
             }
@@ -902,6 +2171,7 @@ impl BamResult {
             runtime_seconds: self.duration.as_secs_f64(),
             counting,
             dupradar,
+            dna: None,
             outputs: self
                 .outputs
                 .iter()
@@ -1562,7 +2832,7 @@ fn write_rseqc_outputs(
         if params.config.flagstat.enabled {
             std::fs::create_dir_all(&samtools_dir)?;
             let flagstat_path = samtools_dir.join(format!("{}.flagstat", sample_name));
-            rna::rseqc::flagstat::write_flagstat(result, &flagstat_path)?;
+            common::samtools::flagstat::write_flagstat(result, &flagstat_path)?;
             let p = flagstat_path.display().to_string();
             ui.output_item("flagstat", &p);
             written.push(("flagstat".into(), p));
@@ -1572,7 +2842,7 @@ fn write_rseqc_outputs(
         if params.config.idxstats.enabled {
             std::fs::create_dir_all(&samtools_dir)?;
             let idxstats_path = samtools_dir.join(format!("{}.idxstats", sample_name));
-            rna::rseqc::idxstats::write_idxstats(result, bam_header_refs, &idxstats_path)?;
+            common::samtools::idxstats::write_idxstats(result, bam_header_refs, &idxstats_path)?;
             let p = idxstats_path.display().to_string();
             ui.output_item("idxstats", &p);
             written.push(("idxstats".into(), p));
@@ -1582,7 +2852,7 @@ fn write_rseqc_outputs(
         if params.config.samtools_stats.enabled {
             std::fs::create_dir_all(&samtools_dir)?;
             let stats_path = samtools_dir.join(format!("{}.stats", sample_name));
-            rna::rseqc::stats::write_stats(result, &stats_path)?;
+            common::samtools::stats::write_stats(result, &stats_path)?;
             let p = stats_path.display().to_string();
             ui.output_item("stats", &p);
             written.push(("samtools stats".into(), p));
