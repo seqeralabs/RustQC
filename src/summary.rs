@@ -44,6 +44,11 @@ pub struct InputSummary {
     /// dupRadar summary (if successful and enabled).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dupradar: Option<DupradarSummary>,
+    /// DNA depth-of-coverage summary (if this was a `dna` run).
+    ///
+    /// An input carries either the RNA fields above or this one, never both.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dna: Option<DnaSummary>,
     /// List of output files written.
     pub outputs: Vec<OutputFile>,
 }
@@ -88,6 +93,39 @@ pub struct DupradarSummary {
     /// Logistic regression slope (if fit succeeded).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub slope: Option<f64>,
+}
+
+/// Depth of coverage summary for a single alignment file.
+#[derive(Debug, Serialize)]
+pub struct DnaSummary {
+    /// Total reference bases across all contigs.
+    pub genome_length: u64,
+    /// Sum of per-base depth, that is total bases covered.
+    pub covered_bases: u64,
+    /// Mean depth across the reference.
+    pub mean_coverage: f64,
+    /// Median per-base depth.
+    pub median_coverage: u32,
+    /// Highest per-base depth seen.
+    pub max_coverage: u32,
+    /// Percentage of reference bases at or above each requested threshold,
+    /// in the order the thresholds were requested.
+    pub coverage_thresholds: Vec<CoverageThreshold>,
+    /// Total records seen.
+    pub total_reads: u64,
+    /// Duplicate-flagged records.
+    pub duplicates: u64,
+    /// Duplicate rate as a percentage of total records.
+    pub duplicate_pct: f64,
+}
+
+/// Percentage of the reference covered at or above one depth threshold.
+#[derive(Debug, Serialize)]
+pub struct CoverageThreshold {
+    /// The threshold itself, in reads (for example 10 for 10X).
+    pub threshold: u32,
+    /// Percentage of reference bases at or above it.
+    pub pct_bases: f64,
 }
 
 /// A single output file written during processing.

@@ -21,7 +21,18 @@ path = "src/lib.rs"
 name = "rustqc"
 path = "src/main.rs"
 
+[features]
+default = ["bigwig"]
+# bigWig coverage tracks. Enabled by default; disable with
+# `--no-default-features` to drop bigtools and its transitive packages when
+# only the text outputs are wanted.
+bigwig = ["dep:bigtools", "dep:tokio"]
+
 [dependencies]
+# bigWig writing for coverage tracks (optional, see the `bigwig` feature)
+bigtools = { version = "0.5", default-features = false, features = ["write", "read"], optional = true }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread"], optional = true }
+
 # CLI argument parsing
 clap = { version = "4", features = ["derive", "env"] }
 

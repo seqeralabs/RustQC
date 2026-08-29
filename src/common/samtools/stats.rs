@@ -10,7 +10,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use log::debug;
 
-use super::bam_stat::{BamStatResult, GcDepthBin};
+use crate::common::bam_stat::{BamStatResult, GcDepthBin};
 
 // ============================================================================
 // Output formatting
@@ -62,7 +62,7 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
     writeln!(out, "# This file was produced by samtools stats and RustQC")?;
     writeln!(
         out,
-        "# The command line was: rustqc rna (samtools stats compatible output)"
+        "# The command line was: rustqc (samtools stats compatible output)"
     )?;
 
     // Derived values

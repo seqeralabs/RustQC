@@ -1026,3 +1026,158 @@ fn test_dup_check_parallel_uses_global_duplicate_state() {
 
     let _ = fs::remove_dir_all(root);
 }
+
+// ===================================================================
+// Coverage tracks
+// ===================================================================
+
+/// Per-base coverage against `bedtools genomecov -bg -split`.
+///
+/// This is the output nf-core/rnaseq currently gets by running bedtools and
+/// then converting its bedGraph to bigWig. Note the semantics differ from
+/// every other depth engine in the crate: nothing is filtered, so duplicates,
+/// secondary alignments and overlapping mates all contribute.
+#[test]
+fn coverage_intervals_match_bedtools() {
+    use rust_htslib::bam::{Read as BamRead, Reader};
+    use rustqc::common::coverage::bedgraph::CoverageAccum;
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut reader = Reader::from_path(root.join("tests/data/test.bam")).unwrap();
+    let header = reader.header().to_owned();
+
+    // One accumulator per contig, as the pipeline drives them.
+    let mut per_chrom: std::collections::BTreeMap<String, CoverageAccum> = header
+        .target_names()
+        .iter()
+        .enumerate()
+        .map(|(tid, name)| {
+            let chrom = String::from_utf8_lossy(name).to_string();
+            let len = header.target_len(tid as u32).unwrap();
+            (chrom, CoverageAccum::new(len, None))
+        })
+        .collect();
+
+    let mut record = rust_htslib::bam::Record::new();
+    while let Some(result) = reader.read(&mut record) {
+        result.unwrap();
+        if record.tid() < 0 {
+            continue;
+        }
+        let chrom = String::from_utf8_lossy(header.tid2name(record.tid() as u32)).to_string();
+        if let Some(accum) = per_chrom.get_mut(&chrom) {
+            accum.process_read(&record);
+        }
+    }
+
+    // bedtools emits contigs in header order, so follow that rather than the
+    // alphabetical order the map would give.
+    let mut got = Vec::new();
+    for (tid, name) in header.target_names().iter().enumerate() {
+        let _ = tid;
+        let chrom = String::from_utf8_lossy(name).to_string();
+        if let Some(accum) = per_chrom.remove(&chrom) {
+            got.extend(accum.into_intervals(&chrom, 1.0));
+        }
+    }
+
+    let want: Vec<(String, u32, u32, f32)> =
+        std::fs::read_to_string(root.join("tests/expected/coverage/test.bedgraph"))
+            .unwrap()
+            .lines()
+            .map(|line| {
+                let f: Vec<&str> = line.split('\t').collect();
+                (
+                    f[0].to_string(),
+                    f[1].parse().unwrap(),
+                    f[2].parse().unwrap(),
+                    f[3].parse().unwrap(),
+                )
+            })
+            .collect();
+
+    assert_eq!(got.len(), want.len(), "interval count");
+    for (index, (ours, theirs)) in got.iter().zip(&want).enumerate() {
+        assert_eq!(
+            (ours.chrom.as_str(), ours.start, ours.end, ours.value),
+            (theirs.0.as_str(), theirs.1, theirs.2, theirs.3),
+            "interval {} differs",
+            index + 1
+        );
+    }
+}
+
+/// The written bigWig read back against the bedtools reference.
+///
+/// A gap between intervals is *undefined* in a bigWig rather than zero, and
+/// reads back as `NaN`. That is the format's own semantics and matches what
+/// `bedGraphToBigWig` produces from a bedGraph that omits its zero-depth
+/// spans, so the check is that every covered base agrees and every uncovered
+/// one is undefined.
+#[cfg(feature = "bigwig")]
+#[test]
+fn bigwig_track_matches_the_bedtools_reference() {
+    use bigtools::BigWigRead;
+    use rust_htslib::bam::{Read as BamRead, Reader};
+    use rustqc::common::coverage::bedgraph::CoverageTracks;
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut reader = Reader::from_path(root.join("tests/data/test.bam")).unwrap();
+    let header = reader.header().to_owned();
+    let chrom_sizes: Vec<(String, u64)> = header
+        .target_names()
+        .iter()
+        .enumerate()
+        .map(|(tid, name)| {
+            (
+                String::from_utf8_lossy(name).to_string(),
+                header.target_len(tid as u32).unwrap(),
+            )
+        })
+        .collect();
+
+    let mut tracks = CoverageTracks::new(vec![None]);
+    let mut record = rust_htslib::bam::Record::new();
+    while let Some(result) = reader.read(&mut record) {
+        result.unwrap();
+        if record.tid() < 0 {
+            continue;
+        }
+        let chrom = String::from_utf8_lossy(header.tid2name(record.tid() as u32)).to_string();
+        tracks.process_read(&record, &chrom);
+    }
+
+    let order: Vec<String> = chrom_sizes.iter().map(|(n, _)| n.clone()).collect();
+    let intervals = tracks.into_intervals(&order, 1.0).remove(0).1;
+
+    let path = std::env::temp_dir().join("rustqc-coverage-parity.bigWig");
+    assert!(
+        rustqc::common::coverage::bigwig::write_bigwig(&intervals, &chrom_sizes, &path).unwrap()
+    );
+
+    // Every interval bedtools reported must read back at the same depth.
+    let mut bw = BigWigRead::open_file(&path).unwrap();
+    let reference =
+        std::fs::read_to_string(root.join("tests/expected/coverage/test.bedgraph")).unwrap();
+    let mut checked = 0usize;
+    for line in reference.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        let (chrom, start, end, depth) = (
+            f[0],
+            f[1].parse::<u32>().unwrap(),
+            f[2].parse::<u32>().unwrap(),
+            f[3].parse::<f32>().unwrap(),
+        );
+        let values = bw.values(chrom, start, end).unwrap();
+        for (offset, value) in values.iter().enumerate() {
+            assert_eq!(
+                *value,
+                depth,
+                "{chrom}:{} should be at depth {depth}",
+                start as usize + offset
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 0, "the reference must cover something");
+}
