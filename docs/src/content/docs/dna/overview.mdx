@@ -1,0 +1,99 @@
+---
+title: DNA QC Overview
+description: What the rustqc dna subcommand runs, what it writes, and how it differs from the RNA pipeline.
+---
+
+import { Aside, FileTree } from "@astrojs/starlight/components";
+
+`rustqc dna` runs a DNA (whole-genome or targeted) quality control pipeline in
+a single pass over each alignment file. Unlike [`rustqc rna`](/rna/dupradar/),
+it needs no gene annotation.
+
+```bash
+rustqc dna sample.bam --reference genome.fasta --outdir results/
+```
+
+## What it runs
+
+| Upstream tool | What RustQC produces |
+| --- | --- |
+| [mosdepth](/dna/mosdepth/) | depth of coverage, per base, per window and per region |
+| [Picard `CollectWgsMetrics`](/dna/picard/) | genome-wide coverage metrics with the exclusion breakdown |
+| [Picard `CollectInsertSizeMetrics`](/dna/picard/) | insert size distribution per pair orientation |
+| [Picard `CollectGcBiasMetrics`](/dna/picard/) | coverage bias against reference GC content |
+| [Picard `CollectHsMetrics`](/dna/picard/) | targeted enrichment metrics, when `--targets` is given |
+| [Samtools](/rna/samtools/) | `stats`, `flagstat` and `idxstats` |
+| [Preseq](/rna/preseq/) | library complexity extrapolation |
+
+Every one of them is fed from the same record stream, so the alignment is read
+once no matter how many are enabled.
+
+## Requirements
+
+The input must be **duplicate-marked, not duplicate-removed**. Duplicate rate
+is a headline metric here, and several exclusion fractions are defined against
+it. RustQC refuses input with no duplicate flags at all unless you pass
+`--skip-dup-check`.
+
+A reference FASTA is needed for three things: reading CRAM, sizing
+`GENOME_TERRITORY` for `CollectWgsMetrics`, and binning reference windows for
+`CollectGcBiasMetrics`. Without one, those two analyses are skipped with a
+warning and everything else still runs.
+
+<Aside type="caution" title="One default differs from the RNA pipeline">
+`-Q/--mapq` defaults to **0** for `dna`, not to 30 as it does for `rna`. That
+is mosdepth's own default, and matching it is what makes the depth figures
+agree with mosdepth exactly. Raising it will move every coverage number.
+</Aside>
+
+## Output tree
+
+<FileTree>
+- results/
+  - mosdepth/
+    - sample.mosdepth.summary.txt
+    - sample.mosdepth.global.dist.txt
+    - sample.mosdepth.region.dist.txt
+    - sample.per-base.bed.gz
+    - sample.per-base.bed.gz.csi
+    - sample.regions.bed.gz
+    - sample.thresholds.bed.gz
+  - picard/
+    - wgs_metrics/
+    - insert_size/
+    - gc_bias/
+    - hs_metrics/
+  - samtools/
+  - preseq/
+  - rustqc_summary.json
+  - CITATIONS.md
+</FileTree>
+
+Pass `--flat-output` to write everything directly into the output directory
+instead.
+
+## Targeted mode
+
+Passing `--targets targets.bed` switches the run into targeted mode and adds
+[`CollectHsMetrics`](/dna/picard/#collecthsmetrics). `--baits` defaults to the
+same intervals; give it separately when the capture baits differ from the
+regions you want reported.
+
+Intervals are merged on load. Overlapping targets would otherwise inflate the
+reported territory and count the same base twice.
+
+## Memory
+
+The depth engine holds one array of four bytes per base for each contig being
+processed, so the largest contig sets the cost per worker: roughly 1 GB for
+GRCh38 chr1. `--max-depth-workers` bounds how many are live at once, defaulting
+to a 4 GB budget divided by the largest contig. Raise it if you have the memory
+and want more parallelism; lower it on a shared machine.
+
+## JSON summary
+
+`--json-summary` writes a machine-readable summary carrying genome length,
+covered bases, mean, median and maximum coverage, the percentage of the
+reference at or above each requested threshold, and the duplicate rate. The
+coverage thresholds are a list rather than a map so that the order you asked
+for survives.
