@@ -845,9 +845,8 @@ mod tests {
         assert_sweep(&got);
         assert_each_record_once(&got);
 
-        // Only the sweep is checked here: a per-reference fetch on a
-        // multi-reference slice also returns the other references' records.
         let got = fetch_everything(&dir.join("multi_ref_slice.cram"), Some(&fasta));
         assert_sweep(&got);
+        assert_each_record_once(&got);
     }
 }

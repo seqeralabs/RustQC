@@ -1095,3 +1095,63 @@ fn test_parallel_unmapped_sweep_counts_placed_unmapped_mate_once() {
         let _ = fs::remove_dir_all(root);
     }
 }
+
+/// The same records as a samtools-written CRAM holding all of them in one
+/// multi-reference slice: each per-reference fetch on the parallel path must
+/// return only its own reference's records. Expected text is `samtools
+/// flagstat` 1.22.1 output for this file.
+#[test]
+fn test_parallel_cram_multi_reference_slice_counts_each_record_once() {
+    let expected = "\
+6 + 0 in total (QC-passed reads + QC-failed reads)
+6 + 0 primary
+0 + 0 secondary
+0 + 0 supplementary
+0 + 0 duplicates
+0 + 0 primary duplicates
+3 + 0 mapped (50.00% : N/A)
+3 + 0 primary mapped (50.00% : N/A)
+2 + 0 paired in sequencing
+1 + 0 read1
+1 + 0 read2
+0 + 0 properly paired (0.00% : N/A)
+0 + 0 with itself and mate mapped
+1 + 0 singletons (50.00% : N/A)
+0 + 0 with mate mapped to a different chr
+0 + 0 with mate mapped to a different chr (mapQ>=5)
+";
+    let data = Path::new("tests/data/unmapped_sweep");
+    for threads in [1, 4] {
+        let root = unique_test_dir(&format!("cram-multi-ref-t{threads}"));
+        let gtf_path = root.join("a.gtf");
+        let outdir = root.join("out");
+        fs::create_dir_all(&outdir).unwrap();
+        fs::write(
+            &gtf_path,
+            "chr1\tt\tgene\t1\t1000\t.\t+\t.\tgene_id \"g1\"; gene_name \"g1\";\n\
+             chr1\tt\texon\t1\t1000\t.\t+\t.\tgene_id \"g1\"; transcript_id \"t1\"; exon_number \"1\";\n",
+        )
+        .unwrap();
+
+        let output = Command::new(rustqc_binary())
+            .args(["rna", "--skip-dup-check", "--threads", &threads.to_string()])
+            .arg("--reference")
+            .arg(data.join("sweep.fa"))
+            .arg("--gtf")
+            .arg(&gtf_path)
+            .arg("--outdir")
+            .arg(&outdir)
+            .arg(data.join("multi_ref_slice.cram"))
+            .output()
+            .expect("Failed to execute rustqc");
+        assert!(
+            output.status.success(),
+            "rustqc failed with --threads {threads}:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let flagstat =
+            fs::read_to_string(outdir.join("samtools/multi_ref_slice.flagstat")).unwrap();
+        assert_eq!(flagstat, expected, "flagstat with --threads {threads}");
+        let _ = fs::remove_dir_all(root);
+    }
+}
