@@ -10,6 +10,8 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 
+use super::flagstat::FlagstatCounts;
+
 // ============================================================================
 // Result struct
 // ============================================================================
@@ -59,28 +61,18 @@ pub struct BamStatResult {
     pub secondary: u64,
     /// Supplementary alignments (0x800).
     pub supplementary: u64,
-    /// All mapped records (not 0x4).
-    pub mapped: u64,
     /// Paired reads (0x1).
     pub paired_flagstat: u64,
-    /// Read1 in pair (0x40).
-    pub read1_flagstat: u64,
-    /// Read2 in pair (0x80).
-    pub read2_flagstat: u64,
     /// First fragments for samtools stats (read1 or unpaired).
     pub first_fragments: u64,
     /// Last fragments for samtools stats (read2).
     pub last_fragments: u64,
     /// Properly paired reads (0x1 + 0x2).
     pub properly_paired: u64,
-    /// Both mates mapped.
-    pub both_mapped: u64,
-    /// Singletons (this mapped, mate unmapped).
-    pub singletons: u64,
-    /// Paired, both mapped, different reference.
-    pub mate_diff_chr: u64,
     /// Paired, both mapped, different reference, MAPQ >= 5.
     pub mate_diff_chr_mapq5: u64,
+    /// The `samtools flagstat` counters, split by QC-pass/fail.
+    pub flagstat: FlagstatCounts,
 
     // --- samtools idxstats fields ---
     /// Per-reference (tid) mapped and unmapped counts.
@@ -209,17 +201,12 @@ impl Default for BamStatResult {
             proper_pair_diff_chrom: 0,
             secondary: 0,
             supplementary: 0,
-            mapped: 0,
             paired_flagstat: 0,
-            read1_flagstat: 0,
-            read2_flagstat: 0,
             first_fragments: 0,
             last_fragments: 0,
             properly_paired: 0,
-            both_mapped: 0,
-            singletons: 0,
-            mate_diff_chr: 0,
             mate_diff_chr_mapq5: 0,
+            flagstat: FlagstatCounts::default(),
             chrom_counts: HashMap::new(),
             unplaced_unmapped: 0,
             total_len: 0,

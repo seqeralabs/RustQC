@@ -9,33 +9,169 @@ use anyhow::{Context, Result};
 use log::debug;
 
 use super::bam_stat::BamStatResult;
+use crate::rna::bam_flags::*;
+
+// ============================================================================
+// Counting
+// ============================================================================
+
+/// samtools flagstat counters. Each is `[QC-passed, QC-failed]`, split on
+/// 0x200 like samtools' `bam_flagstat_t`.
+#[derive(Debug, Clone, Default)]
+pub struct FlagstatCounts {
+    /// All records.
+    pub total: [u64; 2],
+    /// Neither secondary nor supplementary.
+    pub primary: [u64; 2],
+    /// Secondary (0x100).
+    pub secondary: [u64; 2],
+    /// Supplementary (0x800).
+    pub supplementary: [u64; 2],
+    /// Duplicates (0x400).
+    pub duplicates: [u64; 2],
+    /// Primary duplicates.
+    pub primary_duplicates: [u64; 2],
+    /// Mapped (not 0x4).
+    pub mapped: [u64; 2],
+    /// Primary mapped.
+    pub primary_mapped: [u64; 2],
+    /// Primary and paired (0x1).
+    pub paired: [u64; 2],
+    /// Primary, paired, read1 (0x40).
+    pub read1: [u64; 2],
+    /// Primary, paired, read2 (0x80).
+    pub read2: [u64; 2],
+    /// Primary, paired, proper pair (0x2) and mapped.
+    pub properly_paired: [u64; 2],
+    /// Primary, paired, this and mate mapped.
+    pub both_mapped: [u64; 2],
+    /// Primary, paired, mapped with mate unmapped.
+    pub singletons: [u64; 2],
+    /// Both mapped, mate on a different reference.
+    pub mate_diff_chr: [u64; 2],
+    /// As `mate_diff_chr`, with MAPQ >= 5.
+    pub mate_diff_chr_mapq5: [u64; 2],
+}
+
+impl FlagstatCounts {
+    /// Count one record, following samtools' `flagstat_loop` (bam_stat.c).
+    pub fn add(&mut self, flags: u16, tid: i32, mtid: i32, mapq: u8) {
+        let w = usize::from(flags & BAM_FQCFAIL != 0);
+        let is_secondary = flags & BAM_FSECONDARY != 0;
+        let is_supplementary = flags & BAM_FSUPPLEMENTARY != 0;
+        let is_mapped = flags & BAM_FUNMAP == 0;
+        let is_dup = flags & BAM_FDUP != 0;
+
+        self.total[w] += 1;
+        if is_secondary {
+            self.secondary[w] += 1;
+        }
+        // samtools counts a 0x900 record as secondary only; RustQC counts it
+        // in both lines (#125).
+        if is_supplementary {
+            self.supplementary[w] += 1;
+        }
+        if is_mapped {
+            self.mapped[w] += 1;
+        }
+        if is_dup {
+            self.duplicates[w] += 1;
+        }
+        if is_secondary || is_supplementary {
+            return;
+        }
+
+        self.primary[w] += 1;
+        if is_mapped {
+            self.primary_mapped[w] += 1;
+        }
+        if is_dup {
+            self.primary_duplicates[w] += 1;
+        }
+        if flags & BAM_FPAIRED != 0 {
+            self.paired[w] += 1;
+            if flags & BAM_FREAD1 != 0 {
+                self.read1[w] += 1;
+            }
+            if flags & BAM_FREAD2 != 0 {
+                self.read2[w] += 1;
+            }
+            if is_mapped && flags & BAM_FPROPER_PAIR != 0 {
+                self.properly_paired[w] += 1;
+            }
+            let mate_mapped = flags & BAM_FMUNMAP == 0;
+            if is_mapped && mate_mapped {
+                self.both_mapped[w] += 1;
+                if tid != mtid {
+                    self.mate_diff_chr[w] += 1;
+                    if mapq >= 5 {
+                        self.mate_diff_chr_mapq5[w] += 1;
+                    }
+                }
+            }
+            if is_mapped && !mate_mapped {
+                self.singletons[w] += 1;
+            }
+        }
+    }
+
+    /// Add another set of counters into this one.
+    pub fn merge(&mut self, other: &FlagstatCounts) {
+        let pairs = [
+            (&mut self.total, other.total),
+            (&mut self.primary, other.primary),
+            (&mut self.secondary, other.secondary),
+            (&mut self.supplementary, other.supplementary),
+            (&mut self.duplicates, other.duplicates),
+            (&mut self.primary_duplicates, other.primary_duplicates),
+            (&mut self.mapped, other.mapped),
+            (&mut self.primary_mapped, other.primary_mapped),
+            (&mut self.paired, other.paired),
+            (&mut self.read1, other.read1),
+            (&mut self.read2, other.read2),
+            (&mut self.properly_paired, other.properly_paired),
+            (&mut self.both_mapped, other.both_mapped),
+            (&mut self.singletons, other.singletons),
+            (&mut self.mate_diff_chr, other.mate_diff_chr),
+            (&mut self.mate_diff_chr_mapq5, other.mate_diff_chr_mapq5),
+        ];
+        for (mine, theirs) in pairs {
+            mine[0] += theirs[0];
+            mine[1] += theirs[1];
+        }
+    }
+}
 
 // ============================================================================
 // Output formatting
 // ============================================================================
 
-/// Format a flagstat count line with the standard `<passed> + 0 <description>` format.
-fn fmt_line(count: u64, description: &str) -> String {
-    format!("{count} + 0 {description}")
+/// Format a flagstat count line as `<passed> + <failed> <description>`.
+fn fmt_line(count: [u64; 2], description: &str) -> String {
+    format!("{} + {} {description}", count[0], count[1])
 }
 
-/// Format a flagstat percentage as `(XX.XX% : N/A)`.
-///
-/// samtools uses `:` separated `passed : failed` percentages. Since we do not
-/// separate QC-pass/fail, the failed side is always `N/A`.
-fn fmt_pct(numerator: u64, denominator: u64) -> String {
-    if denominator == 0 {
-        "(N/A : N/A)".to_string()
-    } else {
-        let pct = 100.0 * numerator as f64 / denominator as f64;
-        format!("({pct:.2}% : N/A)")
-    }
+/// Format a flagstat percentage as `(XX.XX% : YY.YY%)`, one per QC column,
+/// `N/A` where the denominator is zero.
+fn fmt_pct(numerator: [u64; 2], denominator: [u64; 2]) -> String {
+    let pct = |n: u64, d: u64| {
+        if d == 0 {
+            "N/A".to_string()
+        } else {
+            format!("{:.2}%", 100.0 * n as f64 / d as f64)
+        }
+    };
+    format!(
+        "({} : {})",
+        pct(numerator[0], denominator[0]),
+        pct(numerator[1], denominator[1])
+    )
 }
 
 /// Write samtools flagstat-compatible output.
 ///
 /// The output format matches `samtools flagstat` exactly, with one line per
-/// statistic. Each line has the form `<passed> + 0 <description>`.
+/// statistic. Each line has the form `<passed> + <failed> <description>`.
 ///
 /// # Arguments
 /// * `result` - The computed BAM statistics
@@ -46,95 +182,87 @@ pub fn write_flagstat(result: &BamStatResult, output_path: &Path) -> Result<()> 
     let mut out = std::fs::File::create(output_path)
         .with_context(|| format!("Failed to create flagstat file: {}", output_path.display()))?;
 
-    // Total = primary + secondary + supplementary (all QC states)
-    let total = result.total_records;
-
-    // Primary count for percentage denominators
-    let primary = result.primary_count;
+    let fs = &result.flagstat;
 
     // Line 1: total (QC-passed + QC-failed)
     writeln!(
         out,
         "{}",
-        fmt_line(total, "in total (QC-passed reads + QC-failed reads)")
+        fmt_line(fs.total, "in total (QC-passed reads + QC-failed reads)")
     )?;
 
     // Line 2: primary
-    writeln!(out, "{}", fmt_line(primary, "primary"))?;
+    writeln!(out, "{}", fmt_line(fs.primary, "primary"))?;
 
     // Line 3: secondary
-    writeln!(out, "{}", fmt_line(result.secondary, "secondary"))?;
+    writeln!(out, "{}", fmt_line(fs.secondary, "secondary"))?;
 
     // Line 4: supplementary
-    writeln!(out, "{}", fmt_line(result.supplementary, "supplementary"))?;
+    writeln!(out, "{}", fmt_line(fs.supplementary, "supplementary"))?;
 
     // Line 5: duplicates
-    writeln!(out, "{}", fmt_line(result.duplicates, "duplicates"))?;
+    writeln!(out, "{}", fmt_line(fs.duplicates, "duplicates"))?;
 
     // Line 6: primary duplicates
     writeln!(
         out,
         "{}",
-        fmt_line(result.primary_duplicates, "primary duplicates")
+        fmt_line(fs.primary_duplicates, "primary duplicates")
     )?;
 
     // Line 7: mapped
     writeln!(
         out,
         "{} {}",
-        fmt_line(result.mapped, "mapped"),
-        fmt_pct(result.mapped, total)
+        fmt_line(fs.mapped, "mapped"),
+        fmt_pct(fs.mapped, fs.total)
     )?;
 
     // Line 8: primary mapped
     writeln!(
         out,
         "{} {}",
-        fmt_line(result.primary_mapped, "primary mapped"),
-        fmt_pct(result.primary_mapped, primary)
+        fmt_line(fs.primary_mapped, "primary mapped"),
+        fmt_pct(fs.primary_mapped, fs.primary)
     )?;
 
     // Line 9: paired in sequencing
-    writeln!(
-        out,
-        "{}",
-        fmt_line(result.paired_flagstat, "paired in sequencing")
-    )?;
+    writeln!(out, "{}", fmt_line(fs.paired, "paired in sequencing"))?;
 
     // Line 10: read1
-    writeln!(out, "{}", fmt_line(result.read1_flagstat, "read1"))?;
+    writeln!(out, "{}", fmt_line(fs.read1, "read1"))?;
 
     // Line 11: read2
-    writeln!(out, "{}", fmt_line(result.read2_flagstat, "read2"))?;
+    writeln!(out, "{}", fmt_line(fs.read2, "read2"))?;
 
     // Line 12: properly paired (percentage of paired reads)
     writeln!(
         out,
         "{} {}",
-        fmt_line(result.properly_paired, "properly paired"),
-        fmt_pct(result.properly_paired, result.paired_flagstat)
+        fmt_line(fs.properly_paired, "properly paired"),
+        fmt_pct(fs.properly_paired, fs.paired)
     )?;
 
     // Line 13: with itself and mate mapped
     writeln!(
         out,
         "{}",
-        fmt_line(result.both_mapped, "with itself and mate mapped")
+        fmt_line(fs.both_mapped, "with itself and mate mapped")
     )?;
 
     // Line 14: singletons (percentage of paired reads)
     writeln!(
         out,
         "{} {}",
-        fmt_line(result.singletons, "singletons"),
-        fmt_pct(result.singletons, result.paired_flagstat)
+        fmt_line(fs.singletons, "singletons"),
+        fmt_pct(fs.singletons, fs.paired)
     )?;
 
     // Line 15: with mate mapped to a different chr
     writeln!(
         out,
         "{}",
-        fmt_line(result.mate_diff_chr, "with mate mapped to a different chr")
+        fmt_line(fs.mate_diff_chr, "with mate mapped to a different chr")
     )?;
 
     // Line 16: with mate mapped to a different chr (mapQ>=5)
@@ -142,7 +270,7 @@ pub fn write_flagstat(result: &BamStatResult, output_path: &Path) -> Result<()> 
         out,
         "{}",
         fmt_line(
-            result.mate_diff_chr_mapq5,
+            fs.mate_diff_chr_mapq5,
             "with mate mapped to a different chr (mapQ>=5)"
         )
     )?;
@@ -158,7 +286,6 @@ pub fn write_flagstat(result: &BamStatResult, output_path: &Path) -> Result<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rna::bam_flags::*;
     use crate::rna::rseqc::accumulators::BamStatAccum;
     use rust_htslib::bam::{self, Read as BamRead};
     use std::io::Read;
