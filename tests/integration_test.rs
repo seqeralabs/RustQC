@@ -1026,3 +1026,99 @@ fn test_dup_check_parallel_uses_global_duplicate_state() {
 
     let _ = fs::remove_dir_all(root);
 }
+
+// ===================================================================
+// Qualimap junction motifs (#141)
+// ===================================================================
+
+/// Run `rustqc rna` `runs` times on one spliced read per entry of
+/// `junction_bases`, all over the same annotated intron, and return the
+/// "Junction analysis" motif block of `rnaseq_qc_results.txt` from each run.
+/// The two junction bases follow 30 `A`s, so each read's motif is `AA` plus
+/// its entry. Each run is a new process, so `junction_motifs` (a HashMap)
+/// iterates in a new order.
+fn junction_motif_blocks(label: &str, junction_bases: &[&str], runs: usize) -> Vec<String> {
+    let root = unique_test_dir(label);
+    let bam_path = root.join("s.bam");
+    let gtf_path = root.join("a.gtf");
+    fs::write(
+        &gtf_path,
+        "chr1\tt\tgene\t900\t3000\t.\t+\t.\tgene_id \"g1\"; gene_name \"g1\";\n\
+         chr1\tt\ttranscript\t900\t3000\t.\t+\t.\tgene_id \"g1\"; transcript_id \"t1\";\n\
+         chr1\tt\texon\t900\t1500\t.\t+\t.\tgene_id \"g1\"; transcript_id \"t1\"; exon_number \"1\";\n\
+         chr1\tt\texon\t2001\t3000\t.\t+\t.\tgene_id \"g1\"; transcript_id \"t1\"; exon_number \"2\";\n",
+    )
+    .unwrap();
+    let mut lines = vec![
+        "r0\t0\tchr1\t1001\t60\t50M\t*\t0\t0\tACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTAC\t??????????????????????????????????????????????????".to_string(),
+    ];
+    for (i, bases) in junction_bases.iter().enumerate() {
+        let seq = format!("{}{bases}{}", "A".repeat(30), "A".repeat(18));
+        lines.push(format!(
+            "j{i}\t0\tchr1\t1471\t60\t30M500N20M\t*\t0\t0\t{seq}\t{}",
+            "?".repeat(50)
+        ));
+    }
+    let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+    write_bam_fixture(&bam_path, &[("chr1", 100_000)], &lines);
+
+    let mut blocks = Vec::new();
+    for run in 0..runs {
+        let outdir = root.join(format!("out{run}"));
+        fs::create_dir_all(&outdir).unwrap();
+        let output = run_rustqc_custom(&outdir, &bam_path, &gtf_path, 1, true, &[]);
+        assert!(
+            output.status.success(),
+            "rustqc failed on run {run}:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let results = fs::read_to_string(outdir.join("qualimap/rnaseq_qc_results.txt")).unwrap();
+        let block = results
+            .split_once("reads at junctions")
+            .map(|(_, rest)| rest.to_string())
+            .unwrap_or_default();
+        blocks.push(block);
+    }
+    let _ = fs::remove_dir_all(&root);
+    blocks
+}
+
+fn assert_same_blocks(blocks: &[String]) {
+    for (run, block) in blocks.iter().enumerate().skip(1) {
+        assert_eq!(
+            block, &blocks[0],
+            "junction motifs printed by run {run} differ from run 0"
+        );
+    }
+}
+
+/// 13 motifs tied at 1/13: Qualimap prints 11 of them, and which 11, in
+/// which order, must not change between runs.
+#[test]
+fn test_qualimap_tied_junction_motifs_are_stable_across_runs() {
+    let bases = [
+        "AA", "AC", "AG", "AT", "CA", "CC", "CG", "CT", "GA", "GC", "GG", "GT", "TA",
+    ];
+    let blocks = junction_motif_blocks("motif-ties-13", &bases, 10);
+    assert_eq!(
+        blocks[0].matches(" : ").count(),
+        11,
+        "should print 11 motifs:\n{}",
+        blocks[0]
+    );
+    assert_same_blocks(&blocks);
+}
+
+/// Two motifs tied at 50%: both are printed, in the same order every run.
+/// (With two orders, ten buggy runs agree by chance with probability 1/512.)
+#[test]
+fn test_qualimap_two_tied_junction_motifs_print_in_stable_order() {
+    let blocks = junction_motif_blocks("motif-ties-2", &["AA", "AC"], 10);
+    assert_eq!(
+        blocks[0].matches(" : ").count(),
+        2,
+        "should print 2 motifs:\n{}",
+        blocks[0]
+    );
+    assert_same_blocks(&blocks);
+}
