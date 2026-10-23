@@ -1026,3 +1026,105 @@ fn test_dup_check_parallel_uses_global_duplicate_state() {
 
     let _ = fs::remove_dir_all(root);
 }
+
+// ===================================================================
+// No-genic-reads diagnostic
+// ===================================================================
+
+/// Run `rustqc rna` on one mapped read at `bam_chrom:11`, outside the only
+/// gene (`gtf_chrom:900-3000`), with optional YAML config. Returns the output.
+fn run_no_genic_reads(
+    label: &str,
+    bam_chrom: &str,
+    gtf_chrom: &str,
+    config: Option<&str>,
+) -> std::process::Output {
+    let root = unique_test_dir(label);
+    let bam_path = root.join("s.bam");
+    let gtf_path = root.join("a.gtf");
+    let outdir = root.join("out");
+    fs::create_dir_all(&outdir).unwrap();
+    fs::write(
+        &gtf_path,
+        format!(
+            "{gtf_chrom}\tt\tgene\t900\t3000\t.\t+\t.\tgene_id \"g1\"; gene_name \"g1\";\n\
+             {gtf_chrom}\tt\texon\t900\t3000\t.\t+\t.\tgene_id \"g1\"; transcript_id \"t1\"; exon_number \"1\";\n"
+        ),
+    )
+    .unwrap();
+    let read = format!(
+        "r0\t0\t{bam_chrom}\t11\t60\t50M\t*\t0\t0\tACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTAC\t??????????????????????????????????????????????????"
+    );
+    write_bam_fixture(&bam_path, &[(bam_chrom, 100_000)], &[&read]);
+
+    let mut cmd = Command::new(rustqc_binary());
+    cmd.args(["rna", "--skip-dup-check", "--gtf"])
+        .arg(&gtf_path)
+        .arg("--outdir")
+        .arg(&outdir)
+        .arg(&bam_path);
+    if let Some(yaml) = config {
+        let config_path = root.join("config.yaml");
+        fs::write(&config_path, yaml).unwrap();
+        cmd.arg("--config").arg(&config_path);
+    }
+    let output = cmd.output().expect("Failed to execute rustqc");
+    let _ = fs::remove_dir_all(root);
+    output
+}
+
+/// When BAM and GTF share chromosome names but no read lands in a gene,
+/// the error must not claim a naming mismatch. It still fails.
+#[test]
+fn test_no_genic_reads_with_shared_names_is_not_a_name_mismatch() {
+    let output = run_no_genic_reads("no-genic-shared", "chr1", "chr1", None);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success(),
+        "rustqc should still fail:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("Chromosome name mismatch"),
+        "BAM and GTF both name chr1, so this is not a name mismatch:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("No reads could be assigned to any gene"),
+        "missing no-assigned-reads diagnostic:\n{stderr}"
+    );
+}
+
+/// Names that only match after `chromosome_prefix` are not a mismatch either.
+#[test]
+fn test_no_genic_reads_with_prefix_mapped_names_is_not_a_name_mismatch() {
+    let output = run_no_genic_reads(
+        "no-genic-prefix",
+        "1",
+        "chr1",
+        Some("rna:\n  chromosome_prefix: \"chr\"\n"),
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success(),
+        "rustqc should still fail:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("Chromosome name mismatch"),
+        "chromosome_prefix maps 1 to chr1, so this is not a name mismatch:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("No reads could be assigned to any gene"),
+        "missing no-assigned-reads diagnostic:\n{stderr}"
+    );
+}
+
+/// A real naming mismatch (BAM `1`, GTF `chr1`) keeps the mismatch diagnostic.
+#[test]
+fn test_no_genic_reads_with_disjoint_names_is_a_name_mismatch() {
+    let output = run_no_genic_reads("no-genic-disjoint", "1", "chr1", None);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "rustqc should fail:\n{stderr}");
+    assert!(
+        stderr.contains("Chromosome name mismatch"),
+        "missing chromosome-name diagnostic:\n{stderr}"
+    );
+}
