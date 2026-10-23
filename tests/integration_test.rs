@@ -1026,3 +1026,72 @@ fn test_dup_check_parallel_uses_global_duplicate_state() {
 
     let _ = fs::remove_dir_all(root);
 }
+
+// ===================================================================
+// Unmapped sweep on the parallel path
+// ===================================================================
+
+/// A placed unmapped mate (0x4 with a reference) in the last reference's final
+/// 16 kb, plus two unplaced reads. The parallel path's unmapped sweep must not
+/// count the placed mate a second time. Expected text is `samtools flagstat`
+/// 1.22.1 output for this input.
+#[test]
+fn test_parallel_unmapped_sweep_counts_placed_unmapped_mate_once() {
+    let expected = "\
+6 + 0 in total (QC-passed reads + QC-failed reads)
+6 + 0 primary
+0 + 0 secondary
+0 + 0 supplementary
+0 + 0 duplicates
+0 + 0 primary duplicates
+3 + 0 mapped (50.00% : N/A)
+3 + 0 primary mapped (50.00% : N/A)
+2 + 0 paired in sequencing
+1 + 0 read1
+1 + 0 read2
+0 + 0 properly paired (0.00% : N/A)
+0 + 0 with itself and mate mapped
+1 + 0 singletons (50.00% : N/A)
+0 + 0 with mate mapped to a different chr
+0 + 0 with mate mapped to a different chr (mapQ>=5)
+";
+    let seq = "ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTAC";
+    let qual = "??????????????????????????????????????????????????";
+    let lines: Vec<String> = [
+        "r0\t0\tchr1\t1001\t60\t50M\t*\t0\t0",
+        "r1\t0\tchr1\t1201\t60\t50M\t*\t0\t0",
+        "r2\t73\tchr2\t99001\t60\t50M\t=\t99001\t0",
+        "r3\t133\tchr2\t99001\t0\t*\t=\t99001\t0",
+        "u1\t4\t*\t0\t0\t*\t*\t0\t0",
+        "u2\t4\t*\t0\t0\t*\t*\t0\t0",
+    ]
+    .iter()
+    .map(|fields| format!("{fields}\t{seq}\t{qual}"))
+    .collect();
+    let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+
+    for threads in [1, 4] {
+        let root = unique_test_dir(&format!("unmapped-sweep-t{threads}"));
+        let bam_path = root.join("s.bam");
+        let gtf_path = root.join("a.gtf");
+        let outdir = root.join("out");
+        fs::create_dir_all(&outdir).unwrap();
+        fs::write(
+            &gtf_path,
+            "chr1\tt\tgene\t900\t3000\t.\t+\t.\tgene_id \"g1\"; gene_name \"g1\";\n\
+             chr1\tt\texon\t900\t3000\t.\t+\t.\tgene_id \"g1\"; transcript_id \"t1\"; exon_number \"1\";\n",
+        )
+        .unwrap();
+        write_bam_fixture(&bam_path, &[("chr1", 100_000), ("chr2", 100_000)], &lines);
+
+        let output = run_rustqc_custom(&outdir, &bam_path, &gtf_path, threads, true, &[]);
+        assert!(
+            output.status.success(),
+            "rustqc failed with --threads {threads}:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let flagstat = fs::read_to_string(outdir.join("samtools/s.flagstat")).unwrap();
+        assert_eq!(flagstat, expected, "flagstat with --threads {threads}");
+        let _ = fs::remove_dir_all(root);
+    }
+}
