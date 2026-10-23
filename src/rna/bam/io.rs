@@ -419,9 +419,17 @@ impl IndexedReader {
                         reader: heads.reader,
                         header: heads.header,
                         iter_builder: |reader, header| -> Result<CramRecordIter> {
+                            // noodles filters on the interval only, so a
+                            // multi-reference slice also yields other references'
+                            // records; keep this reference's.
                             let query = reader
                                 .query(header, &region)
-                                .with_context(|| format!("failed to query CRAM tid {tid}"))?;
+                                .with_context(|| format!("failed to query CRAM tid {tid}"))?
+                                .filter(move |result| {
+                                    result.as_ref().map_or(true, |record| {
+                                        record.reference_sequence_id() == Some(tid as usize)
+                                    })
+                                });
                             Ok(Box::new(query))
                         },
                     }
