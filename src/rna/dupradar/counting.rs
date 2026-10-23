@@ -1650,6 +1650,33 @@ pub fn count_reads(
         .filter(|c| c.all_multi > 0)
         .count();
     if merged.total_mapped > 0 && genes_with_reads == 0 {
+        // Only a naming mismatch if no alignment name, after prefix/mapping,
+        // is a GTF chromosome.
+        let shared_chroms: Vec<&str> = tid_to_name
+            .iter()
+            .filter(|bam_name| {
+                let gtf_name = match chrom_mapping.get(bam_name.as_str()) {
+                    Some(mapped) => mapped.clone(),
+                    None => format!("{}{}", chrom_prefix.unwrap_or(""), bam_name),
+                };
+                index.contains_key(&gtf_name)
+            })
+            .take(5)
+            .map(|s| s.as_str())
+            .collect();
+        if !shared_chroms.is_empty() {
+            anyhow::bail!(
+                "No reads could be assigned to any gene: none of the {} mapped reads overlaps \
+                 a gene in the GTF.\n\
+                 \n\
+                 Chromosomes in both the alignment and the GTF (first 5): {}\n\
+                 \n\
+                 The chromosome names match, so check that the GTF annotates the regions the \
+                 reads align to (same genome assembly).",
+                merged.total_mapped,
+                shared_chroms.join(", ")
+            );
+        }
         let bam_chroms: Vec<&str> = tid_to_name.iter().take(5).map(|s| s.as_str()).collect();
         let gtf_chroms: Vec<&str> = index.keys().take(5).map(|s| s.as_str()).collect();
         anyhow::bail!(
