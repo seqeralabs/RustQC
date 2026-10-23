@@ -282,7 +282,7 @@ enum BamCursor {
         chunk_end: Option<bgzf::VirtualPosition>,
         reference_sequence_id: usize,
     },
-    /// Streaming unmapped records from a seeked position to end of file.
+    /// Streaming records with no reference from a seeked position to end of file.
     Unmapped,
 }
 
@@ -436,8 +436,10 @@ impl IndexedReader {
         let source_path = self.source_path.clone();
         match &mut self.backend {
             IndexedBackend::Bam { reader, cursor, .. } => {
-                // Seek to the start of the unmapped read region and stream from
-                // there, filtering for unmapped records as we go.
+                // Seek to the last linear-index window of the last reference and
+                // stream from there, keeping only records with no reference
+                // (htslib's HTS_IDX_NOCOOR). Placed unmapped mates in that window
+                // belong to their reference's fetch.
                 match reader.index().last_first_record_start_position() {
                     Some(pos) => {
                         reader
@@ -448,7 +450,7 @@ impl IndexedReader {
                     None => {
                         // The index carries no metadata pseudo-bin, so there is
                         // no recorded unmapped offset. Reopen and stream from the
-                        // first record, relying on the per-record unmapped filter.
+                        // first record, relying on the per-record no-reference filter.
                         let mut fresh = noodles_bam::io::indexed_reader::Builder::default()
                             .build_from_path(&source_path)
                             .with_context(|| {
@@ -470,9 +472,16 @@ impl IndexedReader {
                         reader: heads.reader,
                         header: heads.header,
                         iter_builder: |reader, header| -> Result<CramRecordIter> {
+                            // The unplaced reads' slice can also hold placed records
+                            // (multi-reference slice); keep only those with no reference.
                             let query = reader
                                 .query_unmapped(header)
-                                .context("failed to query unmapped CRAM reads")?;
+                                .context("failed to query unmapped CRAM reads")?
+                                .filter(|result| {
+                                    result.as_ref().map_or(true, |record| {
+                                        record.reference_sequence_id().is_none()
+                                    })
+                                });
                             Ok(Box::new(query))
                         },
                     }
@@ -503,13 +512,13 @@ impl Read for IndexedReader {
                         Ok(0) => return None,
                         Ok(_) => {
                             *cursor = BamCursor::Unmapped;
-                            if scratch.flags().is_unmapped() {
+                            if scratch.reference_sequence_id().is_none() {
                                 return Some(
                                     Record::from_bam(header.noodles_header(), scratch)
                                         .and_then(|loaded| store_record(record, loaded)),
                                 );
                             }
-                            // Mapped record in the unmapped tail: skip and continue.
+                            // Placed record before the unplaced tail: skip and continue.
                         }
                         Err(e) => return Some(Err(e.into())),
                     },
