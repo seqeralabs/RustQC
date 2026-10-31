@@ -59,7 +59,7 @@ pub struct BamStatResult {
     // --- samtools flagstat fields ---
     /// Secondary alignments (0x100).
     pub secondary: u64,
-    /// Supplementary alignments (0x800).
+    /// Supplementary alignments (0x800) that are not also secondary (0x100).
     pub supplementary: u64,
     /// Paired reads (0x1).
     pub paired_flagstat: u64,

@@ -25,7 +25,7 @@ pub struct FlagstatCounts {
     pub primary: [u64; 2],
     /// Secondary (0x100).
     pub secondary: [u64; 2],
-    /// Supplementary (0x800).
+    /// Supplementary (0x800), excluding secondary records.
     pub supplementary: [u64; 2],
     /// Duplicates (0x400).
     pub duplicates: [u64; 2],
@@ -65,10 +65,7 @@ impl FlagstatCounts {
         self.total[w] += 1;
         if is_secondary {
             self.secondary[w] += 1;
-        }
-        // samtools counts a 0x900 record as secondary only; RustQC counts it
-        // in both lines (#125).
-        if is_supplementary {
+        } else if is_supplementary {
             self.supplementary[w] += 1;
         }
         if is_mapped {
@@ -158,7 +155,8 @@ fn fmt_pct(numerator: [u64; 2], denominator: [u64; 2]) -> String {
         if d == 0 {
             "N/A".to_string()
         } else {
-            format!("{:.2}%", 100.0 * n as f64 / d as f64)
+            // samtools bam_stat.c divides in float before multiplying by 100.0.
+            format!("{:.2}%", (n as f32 / d as f32) as f64 * 100.0)
         }
     };
     format!(
@@ -397,12 +395,6 @@ mod tests {
             if flag & BAM_FDUP != 0 {
                 self.n_dup[w] += 1;
             }
-            // Not samtools: RustQC also counts a 0x900 record as supplementary.
-            // Which behaviour is right is open (#125), so the oracle keeps
-            // RustQC's for that one line.
-            if flag & BAM_FSECONDARY != 0 && flag & BAM_FSUPPLEMENTARY != 0 {
-                self.n_supp[w] += 1;
-            }
         }
 
         fn render(&self) -> String {
@@ -530,5 +522,109 @@ mod tests {
         let [mut accum, other] = parts;
         accum.merge(other);
         assert_eq!(render_flagstat(accum, "merged"), oracle.render());
+    }
+
+    #[test]
+    fn test_flagstat_dual_flags_with_qcfail_and_duplicate() {
+        let mut accum = BamStatAccum::default();
+        let mut direct = FlagstatCounts::default();
+        let flags = [
+            0,
+            BAM_FDUP,
+            BAM_FSECONDARY,
+            BAM_FSUPPLEMENTARY,
+            BAM_FSECONDARY | BAM_FSUPPLEMENTARY,
+            BAM_FSECONDARY | BAM_FSUPPLEMENTARY | BAM_FDUP,
+        ];
+        for qc in [0, BAM_FQCFAIL] {
+            for flag in flags {
+                let flag = flag | qc;
+                accum.process_read(&record(flag, PLACEMENTS[0]), 30);
+                direct.add(flag, 0, 0, 60);
+            }
+        }
+        for fs in [&accum.flagstat, &direct] {
+            assert_eq!(fs.total, [6, 6]);
+            assert_eq!(fs.primary, [2, 2]);
+            assert_eq!(fs.secondary, [3, 3]);
+            assert_eq!(fs.supplementary, [1, 1]);
+            assert_eq!(fs.duplicates, [2, 2]);
+            assert_eq!(fs.primary_duplicates, [1, 1]);
+            assert_eq!(fs.mapped, [6, 6]);
+            assert_eq!(fs.primary_mapped, [2, 2]);
+            for w in 0..2 {
+                assert_eq!(
+                    fs.primary[w] + fs.secondary[w] + fs.supplementary[w],
+                    fs.total[w]
+                );
+            }
+        }
+        let result = accum.into_result();
+        assert_eq!(result.total_records, 12);
+        assert_eq!(result.primary_count, 4);
+        assert_eq!(result.secondary, 6);
+        assert_eq!(result.supplementary, 2);
+        assert_eq!(
+            result.primary_count + result.secondary + result.supplementary,
+            result.total_records
+        );
+    }
+
+    #[test]
+    fn test_flagstat_partitioned_counts_match_serial() {
+        for partitions in [1, 2, 7, 31] {
+            let mut parts = vec![FlagstatCounts::default(); partitions];
+            let mut oracle = SamtoolsFlagstat::default();
+            for (i, (flag, placement)) in (0..4096u16)
+                .flat_map(|flag| PLACEMENTS.map(|placement| (flag, placement)))
+                .enumerate()
+            {
+                parts[i % partitions].add(flag, placement.0, placement.1, placement.2);
+                oracle.add(flag, placement.0, placement.1, placement.2);
+            }
+            let mut merged = FlagstatCounts::default();
+            for part in parts.into_iter().rev() {
+                merged.merge(&part);
+            }
+            for w in 0..2 {
+                assert_eq!(
+                    merged.primary[w] + merged.secondary[w] + merged.supplementary[w],
+                    merged.total[w]
+                );
+            }
+            let mut accum = BamStatAccum::default();
+            accum.flagstat.merge(&merged);
+            assert_eq!(
+                render_flagstat(accum, "partitioned"),
+                oracle.render(),
+                "{partitions} partitions"
+            );
+        }
+    }
+
+    #[test]
+    fn test_flagstat_large_counter_percentages_match_samtools_c() {
+        // samtools 1.22.1 and 1.24 bam_stat.c percent():
+        // sprintf(buffer, "%.2f%%", (float)n / total * 100.0).
+        // Expected strings were checked by compiling that C function unchanged.
+        let cases = [
+            (0, 0, "N/A"),
+            (0, 1_000_000_000, "0.00%"),
+            (1, 32, "3.12%"),
+            (1, 6, "16.67%"),
+            (16_777_217, 16_777_218, "100.00%"),
+            (500_049_999, 1_000_000_000, "50.01%"),
+            (999_950_000, 1_000_000_000, "99.99%"),
+            (499_050_000, 1_000_000_000, "49.90%"),
+            (499_150_000, 1_000_000_000, "49.92%"),
+            (i64::MAX as u64 - 1, i64::MAX as u64, "100.00%"),
+        ];
+        for (n, d, expected) in cases {
+            assert_eq!(
+                fmt_pct([n, n], [d, d]),
+                format!("({expected} : {expected})"),
+                "{n}/{d}"
+            );
+        }
     }
 }

@@ -219,11 +219,8 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
 
     // Quality and length stats
     sn_no_comment(&mut out, "reads QC failed:", filtered)?;
-    sn_no_comment(
-        &mut out,
-        "non-primary alignments:",
-        result.secondary + result.supplementary,
-    )?;
+    // samtools stats reports nreads_secondary separately from supplementary.
+    sn_no_comment(&mut out, "non-primary alignments:", result.secondary)?;
     sn_no_comment(&mut out, "supplementary alignments:", result.supplementary)?;
     sn(
         &mut out,

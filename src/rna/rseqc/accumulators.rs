@@ -158,7 +158,7 @@ pub struct BamStatAccum {
     // --- samtools flagstat additional fields ---
     /// Secondary alignments (0x100) — counted independently of QC/dup.
     pub secondary: u64,
-    /// Supplementary alignments (0x800) — counted independently of QC/dup.
+    /// Supplementary alignments (0x800), excluding secondary records, regardless of QC/dup.
     pub supplementary: u64,
     /// Paired reads (0x1), regardless of QC/dup.
     pub paired_flagstat: u64,
@@ -396,10 +396,10 @@ impl BamStatAccum {
         // samtools flagstat counters (count ALL records, no early returns)
         // =================================================================
         self.flagstat.add(flags, tid, record.mtid(), mapq);
+        // samtools gives SECONDARY priority for records carrying both flags.
         if is_secondary {
             self.secondary += 1;
-        }
-        if is_supplementary {
+        } else if is_supplementary {
             self.supplementary += 1;
         }
         // samtools stats: "1st fragments" / "last fragments" count primary reads only

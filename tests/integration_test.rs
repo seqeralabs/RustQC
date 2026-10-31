@@ -12,26 +12,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rust_htslib::bam;
 use rust_htslib::bam::header::HeaderRecord;
 
-/// Helper: get the path to the rustqc binary.
-///
-/// Uses the `CARGO_BIN_EXE_rustqc` env var when available (set by cargo test),
-/// otherwise falls back to building and using `target/debug/rustqc`.
+/// Use the binary Cargo built for this integration target and profile.
 fn rustqc_binary() -> String {
-    // cargo test sets this for integration tests automatically
-    if let Ok(path) = std::env::var("CARGO_BIN_EXE_rustqc") {
-        return path;
-    }
-
-    // Fallback: build and use debug binary
-    let status = Command::new("cargo")
-        .args(["build"])
-        .status()
-        .expect("Failed to run cargo build");
-    assert!(status.success(), "cargo build failed");
-
-    let path = Path::new("target/debug/rustqc");
-    assert!(path.exists(), "Binary not found at {:?}", path);
-    path.to_str().unwrap().to_string()
+    env!("CARGO_BIN_EXE_rustqc").to_string()
 }
 
 /// Helper: run rustqc rna on test data and return the output directory
@@ -1039,8 +1022,8 @@ const FLAGSTAT_BACKGROUND: [&str; 2] = [
 ];
 
 /// Run `rustqc rna` on the background reads plus one record with `flag` (and
-/// mate field `rnext`) and return its `samtools/<stem>.flagstat`.
-fn flagstat_for_one_record(label: &str, flag: u16, rnext: &str) -> String {
+/// mate field `rnext`) and return its flagstat and stats outputs.
+fn samtools_for_one_record(label: &str, flag: u16, rnext: &str) -> (String, String) {
     let root = unique_test_dir(label);
     let bam_path = root.join("s.bam");
     let gtf_path = root.join("a.gtf");
@@ -1069,8 +1052,13 @@ fn flagstat_for_one_record(label: &str, flag: u16, rnext: &str) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     let flagstat = fs::read_to_string(outdir.join("samtools/s.flagstat")).unwrap();
+    let stats = fs::read_to_string(outdir.join("samtools/s.stats")).unwrap();
     let _ = fs::remove_dir_all(root);
-    flagstat
+    (flagstat, stats)
+}
+
+fn flagstat_for_one_record(label: &str, flag: u16, rnext: &str) -> String {
+    samtools_for_one_record(label, flag, rnext).0
 }
 
 /// A QC-failed read (0x200) belongs in samtools' second column.
@@ -1156,18 +1144,14 @@ fn test_flagstat_qc_failed_duplicate_counts_as_duplicate() {
     );
 }
 
-/// Pins current behaviour, not samtools': a SECONDARY|SUPPLEMENTARY record
-/// (0x900) counts as both. samtools 1.22.1 prints `0 + 0 supplementary` here
-/// (its code counts it as secondary only, its man page says supplementary is
-/// "0x800 bit set"). Which reading RustQC follows is open (#125); update this
-/// test when that is decided.
+/// SECONDARY takes priority over SUPPLEMENTARY, matching samtools 1.22.1.
 #[test]
-fn test_flagstat_secondary_supplementary_overlap_unchanged() {
+fn test_flagstat_secondary_supplementary_overlap_counts_secondary_only() {
     let expected = "\
 3 + 0 in total (QC-passed reads + QC-failed reads)
 2 + 0 primary
 1 + 0 secondary
-1 + 0 supplementary
+0 + 0 supplementary
 0 + 0 duplicates
 0 + 0 primary duplicates
 3 + 0 mapped (100.00% : N/A)
@@ -1206,33 +1190,11 @@ fn all_flags_sam_lines() -> Vec<String> {
     chr1
 }
 
-/// Every flag, against samtools 1.22.1, on the serial and the per-contig
-/// parallel path. The supplementary line is the one exception (#125, open):
-/// RustQC also counts each 0x900 record there, so the expectation adds those.
+/// Every flag, against the unmodified samtools 1.22.1 golden output, on
+/// both the serial and per-contig parallel paths.
 #[test]
 fn test_flagstat_matches_samtools_on_every_flag() {
-    let golden = fs::read_to_string("tests/expected/samtools/all_flags.flagstat").unwrap();
-    let both = |f: u16| f & 0x100 != 0 && f & 0x800 != 0;
-    let sec_supp = [
-        (0..4096u16).filter(|&f| both(f) && f & 0x200 == 0).count() as u64 * 3,
-        (0..4096u16).filter(|&f| both(f) && f & 0x200 != 0).count() as u64 * 3,
-    ];
-    let expected: String = golden
-        .lines()
-        .map(|line| match line.strip_suffix(" supplementary") {
-            Some(counts) => {
-                let (pass, fail) = counts.split_once(" + ").unwrap();
-                let pass: u64 = pass.parse().unwrap();
-                let fail: u64 = fail.parse().unwrap();
-                format!(
-                    "{} + {} supplementary\n",
-                    pass + sec_supp[0],
-                    fail + sec_supp[1]
-                )
-            }
-            None => format!("{line}\n"),
-        })
-        .collect();
+    let expected = fs::read_to_string("tests/expected/samtools/all_flags.flagstat").unwrap();
 
     let lines = all_flags_sam_lines();
     let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
@@ -1255,4 +1217,51 @@ fn test_flagstat_matches_samtools_on_every_flag() {
         assert_eq!(flagstat, expected, "flagstat with --threads {threads}");
         let _ = fs::remove_dir_all(root);
     }
+}
+
+/// A dual-flagged QC-failed duplicate is secondary in the failed column,
+/// stays a duplicate, and contributes to neither supplementary nor primary.
+#[test]
+fn test_flagstat_secondary_supplementary_qcfail_duplicate() {
+    let (flagstat, stats) = samtools_for_one_record("fs-sec-supp-qcfail-dup", 0xf00, "*");
+    let expected = "\
+2 + 1 in total (QC-passed reads + QC-failed reads)
+2 + 0 primary
+0 + 1 secondary
+0 + 0 supplementary
+0 + 1 duplicates
+0 + 0 primary duplicates
+2 + 1 mapped (100.00% : 100.00%)
+2 + 0 primary mapped (100.00% : N/A)
+0 + 0 paired in sequencing
+0 + 0 read1
+0 + 0 read2
+0 + 0 properly paired (N/A : N/A)
+0 + 0 with itself and mate mapped
+0 + 0 singletons (N/A : N/A)
+0 + 0 with mate mapped to a different chr
+0 + 0 with mate mapped to a different chr (mapQ>=5)
+";
+    assert_eq!(flagstat, expected);
+    assert!(
+        stats.contains("SN\tnon-primary alignments:\t1\n"),
+        "{stats}"
+    );
+    assert!(
+        stats.contains("SN\tsupplementary alignments:\t0\n"),
+        "{stats}"
+    );
+}
+
+#[test]
+fn test_stats_supplementary_is_not_non_primary() {
+    let (_, stats) = samtools_for_one_record("stats-supp-only", 0x800, "*");
+    assert!(
+        stats.contains("SN\tnon-primary alignments:\t0\n"),
+        "{stats}"
+    );
+    assert!(
+        stats.contains("SN\tsupplementary alignments:\t1\n"),
+        "{stats}"
+    );
 }
