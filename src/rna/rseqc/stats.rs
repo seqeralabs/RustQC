@@ -522,13 +522,13 @@ fn write_gcc<W: std::io::Write>(
     for cycle in 0..max_cycles {
         let mut combined = [0u64; 6];
         if cycle < fbc.len() {
-            for j in 0..6 {
-                combined[j] += fbc[cycle][j];
+            for (count, &value) in combined.iter_mut().zip(&fbc[cycle]) {
+                *count += value;
             }
         }
         if cycle < lbc.len() {
-            for j in 0..6 {
-                combined[j] += lbc[cycle][j];
+            for (count, &value) in combined.iter_mut().zip(&lbc[cycle]) {
+                *count += value;
             }
         }
         // Denominator is A+C+G+T only (first 4 elements), matching upstream
