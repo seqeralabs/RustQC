@@ -1,0 +1,42 @@
+rna:
+  dupradar:
+    dup_matrix: false
+    intercept_slope: false
+    density_scatter_plot: false
+    boxplot: false
+    expression_histogram: false
+    multiqc_intercept: false
+    multiqc_curve: false
+  featurecounts:
+    counts_file: false
+    summary_file: false
+    biotype_summary_file: false
+    biotype_counts: false
+    biotype_counts_mqc: false
+    biotype_rrna_mqc: false
+  bam_stat:
+    enabled: false
+  infer_experiment:
+    enabled: true
+  read_duplication:
+    enabled: false
+  read_distribution:
+    enabled: false
+  junction_annotation:
+    enabled: false
+  junction_saturation:
+    enabled: false
+  inner_distance:
+    enabled: false
+  flagstat:
+    enabled: true
+  idxstats:
+    enabled: false
+  tin:
+    enabled: false
+  samtools_stats:
+    enabled: true
+  preseq:
+    enabled: false
+  qualimap:
+    enabled: false

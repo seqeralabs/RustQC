@@ -201,8 +201,6 @@ pub fn write_infer_experiment<P: AsRef<Path>>(
             )?;
         }
         _ => {
-            writeln!(writer)?;
-            writeln!(writer)?;
             writeln!(writer, "Unknown Data type")?;
         }
     }
@@ -315,6 +313,32 @@ mod tests {
     use super::*;
     use crate::gtf::{Exon, Gene};
     use indexmap::IndexMap;
+
+    #[test]
+    fn test_write_unknown_reports_match_native_bytes() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "rustqc-infer-unknown-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir(&root).unwrap();
+        for (library_type, total_sampled) in [("Undetermined", 0), ("Mixture", 2)] {
+            let result = InferExperimentResult {
+                total_sampled,
+                library_type: library_type.to_owned(),
+                frac_failed: 0.0,
+                frac_protocol1: 0.5,
+                frac_protocol2: 0.5,
+            };
+            let path = root.join(format!("{library_type}.txt"));
+            write_infer_experiment(&result, &path).unwrap();
+            assert_eq!(fs::read(path).unwrap(), b"Unknown Data type\n".to_vec());
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
 
     /// Helper to create a simple Gene for testing.
     fn make_gene(gene_id: &str, chrom: &str, start: u64, end: u64, strand: char) -> Gene {

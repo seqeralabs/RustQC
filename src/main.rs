@@ -545,7 +545,7 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         exon_bitset: exon_bitset.as_ref(),
         transcript_tree: transcript_tree.as_ref(),
         mapq_cut: args.mapq_cut,
-        infer_experiment_sample_size: config.infer_experiment.sample_size.unwrap_or(200_000),
+        infer_experiment_sample_size: config.infer_experiment.sample_size.unwrap_or(u64::MAX),
         min_intron: config.junction_annotation.min_intron.unwrap_or(50),
         junction_saturation_min_coverage: config.junction_saturation.min_coverage.unwrap_or(1),
         junction_saturation_percentile_floor: config

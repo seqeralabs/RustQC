@@ -61,7 +61,7 @@ pub struct RseqcAnnotations<'a> {
 pub struct RseqcConfig {
     /// MAPQ cutoff for read quality filtering.
     pub mapq_cut: u8,
-    /// Maximum reads to sample for infer_experiment.
+    /// Maximum infer_experiment reads; u64::MAX retains unlimited sampling.
     pub infer_experiment_sample_size: u64,
     /// Minimum intron size for junction filtering.
     pub min_intron: u64,
@@ -1316,10 +1316,8 @@ impl BamStatAccum {
 
 /// infer_experiment accumulator — strand protocol inference.
 ///
-/// Processes ALL reads (no sampling cap). Upstream RSeQC `infer_experiment.py`
-/// samples 200K reads, but since RustQC processes in a single pass, processing
-/// all reads gives equivalent-or-better results on small data and avoids
-/// sampling divergence on large data.
+/// Explicit caps are collected in a file-order prepass before chromosome workers
+/// run; the normal worker accumulators retain the all-read behavior when unset.
 #[derive(Debug, Default)]
 pub struct InferExpAccum {
     /// Paired-end strand class counts (keys: "1++", "1--", "2+-", "2-+", etc.)
@@ -1339,6 +1337,18 @@ impl InferExpAccum {
         model: &GeneModel,
         mapq_cut: u8,
     ) {
+        self.process_sample_read(record, chrom, model, mapq_cut);
+    }
+
+    /// Count one record and report whether it consumed a sample slot.
+    /// Ambiguous transcript overlaps consume a slot, matching native RSeQC.
+    pub(crate) fn process_sample_read(
+        &mut self,
+        record: &bam::Record,
+        chrom: &str,
+        model: &GeneModel,
+        mapq_cut: u8,
+    ) -> bool {
         let flags = record.flags();
 
         // Skip QC-fail, dup, secondary, unmapped.
@@ -1349,11 +1359,11 @@ impl InferExpAccum {
             || flags & BAM_FSECONDARY != 0
             || flags & BAM_FUNMAP != 0
         {
-            return;
+            return false;
         }
 
         if record.mapq() < mapq_cut {
-            return;
+            return false;
         }
 
         let map_strand = if record.is_reverse() { '-' } else { '+' };
@@ -1381,7 +1391,7 @@ impl InferExpAccum {
 
         let strands = model.find_strands(chrom, read_start, read_end);
         if strands.is_empty() {
-            return;
+            return false;
         }
 
         // Build key in reusable buffer to avoid per-read allocation.
@@ -1411,6 +1421,7 @@ impl InferExpAccum {
                 map.insert(self.key_buf.clone(), 1);
             }
         }
+        true
     }
 
     /// Merge another accumulator into this one.
