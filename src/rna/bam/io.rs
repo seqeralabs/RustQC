@@ -1,5 +1,6 @@
 //! BAM/SAM/CRAM readers with a rust-htslib-compatible API.
 
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
@@ -73,6 +74,23 @@ fn open_bam_reader(path: &Path) -> Result<noodles_bam::io::Reader<bgzf::io::Read
     let file =
         File::open(path).with_context(|| format!("failed to open BAM file {}", path.display()))?;
     Ok(noodles_bam::io::Reader::new(file))
+}
+
+fn cram_container_query_index(path: &Path) -> Result<noodles_cram::crai::Index> {
+    let mut index_path = path.as_os_str().to_os_string();
+    index_path.push(".crai");
+    let mut index = noodles_cram::crai::fs::read(&index_path).with_context(|| {
+        format!(
+            "failed to read CRAM index {}",
+            Path::new(&index_path).display()
+        )
+    })?;
+    // noodles 0.94 decodes the whole container for each CRAI slice entry.
+    // Keep one entry per reference/container, preserving other references'
+    // queries and all physical records, including repeated read names.
+    let mut seen = HashSet::new();
+    index.retain(|entry| seen.insert((entry.reference_sequence_id(), entry.offset())));
+    Ok(index)
 }
 
 /// Owned iterator over decoded CRAM records. Boxed so the `query` and
@@ -313,6 +331,7 @@ impl IndexedReader {
         let path = path.as_ref().to_path_buf();
         let backend = if path.to_string_lossy().ends_with(".cram") {
             let mut reader = noodles_cram::io::indexed_reader::Builder::default()
+                .set_index(cram_container_query_index(&path)?)
                 .build_from_path(&path)
                 .with_context(|| format!("failed to open indexed CRAM {}", path.display()))?;
             let sam_header = reader
@@ -361,6 +380,7 @@ impl IndexedReader {
             let repository = load_fasta_repository(&path)?;
             let mut reader = noodles_cram::io::indexed_reader::Builder::default()
                 .set_reference_sequence_repository(repository)
+                .set_index(cram_container_query_index(&cram_path)?)
                 .build_from_path(&cram_path)?;
             let sam_header = reader.read_header()?;
             *header = Header::from_noodles(sam_header.clone());
@@ -856,5 +876,21 @@ mod tests {
         let got = fetch_everything(&dir.join("multi_ref_slice.cram"), Some(&fasta));
         assert_sweep(&got);
         assert_each_record_once(&got);
+    }
+    #[test]
+    fn cram_same_reference_multi_slice_container_is_read_once() {
+        let dir = std::path::Path::new("tests/data/unmapped_sweep");
+        let got = fetch_everything(
+            &dir.join("same_reference_multi_slice.cram"),
+            Some(&dir.join("sweep.fa")),
+        );
+        let mut names: Vec<_> = got.iter().map(|(_, name)| name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            ["r0", "r0", "r1", "r1", "u1", "u2"],
+            "each physical record, including repeated names, must be fetched once: {got:?}"
+        );
+        assert_sweep(&got);
     }
 }
