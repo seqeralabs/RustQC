@@ -2336,9 +2336,9 @@ fn merge_vec_arrays<const N: usize>(target: &mut Vec<[u64; N]>, source: Vec<[u64
     if source.len() > target.len() {
         target.resize(source.len(), [0u64; N]);
     }
-    for (i, arr) in source.into_iter().enumerate() {
-        for j in 0..N {
-            target[i][j] += arr[j];
+    for (target_row, source_row) in target.iter_mut().zip(source) {
+        for (target_count, source_count) in target_row.iter_mut().zip(source_row) {
+            *target_count += source_count;
         }
     }
 }
