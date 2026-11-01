@@ -564,22 +564,19 @@ impl Read for IndexedReader {
                         chunk_end,
                         reference_sequence_id,
                     } => match chunk_end {
-                        None => match chunks.next() {
-                            Some(chunk) => {
-                                if let Err(e) =
-                                    reader.get_mut().seek_to_virtual_position(chunk.start())
-                                {
-                                    return Some(Err(anyhow::Error::new(e)
-                                        .context("failed to seek to BAM index chunk")));
-                                }
-                                *cursor = BamCursor::Region {
-                                    chunks,
-                                    chunk_end: Some(chunk.end()),
-                                    reference_sequence_id,
-                                };
+                        None => {
+                            let chunk = chunks.next()?;
+                            if let Err(e) = reader.get_mut().seek_to_virtual_position(chunk.start())
+                            {
+                                return Some(Err(anyhow::Error::new(e)
+                                    .context("failed to seek to BAM index chunk")));
                             }
-                            None => return None,
-                        },
+                            *cursor = BamCursor::Region {
+                                chunks,
+                                chunk_end: Some(chunk.end()),
+                                reference_sequence_id,
+                            };
+                        }
                         Some(end) => {
                             if reader.get_mut().virtual_position() >= end {
                                 // Reached the end of this chunk; advance to the next.
