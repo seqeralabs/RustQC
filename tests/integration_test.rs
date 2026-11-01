@@ -1128,3 +1128,64 @@ fn test_no_genic_reads_with_disjoint_names_is_a_name_mismatch() {
         "missing chromosome-name diagnostic:\n{stderr}"
     );
 }
+
+/// A physical gene overlap rejected by strandedness is an assignment failure.
+#[test]
+fn test_no_genic_reads_with_wrong_strand_is_assignment_failure() {
+    let root = unique_test_dir("no-genic-wrong-strand");
+    let bam_path = root.join("s.bam");
+    let gtf_path = root.join("a.gtf");
+    fs::write(
+        &gtf_path,
+        "chr1\tt\tgene\t900\t3000\t.\t+\t.\tgene_id \"g1\"; gene_name \"g1\";\n\
+         chr1\tt\texon\t900\t3000\t.\t+\t.\tgene_id \"g1\"; transcript_id \"t1\"; exon_number \"1\";\n",
+    )
+    .unwrap();
+    let read = format!(
+        "r0\t16\tchr1\t1001\t60\t50M\t*\t0\t0\t{}\t{}",
+        "A".repeat(50),
+        "I".repeat(50)
+    );
+    write_bam_fixture(&bam_path, &[("chr1", 100_000)], &[&read]);
+    let run = |stranded: &str| {
+        Command::new(env!("CARGO_BIN_EXE_rustqc"))
+            .args(["rna", "--skip-dup-check", "--skip-preseq", "--gtf"])
+            .arg(&gtf_path)
+            .args(["--stranded", stranded, "--outdir"])
+            .arg(root.join(stranded))
+            .arg(&bam_path)
+            .output()
+            .expect("Failed to execute rustqc")
+    };
+    let control = run("unstranded");
+    assert!(
+        control.status.success(),
+        "the overlapping read must be assigned in the unstranded control:\n{}",
+        String::from_utf8_lossy(&control.stderr)
+    );
+    let output = run("forward");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success(),
+        "assignment failure must remain fatal:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("Chromosome name mismatch"),
+        "chromosome names match:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("overlaps a gene"),
+        "the read overlaps chr1:1001-1050 within g1 at chr1:900-3000; the unstranded control passed:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("configured gene-assignment rules"),
+        "missing assignment-rule diagnostic:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("annotation")
+            && stderr.contains("genome assembly")
+            && stderr.contains("strandedness"),
+        "missing diagnostic guidance:\n{stderr}"
+    );
+    fs::remove_dir_all(root).unwrap();
+}

@@ -1666,13 +1666,13 @@ pub fn count_reads(
             .collect();
         if !shared_chroms.is_empty() {
             anyhow::bail!(
-                "No reads could be assigned to any gene: none of the {} mapped reads overlaps \
-                 a gene in the GTF.\n\
+                "No reads could be assigned to any gene under the configured gene-assignment rules \
+                 ({} mapped reads).\n\
                  \n\
                  Chromosomes in both the alignment and the GTF (first 5): {}\n\
                  \n\
-                 The chromosome names match, so check that the GTF annotates the regions the \
-                 reads align to (same genome assembly).",
+                 The chromosome names match. Check the annotation, genome assembly, and \
+                 strandedness setting for this library.",
                 merged.total_mapped,
                 shared_chroms.join(", ")
             );
