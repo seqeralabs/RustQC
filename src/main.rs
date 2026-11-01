@@ -1838,6 +1838,7 @@ fn write_rseqc_outputs(
         };
         std::fs::create_dir_all(&preseq_dir)?;
         let output_path = preseq_dir.join(format!("{}.lc_extrap.txt", sample_name));
+        let skipped_path = preseq_dir.join(format!("{}.preseq_skipped.txt", sample_name));
         accum.finalize();
         let total_reads = accum.total_fragments;
         let n_distinct = accum.n_distinct();
@@ -1860,6 +1861,7 @@ fn write_rseqc_outputs(
                     &output_path,
                     params.config.preseq.confidence_level,
                 )?;
+                remove_stale_preseq_output(&skipped_path)?;
                 let p = output_path.display().to_string();
                 ui.output_item("preseq", &p);
                 ui.output_detail(&format!("{} extrapolation points", result.curve.len(),));
@@ -1867,6 +1869,11 @@ fn write_rseqc_outputs(
             }
             Err(e) => {
                 ui.warn(&format!("preseq: skipped — {}", e));
+                rna::preseq::write_skipped_output(&skipped_path, &e.to_string())?;
+                remove_stale_preseq_output(&output_path)?;
+                let p = skipped_path.display().to_string();
+                ui.output_item("preseq status", &p);
+                written.push(("preseq status".into(), p));
             }
         }
     }
@@ -1875,4 +1882,13 @@ fn write_rseqc_outputs(
         written,
         infer_experiment: infer_experiment_result,
     })
+}
+
+fn remove_stale_preseq_output(path: &Path) -> Result<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e)
+            .with_context(|| format!("Failed to remove stale preseq output: {}", path.display())),
+    }
 }

@@ -1239,6 +1239,24 @@ fn quantile(sorted: &[f64], q: f64) -> f64 {
 // Output
 // ============================================================================
 
+/// Write a skipped-status TSV when the estimator rejects an analysis, without predictions.
+pub fn write_skipped_output(output_path: &Path, reason: &str) -> Result<()> {
+    let mut f = std::fs::File::create(output_path).with_context(|| {
+        format!(
+            "Failed to create preseq skipped-status output: {}",
+            output_path.display()
+        )
+    })?;
+    let reason = reason.replace(['\t', '\r', '\n'], " ");
+    writeln!(f, "STATUS\tREASON\nskipped\t{reason}").with_context(|| {
+        format!(
+            "Failed to write preseq skipped-status output: {}",
+            output_path.display()
+        )
+    })?;
+    Ok(())
+}
+
 /// Write the preseq lc_extrap output in TSV format.
 ///
 /// Output format matches preseq's lc_extrap output:

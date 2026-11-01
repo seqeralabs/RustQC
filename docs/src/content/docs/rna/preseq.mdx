@@ -56,7 +56,22 @@ all files directly to the output directory instead.
 <FileTree>
 - preseq/
   - `sample.lc_extrap.txt` Library complexity extrapolation curve
+  - `sample.preseq_skipped.txt` Status when the estimator rejects the analysis
 </FileTree>
+
+When the estimator rejects an analysis (for example, too few distinct molecules
+or a failed Good-Toulmin check), RustQC keeps the warning and writes only
+`<sample>.preseq_skipped.txt`, with `STATUS` and `REASON` columns and one
+`skipped` row. It does not write a complexity curve or substitute numeric
+predictions. MultiQC 1.35 ignores this status file; header-only complexity
+tables can instead fail in that version's Preseq module.
+
+After a successful enabled rerun in the same output layout, only the current
+artifact remains for that sample: a skipped estimate removes the previous curve,
+and an estimated curve removes the previous skipped status. Files in another
+previously used output layout are not removed. File write or removal errors fail
+the command; old or partially updated files may remain after a failure.
+Disabling preseq creates no preseq outputs and leaves existing files untouched.
 
 ### Complexity curve
 
