@@ -12,6 +12,7 @@ use indexmap::IndexMap;
 use rust_htslib::bam;
 
 use super::bam_stat::{BamStatResult, GcDepthBin};
+use super::flagstat::FlagstatCounts;
 
 /// Default GC-depth bin size in base pairs (matches upstream samtools default).
 const GCD_BIN_SIZE: u64 = 20_000;
@@ -157,30 +158,20 @@ pub struct BamStatAccum {
     // --- samtools flagstat additional fields ---
     /// Secondary alignments (0x100) — counted independently of QC/dup.
     pub secondary: u64,
-    /// Supplementary alignments (0x800) — counted independently of QC/dup.
+    /// Supplementary alignments (0x800), excluding secondary records, regardless of QC/dup.
     pub supplementary: u64,
-    /// All mapped records (not 0x4), regardless of QC/dup.
-    pub mapped: u64,
     /// Paired reads (0x1), regardless of QC/dup.
     pub paired_flagstat: u64,
-    /// Read1 in pair (0x40), regardless of QC/dup — for flagstat.
-    pub read1_flagstat: u64,
-    /// Read2 in pair (0x80), regardless of QC/dup — for flagstat.
-    pub read2_flagstat: u64,
     /// First fragments for samtools stats: primary reads that are not "last fragments".
     pub first_fragments: u64,
     /// Last fragments for samtools stats: primary reads with 0x80 flag.
     pub last_fragments: u64,
     /// Properly paired reads (0x1 + 0x2), regardless of QC/dup.
     pub properly_paired: u64,
-    /// Both mates mapped (paired + both !unmapped).
-    pub both_mapped: u64,
-    /// Singletons (paired, this mapped, mate unmapped).
-    pub singletons: u64,
-    /// Paired, both mapped, different reference.
-    pub mate_diff_chr: u64,
     /// Paired, both mapped, different reference, MAPQ >= 5.
     pub mate_diff_chr_mapq5: u64,
+    /// The `samtools flagstat` counters, split by QC-pass/fail.
+    pub flagstat: FlagstatCounts,
 
     // --- samtools idxstats additional fields ---
     /// Per-reference (tid) mapped and unmapped counts.
@@ -319,17 +310,12 @@ impl Default for BamStatAccum {
             proper_pair_diff_chrom: 0,
             secondary: 0,
             supplementary: 0,
-            mapped: 0,
             paired_flagstat: 0,
-            read1_flagstat: 0,
-            read2_flagstat: 0,
             first_fragments: 0,
             last_fragments: 0,
             properly_paired: 0,
-            both_mapped: 0,
-            singletons: 0,
-            mate_diff_chr: 0,
             mate_diff_chr_mapq5: 0,
+            flagstat: FlagstatCounts::default(),
             chrom_counts: HashMap::new(),
             unplaced_unmapped: 0,
             total_len: 0,
@@ -409,14 +395,12 @@ impl BamStatAccum {
         // =================================================================
         // samtools flagstat counters (count ALL records, no early returns)
         // =================================================================
+        self.flagstat.add(flags, tid, record.mtid(), mapq);
+        // samtools gives SECONDARY priority for records carrying both flags.
         if is_secondary {
             self.secondary += 1;
-        }
-        if is_supplementary {
+        } else if is_supplementary {
             self.supplementary += 1;
-        }
-        if is_mapped {
-            self.mapped += 1;
         }
         // samtools stats: "1st fragments" / "last fragments" count primary reads only
         // For paired reads: read2 flag -> last, everything else -> 1st
@@ -432,27 +416,12 @@ impl BamStatAccum {
         // (secondary/supplementary are excluded from paired/read1/read2/properly-paired counts)
         if is_paired && is_primary {
             self.paired_flagstat += 1;
-            if flags & BAM_FREAD1 != 0 {
-                self.read1_flagstat += 1;
-            }
-            if flags & BAM_FREAD2 != 0 {
-                self.read2_flagstat += 1;
-            }
             if flags & BAM_FPROPER_PAIR != 0 {
                 self.properly_paired += 1;
             }
             let mate_unmapped = flags & BAM_FMUNMAP != 0;
-            if is_mapped && !mate_unmapped {
-                self.both_mapped += 1;
-                if tid != record.mtid() {
-                    self.mate_diff_chr += 1;
-                    if mapq >= 5 {
-                        self.mate_diff_chr_mapq5 += 1;
-                    }
-                }
-            }
-            if is_mapped && mate_unmapped {
-                self.singletons += 1;
+            if is_mapped && !mate_unmapped && tid != record.mtid() && mapq >= 5 {
+                self.mate_diff_chr_mapq5 += 1;
             }
         }
 
@@ -1193,17 +1162,12 @@ impl BamStatAccum {
         // samtools flagstat fields
         self.secondary += other.secondary;
         self.supplementary += other.supplementary;
-        self.mapped += other.mapped;
         self.paired_flagstat += other.paired_flagstat;
-        self.read1_flagstat += other.read1_flagstat;
-        self.read2_flagstat += other.read2_flagstat;
         self.first_fragments += other.first_fragments;
         self.last_fragments += other.last_fragments;
         self.properly_paired += other.properly_paired;
-        self.both_mapped += other.both_mapped;
-        self.singletons += other.singletons;
-        self.mate_diff_chr += other.mate_diff_chr;
         self.mate_diff_chr_mapq5 += other.mate_diff_chr_mapq5;
+        self.flagstat.merge(&other.flagstat);
 
         // samtools idxstats fields
         for (tid, (m, u)) in other.chrom_counts {
@@ -2336,9 +2300,9 @@ fn merge_vec_arrays<const N: usize>(target: &mut Vec<[u64; N]>, source: Vec<[u64
     if source.len() > target.len() {
         target.resize(source.len(), [0u64; N]);
     }
-    for (i, arr) in source.into_iter().enumerate() {
-        for j in 0..N {
-            target[i][j] += arr[j];
+    for (target_row, source_row) in target.iter_mut().zip(source) {
+        for (target_count, source_count) in target_row.iter_mut().zip(source_row) {
+            *target_count += source_count;
         }
     }
 }
@@ -2372,17 +2336,12 @@ impl BamStatAccum {
             // samtools flagstat fields
             secondary: self.secondary,
             supplementary: self.supplementary,
-            mapped: self.mapped,
             paired_flagstat: self.paired_flagstat,
-            read1_flagstat: self.read1_flagstat,
-            read2_flagstat: self.read2_flagstat,
             first_fragments: self.first_fragments,
             last_fragments: self.last_fragments,
             properly_paired: self.properly_paired,
-            both_mapped: self.both_mapped,
-            singletons: self.singletons,
-            mate_diff_chr: self.mate_diff_chr,
             mate_diff_chr_mapq5: self.mate_diff_chr_mapq5,
+            flagstat: self.flagstat,
             // samtools idxstats fields
             chrom_counts: self.chrom_counts,
             unplaced_unmapped: self.unplaced_unmapped,

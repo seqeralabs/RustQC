@@ -219,11 +219,8 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
 
     // Quality and length stats
     sn_no_comment(&mut out, "reads QC failed:", filtered)?;
-    sn_no_comment(
-        &mut out,
-        "non-primary alignments:",
-        result.secondary + result.supplementary,
-    )?;
+    // samtools stats reports nreads_secondary separately from supplementary.
+    sn_no_comment(&mut out, "non-primary alignments:", result.secondary)?;
     sn_no_comment(&mut out, "supplementary alignments:", result.supplementary)?;
     sn(
         &mut out,
@@ -525,13 +522,13 @@ fn write_gcc<W: std::io::Write>(
     for cycle in 0..max_cycles {
         let mut combined = [0u64; 6];
         if cycle < fbc.len() {
-            for j in 0..6 {
-                combined[j] += fbc[cycle][j];
+            for (count, &value) in combined.iter_mut().zip(&fbc[cycle]) {
+                *count += value;
             }
         }
         if cycle < lbc.len() {
-            for j in 0..6 {
-                combined[j] += lbc[cycle][j];
+            for (count, &value) in combined.iter_mut().zip(&lbc[cycle]) {
+                *count += value;
             }
         }
         // Denominator is A+C+G+T only (first 4 elements), matching upstream

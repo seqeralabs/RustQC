@@ -12,26 +12,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rust_htslib::bam;
 use rust_htslib::bam::header::HeaderRecord;
 
-/// Helper: get the path to the rustqc binary.
-///
-/// Uses the `CARGO_BIN_EXE_rustqc` env var when available (set by cargo test),
-/// otherwise falls back to building and using `target/debug/rustqc`.
+/// Use the binary Cargo built for this integration target and profile.
 fn rustqc_binary() -> String {
-    // cargo test sets this for integration tests automatically
-    if let Ok(path) = std::env::var("CARGO_BIN_EXE_rustqc") {
-        return path;
-    }
-
-    // Fallback: build and use debug binary
-    let status = Command::new("cargo")
-        .args(["build"])
-        .status()
-        .expect("Failed to run cargo build");
-    assert!(status.success(), "cargo build failed");
-
-    let path = Path::new("target/debug/rustqc");
-    assert!(path.exists(), "Binary not found at {:?}", path);
-    path.to_str().unwrap().to_string()
+    env!("CARGO_BIN_EXE_rustqc").to_string()
 }
 
 /// Helper: run rustqc rna on test data and return the output directory
@@ -1025,4 +1008,260 @@ fn test_dup_check_parallel_uses_global_duplicate_state() {
     );
 
     let _ = fs::remove_dir_all(root);
+}
+
+// ===================================================================
+// samtools flagstat parity
+// ===================================================================
+
+/// The two plain mapped reads every flagstat case sits between, so that some
+/// read lands in a gene and `rustqc rna` produces its outputs.
+const FLAGSTAT_BACKGROUND: [&str; 2] = [
+    "r0\t0\tchr1\t1001\t60\t50M\t*\t0\t0\tACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTAC\t??????????????????????????????????????????????????",
+    "r1\t0\tchr1\t1201\t60\t50M\t*\t0\t0\tACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTAC\t??????????????????????????????????????????????????",
+];
+
+/// Run `rustqc rna` on the background reads plus one record with `flag` (and
+/// mate field `rnext`) and return its flagstat and stats outputs.
+fn samtools_for_one_record(label: &str, flag: u16, rnext: &str) -> (String, String) {
+    let root = unique_test_dir(label);
+    let bam_path = root.join("s.bam");
+    let gtf_path = root.join("a.gtf");
+    let outdir = root.join("out");
+    fs::create_dir_all(&outdir).unwrap();
+    fs::write(
+        &gtf_path,
+        "chr1\tt\tgene\t900\t3000\t.\t+\t.\tgene_id \"g1\"; gene_name \"g1\";\n\
+         chr1\tt\texon\t900\t3000\t.\t+\t.\tgene_id \"g1\"; transcript_id \"t1\"; exon_number \"1\";\n",
+    )
+    .unwrap();
+    let pnext = if rnext == "*" { 0 } else { 1001 };
+    let case = format!(
+        "r2\t{flag}\tchr1\t1001\t60\t50M\t{rnext}\t{pnext}\t0\tACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTAC\t??????????????????????????????????????????????????"
+    );
+    write_bam_fixture(
+        &bam_path,
+        &[("chr1", 100_000), ("chr2", 100_000)],
+        &[FLAGSTAT_BACKGROUND[0], &case, FLAGSTAT_BACKGROUND[1]],
+    );
+
+    let output = run_rustqc_custom(&outdir, &bam_path, &gtf_path, 1, true, &[]);
+    assert!(
+        output.status.success(),
+        "rustqc failed on flag {flag:#06x}:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let flagstat = fs::read_to_string(outdir.join("samtools/s.flagstat")).unwrap();
+    let stats = fs::read_to_string(outdir.join("samtools/s.stats")).unwrap();
+    let _ = fs::remove_dir_all(root);
+    (flagstat, stats)
+}
+
+fn flagstat_for_one_record(label: &str, flag: u16, rnext: &str) -> String {
+    samtools_for_one_record(label, flag, rnext).0
+}
+
+/// A QC-failed read (0x200) belongs in samtools' second column.
+/// Expected text is `samtools flagstat` 1.22.1 output for this input.
+#[test]
+fn test_flagstat_qc_failed_column() {
+    let expected = "\
+2 + 1 in total (QC-passed reads + QC-failed reads)
+2 + 1 primary
+0 + 0 secondary
+0 + 0 supplementary
+0 + 0 duplicates
+0 + 0 primary duplicates
+2 + 1 mapped (100.00% : 100.00%)
+2 + 1 primary mapped (100.00% : 100.00%)
+0 + 0 paired in sequencing
+0 + 0 read1
+0 + 0 read2
+0 + 0 properly paired (N/A : N/A)
+0 + 0 with itself and mate mapped
+0 + 0 singletons (N/A : N/A)
+0 + 0 with mate mapped to a different chr
+0 + 0 with mate mapped to a different chr (mapQ>=5)
+";
+    assert_eq!(flagstat_for_one_record("fs-qcfail", 0x200, "*"), expected);
+}
+
+/// "properly paired" needs the read itself mapped (samtools bam_stat.c:61),
+/// so PAIRED|PROPER_PAIR|UNMAP|MUNMAP|READ1 (0x4f) does not count.
+/// Expected text is `samtools flagstat` 1.22.1 output for this input.
+#[test]
+fn test_flagstat_properly_paired_requires_mapped_read() {
+    let expected = "\
+3 + 0 in total (QC-passed reads + QC-failed reads)
+3 + 0 primary
+0 + 0 secondary
+0 + 0 supplementary
+0 + 0 duplicates
+0 + 0 primary duplicates
+2 + 0 mapped (66.67% : N/A)
+2 + 0 primary mapped (66.67% : N/A)
+1 + 0 paired in sequencing
+1 + 0 read1
+0 + 0 read2
+0 + 0 properly paired (0.00% : N/A)
+0 + 0 with itself and mate mapped
+0 + 0 singletons (0.00% : N/A)
+0 + 0 with mate mapped to a different chr
+0 + 0 with mate mapped to a different chr (mapQ>=5)
+";
+    assert_eq!(
+        flagstat_for_one_record("fs-proper-unmapped", 0x4f, "="),
+        expected
+    );
+}
+
+/// A QC-failed duplicate (0x600) is a duplicate in the QC-failed column, so
+/// "primary duplicates" never exceeds "duplicates".
+/// Expected text is `samtools flagstat` 1.22.1 output for this input.
+#[test]
+fn test_flagstat_qc_failed_duplicate_counts_as_duplicate() {
+    let expected = "\
+2 + 1 in total (QC-passed reads + QC-failed reads)
+2 + 1 primary
+0 + 0 secondary
+0 + 0 supplementary
+0 + 1 duplicates
+0 + 1 primary duplicates
+2 + 1 mapped (100.00% : 100.00%)
+2 + 1 primary mapped (100.00% : 100.00%)
+0 + 0 paired in sequencing
+0 + 0 read1
+0 + 0 read2
+0 + 0 properly paired (N/A : N/A)
+0 + 0 with itself and mate mapped
+0 + 0 singletons (N/A : N/A)
+0 + 0 with mate mapped to a different chr
+0 + 0 with mate mapped to a different chr (mapQ>=5)
+";
+    assert_eq!(
+        flagstat_for_one_record("fs-qcfail-dup", 0x600, "*"),
+        expected
+    );
+}
+
+/// SECONDARY takes priority over SUPPLEMENTARY, matching samtools 1.22.1.
+#[test]
+fn test_flagstat_secondary_supplementary_overlap_counts_secondary_only() {
+    let expected = "\
+3 + 0 in total (QC-passed reads + QC-failed reads)
+2 + 0 primary
+1 + 0 secondary
+0 + 0 supplementary
+0 + 0 duplicates
+0 + 0 primary duplicates
+3 + 0 mapped (100.00% : N/A)
+2 + 0 primary mapped (100.00% : N/A)
+0 + 0 paired in sequencing
+0 + 0 read1
+0 + 0 read2
+0 + 0 properly paired (N/A : N/A)
+0 + 0 with itself and mate mapped
+0 + 0 singletons (N/A : N/A)
+0 + 0 with mate mapped to a different chr
+0 + 0 with mate mapped to a different chr (mapQ>=5)
+";
+    assert_eq!(flagstat_for_one_record("fs-sec-supp", 0x900, "*"), expected);
+}
+
+/// SAM lines for every 12-bit flag in three placements: mate on the same
+/// contig, mate on the other contig (MAPQ 60), and mate on the other contig
+/// with MAPQ 3. `tests/expected/samtools/all_flags.flagstat` is samtools
+/// 1.22.1's output for exactly these records (see the README there).
+fn all_flags_sam_lines() -> Vec<String> {
+    let mut chr1 = Vec::new();
+    let mut chr2 = Vec::new();
+    for flag in 0..4096u16 {
+        chr1.push(format!(
+            "f{flag}a\t{flag}\tchr1\t10\t60\t4M\t=\t10\t0\tACGT\tIIII"
+        ));
+        chr1.push(format!(
+            "f{flag}b\t{flag}\tchr1\t10\t60\t4M\tchr2\t10\t0\tACGT\tIIII"
+        ));
+        chr2.push(format!(
+            "f{flag}c\t{flag}\tchr2\t10\t3\t4M\tchr1\t10\t0\tACGT\tIIII"
+        ));
+    }
+    chr1.extend(chr2);
+    chr1
+}
+
+/// Every flag, against the unmodified samtools 1.22.1 golden output, on
+/// both the serial and per-contig parallel paths.
+#[test]
+fn test_flagstat_matches_samtools_on_every_flag() {
+    let expected = fs::read_to_string("tests/expected/samtools/all_flags.flagstat").unwrap();
+
+    let lines = all_flags_sam_lines();
+    let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+    for threads in [1, 2] {
+        let root = unique_test_dir(&format!("fs-all-flags-t{threads}"));
+        let bam_path = root.join("all_flags.bam");
+        let gtf_path = root.join("all_flags.gtf");
+        let outdir = root.join("out");
+        fs::create_dir_all(&outdir).unwrap();
+        write_test_gtf(&gtf_path, &["chr1", "chr2"]);
+        write_bam_fixture(&bam_path, &[("chr1", 1000), ("chr2", 1000)], &lines);
+
+        let output = run_rustqc_custom(&outdir, &bam_path, &gtf_path, threads, true, &[]);
+        assert!(
+            output.status.success(),
+            "rustqc failed with --threads {threads}:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let flagstat = fs::read_to_string(outdir.join("samtools/all_flags.flagstat")).unwrap();
+        assert_eq!(flagstat, expected, "flagstat with --threads {threads}");
+        let _ = fs::remove_dir_all(root);
+    }
+}
+
+/// A dual-flagged QC-failed duplicate is secondary in the failed column,
+/// stays a duplicate, and contributes to neither supplementary nor primary.
+#[test]
+fn test_flagstat_secondary_supplementary_qcfail_duplicate() {
+    let (flagstat, stats) = samtools_for_one_record("fs-sec-supp-qcfail-dup", 0xf00, "*");
+    let expected = "\
+2 + 1 in total (QC-passed reads + QC-failed reads)
+2 + 0 primary
+0 + 1 secondary
+0 + 0 supplementary
+0 + 1 duplicates
+0 + 0 primary duplicates
+2 + 1 mapped (100.00% : 100.00%)
+2 + 0 primary mapped (100.00% : N/A)
+0 + 0 paired in sequencing
+0 + 0 read1
+0 + 0 read2
+0 + 0 properly paired (N/A : N/A)
+0 + 0 with itself and mate mapped
+0 + 0 singletons (N/A : N/A)
+0 + 0 with mate mapped to a different chr
+0 + 0 with mate mapped to a different chr (mapQ>=5)
+";
+    assert_eq!(flagstat, expected);
+    assert!(
+        stats.contains("SN\tnon-primary alignments:\t1\n"),
+        "{stats}"
+    );
+    assert!(
+        stats.contains("SN\tsupplementary alignments:\t0\n"),
+        "{stats}"
+    );
+}
+
+#[test]
+fn test_stats_supplementary_is_not_non_primary() {
+    let (_, stats) = samtools_for_one_record("stats-supp-only", 0x800, "*");
+    assert!(
+        stats.contains("SN\tnon-primary alignments:\t0\n"),
+        "{stats}"
+    );
+    assert!(
+        stats.contains("SN\tsupplementary alignments:\t1\n"),
+        "{stats}"
+    );
 }
