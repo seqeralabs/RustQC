@@ -500,6 +500,15 @@ impl IndexedReader {
                         reader: heads.reader,
                         header: heads.header,
                         iter_builder: |reader, header| -> Result<CramRecordIter> {
+                            // With no unplaced CRAI entry, noodles 0.94 seeks EOF
+                            // and reports a truncated container instead of an empty query.
+                            if reader
+                                .index()
+                                .iter()
+                                .all(|entry| entry.reference_sequence_id().is_some())
+                            {
+                                return Ok(Box::new(std::iter::empty()));
+                            }
                             // The unplaced reads' slice can also hold placed records
                             // (multi-reference slice); keep only those with no reference.
                             let query = reader
@@ -892,5 +901,21 @@ mod tests {
             "each physical record, including repeated names, must be fetched once: {got:?}"
         );
         assert_sweep(&got);
+    }
+    #[test]
+    fn cram_unmapped_sweep_with_no_unplaced_reads_is_empty() {
+        let dir = std::path::Path::new("tests/data/unmapped_sweep");
+        let got = fetch_everything(&dir.join("placed_only.cram"), Some(&dir.join("sweep.fa")));
+        let swept: Vec<_> = got
+            .iter()
+            .filter(|(target, _)| target == "unmapped")
+            .collect();
+        assert!(
+            swept.is_empty(),
+            "no unplaced records should be returned: {got:?}"
+        );
+        let mut names: Vec<_> = got.iter().map(|(_, name)| name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(names, ["r0", "r1", "r2", "r3"]);
     }
 }

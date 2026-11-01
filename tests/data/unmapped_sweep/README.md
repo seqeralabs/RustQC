@@ -21,3 +21,10 @@ samtools view -T sweep.fa same_reference_multi_slice.cram
 ```
 
 The generator reuses the original fixture's encoded slices, updates the second slice's record counter and the container's counts, landmarks, size and CRC. It omits the chr2 container, keeping the existing unplaced container's record counter correct. Samtools 1.22.1 decodes six records: r0, r1, r0, r1, u1, u2. Record-level or read-name deduplication would incorrectly discard two legitimate records.
+
+`placed_only.sam` drops the two unplaced reads from `sweep.sam`. It pins the empty-unplaced-sweep case; regenerate with samtools 1.22.1:
+
+```bash
+samtools view --no-PG -C -T sweep.fa -o placed_only.cram placed_only.sam
+samtools index placed_only.cram
+```
