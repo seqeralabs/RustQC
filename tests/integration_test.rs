@@ -1095,3 +1095,55 @@ fn test_parallel_unmapped_sweep_counts_placed_unmapped_mate_once() {
         let _ = fs::remove_dir_all(root);
     }
 }
+
+/// A CRAM with no unplaced records must succeed on the parallel sweep path too.
+#[test]
+fn test_parallel_cram_with_no_unplaced_reads() {
+    let expected = "\
+4 + 0 in total (QC-passed reads + QC-failed reads)
+4 + 0 primary
+0 + 0 secondary
+0 + 0 supplementary
+0 + 0 duplicates
+0 + 0 primary duplicates
+3 + 0 mapped (75.00% : N/A)
+3 + 0 primary mapped (75.00% : N/A)
+2 + 0 paired in sequencing
+1 + 0 read1
+1 + 0 read2
+0 + 0 properly paired (0.00% : N/A)
+0 + 0 with itself and mate mapped
+1 + 0 singletons (50.00% : N/A)
+0 + 0 with mate mapped to a different chr
+0 + 0 with mate mapped to a different chr (mapQ>=5)
+";
+    let data = Path::new("tests/data/unmapped_sweep");
+    for threads in [1, 4] {
+        let root = unique_test_dir(&format!("cram-no-unplaced-t{threads}"));
+        let gtf_path = root.join("a.gtf");
+        let outdir = root.join("out");
+        fs::write(&gtf_path,
+            "chr1\tt\tgene\t1\t1000\t.\t+\t.\tgene_id \"g1\"; gene_name \"g1\";\n\
+             chr1\tt\texon\t1\t1000\t.\t+\t.\tgene_id \"g1\"; transcript_id \"t1\"; exon_number \"1\";\n"
+        ).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_rustqc"))
+            .args(["rna", "--skip-dup-check", "--threads", &threads.to_string()])
+            .arg("--reference")
+            .arg(data.join("sweep.fa"))
+            .arg("--gtf")
+            .arg(&gtf_path)
+            .arg("--outdir")
+            .arg(&outdir)
+            .arg(data.join("placed_only.cram"))
+            .output()
+            .expect("Failed to execute rustqc");
+        assert!(
+            output.status.success(),
+            "rustqc failed with --threads {threads}:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let flagstat = fs::read_to_string(outdir.join("samtools/placed_only.flagstat")).unwrap();
+        assert_eq!(flagstat, expected, "flagstat with --threads {threads}");
+        fs::remove_dir_all(root).unwrap();
+    }
+}
