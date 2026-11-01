@@ -4,7 +4,7 @@
 use rust_htslib::bam;
 use rust_htslib::bam::header::HeaderRecord;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -219,16 +219,15 @@ fn test_preseq_skipped_status_write_error_is_not_swallowed() {
     fs::remove_dir_all(fixture.root).unwrap();
 }
 
-#[test]
-fn test_preseq_estimable_sample_keeps_numeric_output() {
+fn estimable_fixture() -> Fixture {
     let multiplicities: Vec<_> = [(1, 100), (2, 50), (3, 25), (4, 12), (5, 6), (6, 3), (7, 1)]
         .into_iter()
         .flat_map(|(copies, molecules)| std::iter::repeat_n(copies, molecules))
         .collect();
-    let fixture = Fixture::new(&multiplicities);
-    let output = fixture.run(true, false);
-    assert!(output.status.success(), "{}", messages(&output));
-    let directory = fixture.output_dir(false);
+    Fixture::new(&multiplicities)
+}
+
+fn assert_numeric_curve(directory: &Path) {
     let table = fs::read_to_string(directory.join("sample.lc_extrap.txt")).unwrap();
     assert_eq!(
         table.lines().next(),
@@ -251,6 +250,165 @@ fn test_preseq_estimable_sample_keeps_numeric_output() {
         }
     }
     assert!(positive_prediction, "{table}");
+}
+
+#[test]
+fn test_preseq_estimable_sample_keeps_numeric_output() {
+    let fixture = estimable_fixture();
+    let output = fixture.run(true, false);
+    assert!(output.status.success(), "{}", messages(&output));
+    let directory = fixture.output_dir(false);
+    assert_numeric_curve(&directory);
     assert!(!directory.join("sample.preseq_skipped.txt").exists());
+    fs::remove_dir_all(fixture.root).unwrap();
+}
+
+fn replace_input(target: &Fixture, source: &Fixture) {
+    fs::copy(&source.bam, &target.bam).unwrap();
+    bam::index::build(&target.bam, None, bam::index::Type::Bai, 1).unwrap();
+}
+
+fn write_neighbors(directory: &Path) {
+    fs::write(directory.join("other.lc_extrap.txt"), "other curve\n").unwrap();
+    fs::write(directory.join("other.preseq_skipped.txt"), "other status\n").unwrap();
+}
+
+fn assert_neighbors(directory: &Path) {
+    assert_eq!(
+        fs::read_to_string(directory.join("other.lc_extrap.txt")).unwrap(),
+        "other curve\n"
+    );
+    assert_eq!(
+        fs::read_to_string(directory.join("other.preseq_skipped.txt")).unwrap(),
+        "other status\n"
+    );
+}
+
+#[test]
+fn test_preseq_success_then_skip_removes_only_own_curve() {
+    for flat in [false, true] {
+        let fixture = estimable_fixture();
+        let skipped = Fixture::new(&[1, 1]);
+        let output = fixture.run(true, flat);
+        assert!(output.status.success(), "{}", messages(&output));
+        let directory = fixture.output_dir(flat);
+        assert_numeric_curve(&directory);
+        write_neighbors(&directory);
+        replace_input(&fixture, &skipped);
+        assert_skipped(&fixture, "Too few distinct molecules (2)", flat);
+        assert_neighbors(&directory);
+        fs::remove_dir_all(fixture.root).unwrap();
+        fs::remove_dir_all(skipped.root).unwrap();
+    }
+}
+
+#[test]
+fn test_preseq_skip_then_success_removes_only_own_status() {
+    for flat in [false, true] {
+        let fixture = Fixture::new(&[1, 1]);
+        let estimable = estimable_fixture();
+        assert_skipped(&fixture, "Too few distinct molecules (2)", flat);
+        let directory = fixture.output_dir(flat);
+        write_neighbors(&directory);
+        replace_input(&fixture, &estimable);
+        let output = fixture.run(true, flat);
+        assert!(output.status.success(), "{}", messages(&output));
+        assert_numeric_curve(&directory);
+        assert!(!directory.join("sample.preseq_skipped.txt").exists());
+        assert_neighbors(&directory);
+        fs::remove_dir_all(fixture.root).unwrap();
+        fs::remove_dir_all(estimable.root).unwrap();
+    }
+}
+
+#[test]
+fn test_preseq_stale_curve_removal_error_is_not_swallowed() {
+    for flat in [false, true] {
+        let fixture = Fixture::new(&[1, 1]);
+        let directory = fixture.output_dir(flat);
+        let blocked = directory.join("sample.lc_extrap.txt");
+        fs::create_dir_all(&blocked).unwrap();
+        fs::write(blocked.join("keep"), "do not remove recursively\n").unwrap();
+        let output = fixture.run(true, flat);
+        assert!(!output.status.success(), "{}", messages(&output));
+        assert!(
+            messages(&output).contains("Failed to remove stale preseq output"),
+            "{}",
+            messages(&output)
+        );
+        assert!(directory.join("sample.preseq_skipped.txt").is_file());
+        assert_eq!(
+            fs::read_to_string(blocked.join("keep")).unwrap(),
+            "do not remove recursively\n"
+        );
+        fs::remove_dir_all(fixture.root).unwrap();
+    }
+}
+
+#[test]
+fn test_preseq_stale_status_removal_error_is_not_swallowed() {
+    for flat in [false, true] {
+        let fixture = estimable_fixture();
+        let directory = fixture.output_dir(flat);
+        let blocked = directory.join("sample.preseq_skipped.txt");
+        fs::create_dir_all(&blocked).unwrap();
+        fs::write(blocked.join("keep"), "do not remove recursively\n").unwrap();
+        let output = fixture.run(true, flat);
+        assert!(!output.status.success(), "{}", messages(&output));
+        assert!(
+            messages(&output).contains("Failed to remove stale preseq output"),
+            "{}",
+            messages(&output)
+        );
+        assert_numeric_curve(&directory);
+        assert_eq!(
+            fs::read_to_string(blocked.join("keep")).unwrap(),
+            "do not remove recursively\n"
+        );
+        fs::remove_dir_all(fixture.root).unwrap();
+    }
+}
+
+#[test]
+fn test_preseq_numeric_output_write_error_is_not_swallowed() {
+    let fixture = estimable_fixture();
+    let directory = fixture.output_dir(false);
+    fs::create_dir_all(directory.join("sample.lc_extrap.txt")).unwrap();
+    let output = fixture.run(true, false);
+    assert!(!output.status.success(), "{}", messages(&output));
+    assert!(
+        messages(&output).contains("Failed to create preseq output"),
+        "{}",
+        messages(&output)
+    );
+    assert!(!directory.join("sample.preseq_skipped.txt").exists());
+    fs::remove_dir_all(fixture.root).unwrap();
+}
+
+#[test]
+fn test_preseq_disabled_keeps_existing_outputs() {
+    let fixture = Fixture::new(&[1, 1]);
+    let directory = fixture.output_dir(false);
+    fs::create_dir_all(&directory).unwrap();
+    let curve = directory.join("sample.lc_extrap.txt");
+    let status = directory.join("sample.preseq_skipped.txt");
+    fs::write(&curve, "existing curve\n").unwrap();
+    fs::write(&status, "existing status\n").unwrap();
+    let output = fixture.run(false, false);
+    assert!(output.status.success(), "{}", messages(&output));
+    assert_eq!(fs::read_to_string(curve).unwrap(), "existing curve\n");
+    assert_eq!(fs::read_to_string(status).unwrap(), "existing status\n");
+    fs::remove_dir_all(fixture.root).unwrap();
+}
+
+#[test]
+fn test_preseq_skipped_status_sanitizes_record_delimiters() {
+    let fixture = Fixture::new(&[]);
+    let path = fixture.root.join("skipped.txt");
+    rustqc::rna::preseq::write_skipped_output(&path, "bad\treason\ncontinued\rline").unwrap();
+    assert_eq!(
+        fs::read_to_string(path).unwrap(),
+        "STATUS\tREASON\nskipped\tbad reason continued line\n"
+    );
     fs::remove_dir_all(fixture.root).unwrap();
 }
