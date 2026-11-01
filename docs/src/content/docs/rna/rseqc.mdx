@@ -147,9 +147,15 @@ at the end of the run suggesting the correct value:
 
 </details>
 
-The table compares an all-read RustQC run with upstream `infer_experiment.py`'s
-default sample of 200,000 usable reads. RustQC continues to process all reads
-when the sample-size setting is unset. An explicit
+The difference in this benchmark is caused by a read-sampling mismatch: the upstream
+`infer_experiment.py` defaults to sampling only 200,000 reads. On this 186M-read BAM,
+this early-file subsample draws predominantly from the first few chromosomes, which
+underrepresents loci where transcripts on both strands overlap, causing the
+"failed-to-determine" fraction to appear lower than it truly is. RustQC processes
+all reads when the sample-size setting is unset, giving a more representative
+estimate for this dataset.
+
+An explicit
 `--infer-experiment-sample-size N` or `rna.infer_experiment.sample_size: N` selects
 the first N eligible transcript-overlapping records in input-file order,
 independently for each input and across thread counts. Paired-end records each
@@ -164,10 +170,12 @@ Every Unknown report, including no-data and mixed
 library reports, is exactly `Unknown Data type` followed by a newline, without
 leading blank lines. Frame selection and input success/error policy are unchanged.
 
-Both populations in this particular benchmark suggest a strongly reverse-stranded
-library. Different sample populations can change a downstream strand/QC decision;
-the practical interpretation is not guaranteed to be identical. Pipelines need a
-fixed RustQC artifact and an explicit finite cap to request that sampling policy.
+On this benchmark, both tools correctly identify the library as strongly
+reverse-stranded (antisense ~88-92%), so the practical interpretation is identical
+for this dataset. Different sample populations can change a downstream strand/QC
+decision; this benchmark does not guarantee the same interpretation elsewhere.
+Pipelines need a fixed RustQC artifact and an explicit finite cap to request that
+sampling policy.
 
 ## read_duplication
 
