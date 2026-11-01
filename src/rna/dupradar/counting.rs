@@ -12,7 +12,10 @@
 use crate::gtf::Gene;
 use crate::io::format_count;
 use crate::rna::qualimap::QualimapAccum;
-use crate::rna::rseqc::accumulators::{RseqcAccumulators, RseqcAnnotations, RseqcConfig};
+use crate::rna::rseqc::accumulators::{
+    InferExpAccum, RseqcAccumulators, RseqcAnnotations, RseqcConfig,
+};
+use crate::rna::rseqc::infer_experiment::GeneModel;
 use crate::Strandedness;
 use anyhow::{Context, Result};
 use coitrees::{COITree, Interval, IntervalTree};
@@ -1130,6 +1133,60 @@ fn partition_chromosomes(lengths: &[u64], num_workers: usize) -> Vec<Vec<u32>> {
     batches
 }
 
+/// Collect the first usable reads in file order, independent of chromosome batching.
+fn sample_infer_experiment(
+    bam_path: &str,
+    reference: Option<&str>,
+    tid_to_name: &[String],
+    chrom_mapping: &HashMap<String, String>,
+    chrom_prefix: Option<&str>,
+    model: &GeneModel,
+    config: &RseqcConfig,
+) -> Result<InferExpAccum> {
+    let chromosomes: Vec<String> = tid_to_name
+        .iter()
+        .map(|name| {
+            if let Some(mapped) = chrom_mapping.get(name) {
+                mapped.clone()
+            } else if let Some(prefix) = chrom_prefix {
+                format!("{prefix}{name}")
+            } else {
+                name.clone()
+            }
+        })
+        .collect();
+    let mut bam = bam::Reader::from_path(bam_path).with_context(|| {
+        format!("Failed to open alignment file for infer_experiment sampling: {bam_path}")
+    })?;
+    if let Some(path) = reference {
+        bam.set_reference(path)
+            .with_context(|| format!("Failed to set reference FASTA: {path}"))?;
+    }
+    let limit = config.infer_experiment_sample_size;
+    let mut sampled = 0;
+    let mut accum = InferExpAccum::default();
+    let mut record = bam::Record::new();
+    while sampled < limit {
+        let Some(result) = bam.read(&mut record) else {
+            break;
+        };
+        result.context("Error reading alignment record for infer_experiment sampling")?;
+        let chrom = if record.tid() >= 0 {
+            chromosomes
+                .get(record.tid() as usize)
+                .map(String::as_str)
+                .unwrap_or("")
+        } else {
+            ""
+        };
+        if accum.process_sample_read(&record, chrom, model, config.mapq_cut) {
+            sampled += 1;
+        }
+    }
+    debug!("infer_experiment sampled {sampled} usable reads in file order (cap {limit})");
+    Ok(accum)
+}
+
 ///   an index for `threads > 1`; SAM files always use single-threaded mode)
 /// * `genes` - Gene annotation map from GTF parsing
 /// * `stranded` - Library strandedness (unstranded, forward, or reverse)
@@ -1178,6 +1235,34 @@ pub fn count_reads(
             .collect();
         (names, lengths)
     };
+
+    // Aggregate worker maps cannot recover a global file-order prefix. Sample
+    // explicit caps separately; other analyses retain their normal parallel pass.
+    let mut worker_rseqc_config = rseqc_config.cloned();
+    let sampled_infer_exp = match (
+        rseqc_config,
+        rseqc_annotations.and_then(|annotations| annotations.gene_model),
+    ) {
+        (Some(cfg), Some(model))
+            if cfg.infer_experiment_enabled && cfg.infer_experiment_sample_size != u64::MAX =>
+        {
+            let sampled = sample_infer_experiment(
+                bam_path,
+                reference,
+                &tid_to_name,
+                chrom_mapping,
+                chrom_prefix,
+                model,
+                cfg,
+            )?;
+            if let Some(worker_config) = &mut worker_rseqc_config {
+                worker_config.infer_experiment_enabled = false;
+            }
+            Some(sampled)
+        }
+        _ => None,
+    };
+    let rseqc_config = worker_rseqc_config.as_ref();
 
     if skip_dup_check {
         log::info!("Skipping duplicate-marking verification (--skip-dup-check)");
@@ -1684,6 +1769,10 @@ pub fn count_reads(
             (name, counts)
         })
         .collect();
+
+    if let (Some(accums), Some(infer_exp)) = (&mut merged_rseqc, sampled_infer_exp) {
+        accums.infer_exp = Some(infer_exp);
+    }
 
     Ok(CountResult {
         gene_counts: gene_counts_map,

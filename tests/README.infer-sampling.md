@@ -26,3 +26,18 @@ The default is intentionally unchanged. A production pipeline benefits only
 after using a fixed artifact and requesting the intended finite cap; this PR
 does not change pipeline artifacts, flags or thresholds. Unknown-strand GTF
 eligibility and whole-pipeline equivalence are separate concerns.
+
+The fix collects an explicitly capped prefix in a streaming prepass, then runs
+the normal parallel pipeline with only infer-experiment disabled. Each input
+gets its own counter. The prepass retains one alignment and the small strand
+counters; annotation/reference memory follows the existing backend. If usable
+reads are scarce or the cap exceeds the population, it can add one full scan.
+Unset and maximum caps keep the existing all-read behavior. Explicit zero
+samples no reads. Every Unknown report, including mixed/no-data reports,
+now writes native RSeQC's exact 18-byte line without the previous two leading
+blank lines; a direct writer test covers those cases. Input success/error
+policy and frame selection are unchanged.
+
+Counter-correctness fixes are excluded. In particular, the filtered-read test
+compares complete flagstat bytes to this branch's uncapped baseline rather
+than requiring an unrelated QC-column correction.

@@ -329,7 +329,8 @@ pub struct InferExperimentConfig {
     /// Whether to run infer_experiment analysis. Defaults to true.
     pub enabled: bool,
 
-    /// Maximum number of reads to sample for strandedness inference.
+    /// Maximum number of usable reads to sample for strandedness inference.
+    /// When unset, processes all reads.
     /// Can be overridden by `--infer-experiment-sample-size` CLI flag.
     pub sample_size: Option<u64>,
 }

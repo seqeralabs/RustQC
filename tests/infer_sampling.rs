@@ -210,6 +210,7 @@ fn test_explicit_caps_filtering_and_ambiguous_overlap() {
         &[("chr1", 100_000), ("chr2", 200_000)],
         &rows,
     );
+    let baseline = run(&root, 1, None, None, "", [0.25, 0.5, 0.25]);
     for threads in [1, 2, 4, 8] {
         for (cap, expected) in [
             (1, [1.0, 0.0, 0.0]),
@@ -218,7 +219,10 @@ fn test_explicit_caps_filtering_and_ambiguous_overlap() {
             (10, [0.25, 0.5, 0.25]),
         ] {
             let flagstat = run(&root, threads, Some(cap), None, "", expected);
-            assert!(flagstat.starts_with("9 + 1 in total"));
+            assert_eq!(
+                flagstat, baseline,
+                "sampling must preserve uncapped flagstat"
+            );
         }
     }
     let _ = fs::remove_dir_all(root);

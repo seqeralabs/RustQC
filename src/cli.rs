@@ -185,7 +185,7 @@ pub struct RnaArgs {
     pub verbose: bool,
 
     // ── Tool parameters ─────────────────────────────────────────────────
-    /// infer_experiment: sample size [default: 200000]
+    /// infer_experiment: maximum usable reads [default: all reads]
     #[arg(
         long = "infer-experiment-sample-size",
         value_name = "N",
