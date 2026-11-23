@@ -16,5 +16,6 @@ pub mod junction_annotation;
 pub mod junction_saturation;
 pub mod read_distribution;
 pub mod read_duplication;
+pub mod split_bam;
 pub mod stats;
 pub mod tin;

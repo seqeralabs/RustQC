@@ -50,6 +50,7 @@ It currently includes:
 | junction_saturation | [RSeQC](https://rseqc.sourceforge.net/#junction-saturation-py) `junction_saturation.py` | Splice junction saturation analysis                                   |
 | inner_distance      | [RSeQC](https://rseqc.sourceforge.net/#inner-distance-py) `inner_distance.py`           | Paired-end inner distance distribution                                |
 | TIN                 | [RSeQC](https://rseqc.sourceforge.net/#tin-py) `tin.py`                                 | Transcript Integrity Number                                           |
+| split_bam           | [RSeQC](https://rseqc.sourceforge.net/#split-bam-py) `split_bam.py`                     | BED-region (e.g. rRNA) read classification, needs `--split-bam-bed`   |
 | preseq              | [preseq](http://smithlabresearch.org/software/preseq/) `lc_extrap`                      | Library complexity extrapolation                                      |
 | Qualimap rnaseq     | [Qualimap](http://qualimap.conesalab.org/) `rnaseq`                                     | Gene body coverage, read origin, strand specificity                   |
 | flagstat            | [samtools](http://www.htslib.org/) `flagstat`                                           | Alignment flag summary                                                |

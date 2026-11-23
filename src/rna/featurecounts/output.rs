@@ -361,6 +361,7 @@ mod tests {
             stat_singleton_unmapped_mates: 0,
             stat_total_mapped: 200,
             stat_total_dup: 0,
+            stat_total_multi: 0,
             fc_assigned: 185,
             fc_ambiguous: 5,
             fc_no_features: 10,

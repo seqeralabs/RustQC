@@ -3,8 +3,9 @@
 //! A collection of Rust-based QC tools for bioinformatics.
 //! The `rna` subcommand runs all RNA-Seq QC analyses in a single pass:
 //! dupRadar duplication rate analysis, featureCounts-compatible gene counting,
-//! 8 RSeQC-equivalent tools (bam_stat, infer_experiment, read_duplication,
-//! read_distribution, junction_annotation, junction_saturation, inner_distance, TIN),
+//! 9 RSeQC-equivalent tools (bam_stat, infer_experiment, read_duplication,
+//! read_distribution, junction_annotation, junction_saturation, inner_distance, TIN,
+//! and split_bam when a BED file is given),
 //! preseq library complexity extrapolation, samtools-compatible outputs
 //! (flagstat, idxstats, stats), and Qualimap gene body coverage profiling.
 //! Individual tools can be disabled via the YAML config file.
@@ -114,6 +115,12 @@ fn reconstruct_command_line(args: &cli::RnaArgs) -> String {
     if args.paired {
         parts.push("-p".to_string());
     }
+    if args.count_multi_mapping {
+        parts.push("-M".to_string());
+    }
+    if args.count_multi_overlapping {
+        parts.push("-O".to_string());
+    }
     if args.threads != 1 {
         parts.push(format!("-t {}", args.threads));
     }
@@ -134,6 +141,12 @@ fn reconstruct_command_line(args: &cli::RnaArgs) -> String {
     }
     if args.skip_dup_check {
         parts.push("--skip-dup-check".to_string());
+    }
+    if let Some(ref bed) = args.split_bam_bed {
+        parts.push(format!("--split-bam-bed {}", shell_escape(bed)));
+    }
+    if args.split_bam_write_bams {
+        parts.push("--split-bam-write-bams".to_string());
     }
     parts.join(" ")
 }
@@ -245,6 +258,23 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
     }
     if let Some(seed) = args.junction_saturation_seed {
         config.junction_saturation.seed = Some(seed);
+    }
+
+    // featureCounts -M / -O
+    if args.count_multi_mapping {
+        config.featurecounts.count_multi_mapping = true;
+    }
+    if args.count_multi_overlapping {
+        config.featurecounts.count_multi_overlapping = true;
+    }
+
+    // split_bam: a BED on the CLI enables the tool even if the config disables it
+    if let Some(ref bed) = args.split_bam_bed {
+        config.split_bam.bed = Some(bed.clone());
+        config.split_bam.enabled = true;
+    }
+    if args.split_bam_write_bams {
+        config.split_bam.write_bams = true;
     }
 
     // Warn early if CRAM input is likely but no reference is provided
@@ -471,6 +501,33 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         None
     };
 
+    let split_bam_regions = match config.split_bam.active_bed() {
+        Some(bed) => {
+            ui.detail(&format!("Loading split_bam regions from {}...", bed));
+            let regions = rna::rseqc::split_bam::parse_bed(bed)?;
+            ui.detail(&format!(
+                "Loaded {} BED records ({} blocks on {} chromosomes)",
+                format_count(regions.num_records as u64),
+                format_count(regions.num_blocks as u64),
+                regions.num_chroms(),
+            ));
+            if regions.num_short_records > 0 {
+                ui.warn(&format!(
+                    "split_bam: {} BED record(s) have fewer than 12 columns and are used as \
+                     single blocks (RSeQC split_bam.py requires BED12)",
+                    regions.num_short_records
+                ));
+            }
+            Some(regions)
+        }
+        None => {
+            if config.split_bam.enabled && config.split_bam.write_bams {
+                ui.warn("split_bam: write_bams is set but no BED file was given; skipping");
+            }
+            None
+        }
+    };
+
     let chrom_mapping = config.alignment_to_gtf_mapping();
     let chrom_prefix = config.chromosome_prefix().map(|s| s.to_owned());
 
@@ -568,6 +625,7 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         tin_index: tin_index.as_ref(),
         tin_sample_size,
         tin_min_coverage: config.tin.min_coverage.unwrap_or(10),
+        split_bam_regions: split_bam_regions.as_ref(),
         gtf_path: &args.gtf,
         sample_name_override: effective_sample_name,
     };
@@ -813,6 +871,8 @@ struct SharedParams<'a> {
     tin_sample_size: usize,
     /// Minimum read-start count per transcript to compute TIN.
     tin_min_coverage: u32,
+    /// Parsed split_bam BED regions (`None` when split_bam is not run).
+    split_bam_regions: Option<&'a rna::rseqc::split_bam::SplitBamRegions>,
     /// Path to GTF file (for Qualimap report output).
     gtf_path: &'a str,
 }
@@ -954,6 +1014,37 @@ fn process_single_bam(
     // Track output files for the summary
     let mut written_outputs: Vec<(String, String)> = Vec::new();
 
+    // Reference names + lengths from the alignment header (samtools-style
+    // outputs, junction_annotation, and the split_bam target lookup)
+    let bam_header_refs = {
+        let reader = rust_htslib::bam::Reader::from_path(bam_path)
+            .with_context(|| format!("Failed to open BAM for header: {}", bam_path))?;
+        let header = reader.header();
+        (0..header.target_count())
+            .map(|tid| {
+                let name = String::from_utf8_lossy(header.tid2name(tid)).to_string();
+                let len = header.target_len(tid).unwrap_or(0);
+                (name, len)
+            })
+            .collect::<Vec<(String, u64)>>()
+    };
+
+    // split_bam: map BED chromosomes onto this file's targets (case-insensitive)
+    let split_bam_lookup = params.split_bam_regions.map(|regions| {
+        let names: Vec<&str> = bam_header_refs.iter().map(|(n, _)| n.as_str()).collect();
+        regions.lookup_for_targets(&names)
+    });
+    if let (Some(lookup), Some(regions)) = (&split_bam_lookup, params.split_bam_regions) {
+        if lookup.matched_targets() == 0 {
+            ui.warn(&format!(
+                "split_bam: none of the {} BED chromosomes match a reference name in {} \
+                 (compared case-insensitively); every mapped read will be counted as 'ex'",
+                regions.num_chroms(),
+                bam_path
+            ));
+        }
+    }
+
     // === Build RSeQC config and annotations ===
     let rseqc_config = RseqcConfig {
         mapq_cut: params.mapq_cut,
@@ -988,6 +1079,7 @@ fn process_single_bam(
         junction_saturation_seed: config.junction_saturation.seed.unwrap_or(42),
         preseq_enabled: config.preseq.enabled,
         preseq_max_segment_length: config.preseq.max_segment_length,
+        split_bam_enabled: split_bam_lookup.is_some(),
     };
 
     let rseqc_annotations = RseqcAnnotations {
@@ -997,6 +1089,7 @@ fn process_single_bam(
         exon_bitset: params.exon_bitset,
         transcript_tree: params.transcript_tree,
         tin_index: params.tin_index,
+        split_bam: split_bam_lookup.as_ref(),
     };
 
     let any_rseqc_enabled = rseqc_config.bam_stat_enabled
@@ -1007,7 +1100,8 @@ fn process_single_bam(
         || rseqc_config.junction_saturation_enabled
         || rseqc_config.inner_distance_enabled
         || rseqc_config.preseq_enabled
-        || rseqc_config.tin_enabled;
+        || rseqc_config.tin_enabled
+        || rseqc_config.split_bam_enabled;
 
     // === Build Qualimap exon index (if enabled) ===
     let qualimap_index = if params.config.qualimap.enabled {
@@ -1043,6 +1137,10 @@ fn process_single_bam(
             None
         },
         qualimap_index.as_ref(),
+        rna::dupradar::counting::FeatureCountsOptions {
+            count_multi_mapping: config.featurecounts.count_multi_mapping,
+            count_multi_overlapping: config.featurecounts.count_multi_overlapping,
+        },
         Some(&pb),
     )?;
     let count_duration = count_start.elapsed();
@@ -1098,8 +1196,8 @@ fn process_single_bam(
             ),
             (
                 "Multimappers:",
-                format_count(count_result.fc_multimapping),
-                format_pct(count_result.fc_multimapping, count_result.stat_total_reads),
+                format_count(count_result.stat_total_multi),
+                format_pct(count_result.stat_total_multi, count_result.stat_total_reads),
             ),
         ],
     );
@@ -1426,25 +1524,13 @@ fn process_single_bam(
         ui.detail("No RSeQC tools enabled, skipping");
         RseqcAccumulators::empty()
     });
-    // Extract BAM header info (reference names + lengths) for samtools-compatible outputs
-    let bam_header_refs = {
-        let reader = rust_htslib::bam::Reader::from_path(bam_path)
-            .with_context(|| format!("Failed to open BAM for header: {}", bam_path))?;
-        let header = reader.header();
-        (0..header.target_count())
-            .map(|tid| {
-                let name = String::from_utf8_lossy(header.tid2name(tid)).to_string();
-                let len = header.target_len(tid).unwrap_or(0);
-                (name, len)
-            })
-            .collect::<Vec<(String, u64)>>()
-    };
     let rseqc_outputs = write_rseqc_outputs(
         bam_path,
         &sample_name,
         params,
         rseqc_accums,
         &bam_header_refs,
+        threads,
     )?;
     written_outputs.extend(rseqc_outputs.written);
 
@@ -1460,7 +1546,7 @@ fn process_single_bam(
         no_features: count_result.stat_no_features,
         ambiguous: count_result.stat_ambiguous,
         duplicates: total_dup,
-        multimappers: count_result.fc_multimapping,
+        multimappers: count_result.stat_total_multi,
         dupradar_intercept,
         dupradar_slope,
         dupradar_total_genes,
@@ -1495,6 +1581,7 @@ fn write_rseqc_outputs(
     params: &SharedParams,
     accums: RseqcAccumulators,
     bam_header_refs: &[(String, u64)],
+    threads: usize,
 ) -> Result<RseqcOutputs> {
     let ui = params.ui;
     let outdir = params.outdir;
@@ -1598,7 +1685,8 @@ fn write_rseqc_outputs(
             || accums.junc_annot.is_some()
             || accums.junc_sat.is_some()
             || accums.inner_dist.is_some()
-            || accums.tin.is_some();
+            || accums.tin.is_some()
+            || accums.split_bam.is_some();
         if has_rseqc {
             ui.output_group("RSeQC");
         }
@@ -1827,6 +1915,53 @@ fn write_rseqc_outputs(
             format_count(results.len() as u64)
         ));
         written.push(("TIN".into(), p));
+    }
+
+    // --- split_bam (BED region classification, e.g. rRNA) ---
+    if let (Some(accum), Some(regions)) = (accums.split_bam, params.split_bam_regions) {
+        let split_dir = if flat {
+            outdir.to_path_buf()
+        } else {
+            outdir.join("rseqc").join("split_bam")
+        };
+        std::fs::create_dir_all(&split_dir)?;
+        let counts = accum.into_result();
+        if params.config.split_bam.write_bams {
+            let bam_counts = rna::rseqc::split_bam::write_split_bams(
+                bam_path,
+                params.reference,
+                regions,
+                &split_dir.join(sample_name),
+                threads,
+            )?;
+            ensure!(
+                bam_counts == counts,
+                "split_bam: BAM-writing pass counts {:?} differ from single-pass counts {:?}",
+                bam_counts,
+                counts
+            );
+        }
+        let output_path = split_dir.join(format!("{}.split_bam.txt", sample_name));
+        rna::rseqc::split_bam::write_split_bam_stats(&counts, sample_name, &output_path)?;
+        let p = output_path.display().to_string();
+        ui.output_item("split_bam", &p);
+        ui.output_detail(&format!(
+            "{} in {}, {} ex, {} junk of {} records",
+            format_count(counts.in_count),
+            format_pct(counts.in_count, counts.total),
+            format_count(counts.ex_count),
+            format_count(counts.junk_count),
+            format_count(counts.total),
+        ));
+        written.push(("split_bam".into(), p));
+        if params.config.split_bam.write_bams {
+            for class in ["in", "ex", "junk"] {
+                let bam_out = split_dir.join(format!("{}.{}.bam", sample_name, class));
+                let p = bam_out.display().to_string();
+                ui.output_item(&format!("split_bam .{class}.bam"), &p);
+                written.push(("split_bam".into(), p));
+            }
+        }
     }
 
     // --- preseq (library complexity) ---

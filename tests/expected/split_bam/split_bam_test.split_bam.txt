@@ -1,0 +1,4 @@
+Total records:                                         33
+split_bam_test.in.bam (Alignments consumed by input gene list):15
+split_bam_test.ex.bam (Alignments not consumed by input gene list):11
+split_bam_test.junk.bam (qcfailed, unmapped reads):    7

@@ -13,12 +13,13 @@ RSeQC is a Python package providing a suite of quality control tools for RNA-Seq
 [Documentation](https://rseqc.sourceforge.net/) | [Source code](https://github.com/MonashBioinformaticsPlatform/RSeQC)
 </Aside>
 
-RustQC reimplements eight tools from the [RSeQC](https://rseqc.sourceforge.net/)
-package (including TIN). Each tool produces output files that match the format
+RustQC reimplements nine tools from the [RSeQC](https://rseqc.sourceforge.net/)
+package (including TIN and split_bam). Each tool produces output files that match the format
 and content of the original Python implementation, plus **native PNG and SVG
 plots** generated directly -- no R scripts required.
 
-All RSeQC tools run automatically as part of the `rustqc rna` command and use
+All RSeQC tools except split_bam (which needs a BED file) run automatically
+as part of the `rustqc rna` command and use
 the input filename stem as a prefix for output files. Output files are organized
 into per-tool subdirectories under `rseqc/`. For example,
 `rustqc rna sample.bam --gtf genes.gtf -o results/` produces
@@ -608,6 +609,103 @@ show larger differences due to the coverage counting approach described above.
 RustQC produces gene-level TIN scores (one row per gene, using the longest
 transcript as representative), while RSeQC's `tin.py` produces transcript-level
 scores. Both formats are compatible with MultiQC.
+
+## split_bam
+
+RustQC reimplements [RSeQC's `split_bam.py`](https://rseqc.sourceforge.net/#split-bam-py),
+which classifies every alignment against a BED file of regions. Its main use is
+**rRNA quantification** with an rRNA BED file (for example RSeQC's
+[`hg38_rRNA.bed`](https://sourceforge.net/projects/rseqc/files/BED/Human_Homo_sapiens/)).
+This counts rRNA that the GTF/biotype route cannot see; see
+[why biotype rRNA can read near zero](../featurecounts/#rrna-and-biotype-counts).
+
+Unlike the other RSeQC tools, split_bam needs an extra input, so it only runs
+when a BED file is given:
+
+```bash
+rustqc rna sample.markdup.bam --gtf genes.gtf --split-bam-bed hg38_rRNA.bed
+```
+
+Each alignment record falls into exactly one category:
+
+| Category | Records                                                                    |
+| -------- | -------------------------------------------------------------------------- |
+| `in`     | Mapped, QC-passing records whose start (or mate's start) is in a region    |
+| `ex`     | Mapped, QC-passing records outside every region                            |
+| `junk`   | QC-failed (`0x200`) or unmapped (`0x4`) records                            |
+
+Classification follows `split_bam.py` exactly:
+
+- The BED file is read as **BED12**, and only the exon blocks count. A read
+  starting inside an intron of a BED12 record is `ex`.
+- A record is `in` when its own 0-based start lies in a block on its
+  chromosome. If the mate-unmapped flag (`0x8`) is not set, the mate's start is
+  also tested, **against the read's own chromosome** even when the mate maps
+  elsewhere.
+- Only the start position is tested, not the whole alignment.
+- No other flags are filtered. Secondary, supplementary and duplicate
+  alignments are all classified, so multi-mapping rRNA reads count once per
+  reported alignment.
+- Chromosome names are compared case-insensitively against the **alignment
+  file's** reference names. The `chromosome_prefix` / `chromosome_mapping`
+  settings (which map alignment names to GTF names) do not apply.
+
+RustQC warns when no BED chromosome matches any reference name in the
+alignment file (for example a `chr6` BED against an Ensembl `6` BAM), a mismatch
+that `split_bam.py` silently reports as 0% `in`.
+
+| File                       | Description                                   |
+| -------------------------- | --------------------------------------------- |
+| `{stem}.split_bam.txt`     | Record counts, identical to `split_bam.py`'s stdout |
+| `{stem}.in.bam`            | Records in the regions (optional)             |
+| `{stem}.ex.bam`            | Records outside the regions (optional)        |
+| `{stem}.junk.bam`          | QC-failed and unmapped records (optional)     |
+
+The summary file is byte-for-byte what `split_bam.py -o {stem}` prints. For
+the test fixture (`tests/expected/split_bam/split_bam_test.split_bam.txt`):
+
+```text
+Total records:                                         33
+split_bam_test.in.bam (Alignments consumed by input gene list):15
+split_bam_test.ex.bam (Alignments not consumed by input gene list):11
+split_bam_test.junk.bam (qcfailed, unmapped reads):    7
+```
+
+### Writing the split BAM files
+
+The counts come from the single pass. Writing the `.in.bam`, `.ex.bam` and
+`.junk.bam` files is optional because it needs one extra sequential read of the
+alignment file:
+
+```bash
+rustqc rna sample.markdup.bam --gtf genes.gtf \
+  --split-bam-bed hg38_rRNA.bed --split-bam-write-bams
+```
+
+The BAM files keep the input header unchanged and the records in input order,
+matching `split_bam.py`.
+
+### Configuration
+
+split_bam can also be enabled from the config file. See the
+[Configuration](../usage/configuration/#split_bam) page.
+
+### Compatibility
+
+Validated against RSeQC 5.0.4 `split_bam.py`:
+
+- **Test fixture** (`tests/data/split_bam_test.*`): 33 records covering every
+  classification branch, with a BED12 that has multi-block, zero-length,
+  overlapping, truncated-block and mixed-case entries. Counts and all three
+  BAM files are identical, record for record.
+- **Small dataset** (~52K reads, chr6 subset): with a 4,000-record BED12
+  built around the reads, the counts (32,150 `in` / 20,689 `ex`) and all three
+  BAM files are identical to `split_bam.py` on both the single-threaded and
+  the parallel code paths.
+
+BED inputs that `split_bam.py` crashes on are accepted. Blank, `#`, `track` and
+`browser` lines are skipped, and BED3–BED11 records are used as a single
+`chromStart`–`chromEnd` block, with a warning.
 
 ## Compatibility with RSeQC
 
