@@ -101,6 +101,11 @@ pub fn classify_junction(
 pub struct KnownJunctionSet {
     /// Junction keys in `"CHROM:start-end"` format (uppercased chromosome).
     pub junctions: HashSet<String>,
+    /// Uppercased names of chromosomes with at least one annotated transcript.
+    ///
+    /// RSeQC's junction_saturation ignores reads on chromosomes that are not in
+    /// its BED gene model, which has one line per transcript.
+    pub chroms: HashSet<String>,
 }
 
 // ===================================================================
@@ -166,11 +171,12 @@ pub fn build_known_junctions_from_genes(genes: &IndexMap<String, Gene>) -> Known
 
     for gene in genes.values() {
         for tx in &gene.transcripts {
-            if tx.exons.len() <= 1 {
+            if tx.exons.is_empty() {
                 continue;
             }
 
             let chrom = tx.chrom.to_uppercase();
+            result.chroms.insert(chrom.clone());
 
             // Same coordinate conversion as build_reference_junctions_from_genes
             for i in 0..tx.exons.len() - 1 {
@@ -367,6 +373,8 @@ mod tests {
 
         let known = build_known_junctions_from_genes(&genes);
         assert!(known.junctions.is_empty());
+        // The chromosome still counts as annotated (RSeQC's BED has the transcript).
+        assert!(known.chroms.contains("CHR1"));
     }
 
     #[test]

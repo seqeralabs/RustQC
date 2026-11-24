@@ -8,5 +8,6 @@ pub mod cpp_rng;
 pub mod dupradar;
 pub mod featurecounts;
 pub mod preseq;
+pub mod py_random;
 pub mod qualimap;
 pub mod rseqc;

@@ -429,8 +429,32 @@ At 100% sampling depth:
 
 </details>
 
-Intermediate sampling percentages show minor stochastic variation from random
-subsampling, as expected.
+### Reproducing RSeQC's random sampling
+
+RSeQC shuffles the splice-junction observations with Python's `random.shuffle()`
+before sampling, and does not seed it, so its intermediate points change from run
+to run. RustQC uses an exact reimplementation of CPython's `random` module
+(MT19937 seeded as `random.seed(n)` does, and `shuffle()` built on
+`getrandbits()` with rejection sampling). It shuffles the same observation list
+(BAM record order, then intron order within each read) and uses RSeQC's sampling
+windows and floating-point index arithmetic. So with `--junction-saturation-seed N`,
+the R script is identical to that of `junction_saturation.py` run after
+`random.seed(N)`, at every sampling percentage, with any `--threads` value.
+
+`junction_saturation.py` has no seed option, but it can be seeded from a wrapper:
+
+```bash
+python -c "import random, runpy, sys; random.seed(1); \
+  sys.argv = ['junction_saturation.py', '-i', 'sample.bam', '-r', 'genes.bed', '-o', 'sample']; \
+  runpy.run_path('/path/to/junction_saturation.py', run_name='__main__')"
+```
+
+This was checked on the small benchmark dataset with RSeQC 5.0.4 (Python 3.12)
+for several seeds, thread counts and non-default sampling parameters. Without a
+seeded upstream run, only the 100% point is comparable, since the intermediate
+points depend on the random draw.
+
+As in RSeQC, reads on chromosomes without any annotated transcript are ignored.
 
 ## inner_distance
 

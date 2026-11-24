@@ -221,7 +221,7 @@ pub struct RnaArgs {
     )]
     pub min_intron: Option<u64>,
 
-    /// junction_saturation: random seed for reproducible results
+    /// junction_saturation: random seed (same stream as Python's random.seed(N) in RSeQC) [default: 42]
     #[arg(
         long = "junction-saturation-seed",
         value_name = "N",

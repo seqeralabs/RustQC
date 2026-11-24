@@ -64,9 +64,10 @@ src/
   io.rs             — Shared I/O utilities (gzip-transparent file reading)
   gtf.rs            — GTF annotation file parser (with configurable attribute extraction)
   rna/
-    mod.rs          — Re-exports all submodules (dupradar, featurecounts, rseqc, bam_flags, cpp_rng, preseq, qualimap)
+    mod.rs          — Re-exports all submodules (dupradar, featurecounts, rseqc, bam_flags, cpp_rng, py_random, preseq, qualimap)
     bam_flags.rs    — BAM flag constants
     cpp_rng.rs      — C++ RNG FFI shim for preseq bootstrap reproducibility
+    py_random.rs    — CPython `random` emulation for junction_saturation reproducibility
     dupradar/
       mod.rs        — Re-exports counting, dupmatrix, fitting, plots
       counting.rs   — BAM read counting engine (largest module)

@@ -472,6 +472,8 @@ pub struct JunctionSaturationConfig {
 
     /// Random seed for the observation shuffle in saturation sampling.
     /// When set via `--junction-saturation-seed`, replaces the default hard-coded seed (42).
+    /// The shuffle reproduces CPython's `random.seed(seed); random.shuffle(...)`,
+    /// so RSeQC run with the same Python seed gives identical output.
     pub seed: Option<u64>,
 }
 
