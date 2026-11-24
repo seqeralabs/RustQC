@@ -26,7 +26,9 @@ const HIGH_TIER_COUNT: usize = 500;
 /// Number of transcripts for the "low" expression tier.
 const LOW_TIER_COUNT: usize = 500;
 
-/// Number of top transcripts used for 5'-3' bias calculation.
+/// Number of top transcripts used for 5'-3' bias calculation, as Qualimap
+/// prints it. Its selection code actually keeps the top 1001 (see
+/// [`compute_bias`]).
 const NUM_TRANSCRIPTS_FOR_BIAS: usize = 1000;
 
 /// Number of bases at 5'/3' ends used for bias calculation.
@@ -154,121 +156,137 @@ fn compute_coverage_profile(entries: &[&TranscriptCoverageEntry]) -> [f64; NUM_B
 
 /// Compute 5'-3' bias values from per-transcript coverage.
 ///
-/// For each qualifying transcript (length >= 500, mean >= 1.0):
-/// - Compute mean coverage of first `NUM_PRIME_BASES` bases (5' end)
-/// - Compute mean coverage of last `NUM_PRIME_BASES` bases (3' end)
-/// - Compute mean coverage of entire transcript
-/// - 5' bias = 5' mean / whole mean
-/// - 3' bias = 3' mean / whole mean
-/// - 5'-3' bias = 5' mean / 3' mean
+/// Follows Qualimap's `TranscriptDataHandler.calculateCoverageBias()` and
+/// `pickTranscripts()` (themselves ported from Picard's `RnaMetricsCollector`):
 ///
-/// For negative-strand transcripts, the coverage array is reversed before
-/// computing 5'/3' regions.
-///
-/// Returns (5' bias, 3' bias, 5'-3' bias) as medians across all qualifying
-/// transcripts.
-fn compute_bias(entries: &[TranscriptCoverageEntry]) -> (f64, f64, f64) {
+/// 1. Per gene, pick the transcript with the highest mean coverage among
+///    those at least 500 bp long with mean coverage >= 1. Transcripts are
+///    visited in Java `HashMap` order (`order`) and only a strictly higher
+///    mean replaces the current best, so on ties the first one visited wins.
+/// 2. Keep every picked transcript whose mean is at least the 1001st highest
+///    mean (`coverages[max(0, n - 1001)]` in the sorted means), so up to 1001
+///    transcripts plus ties, not 1000.
+/// 3. For each, with the coverage reversed for minus-strand genes:
+///    5' bias = mean(first 100 bases) / mean, 3' bias = mean(last 100) / mean,
+///    5'-3' bias = mean(first 100) / mean(last 100). No value is filtered:
+///    a transcript with no coverage in either end gives 0/0 = NaN.
+/// 4. Report `StatUtils.percentile(values, 50)` of each list (Commons Math
+///    2.0, see [`commons_math_median`]).
+fn compute_bias(entries: &[TranscriptCoverageEntry], order: &[usize]) -> (f64, f64, f64) {
     use std::collections::HashMap;
 
-    // Step 1: Pick best transcript per gene (highest mean coverage).
-    // Qualimap selects one transcript per gene, then filters by length >= 500
-    // and mean >= 1.0, then takes the top 1000 by mean coverage.
-    // Java qualimap uses strict > with HashMap iteration order (effectively
-    // non-deterministic across JVM versions). We use >= so that when two
-    // transcripts tie, the later one in GTF order wins. This is deterministic
-    // within RustQC and closer to HashMap's overwrite-on-put semantics.
-    let mut best_per_gene: HashMap<u32, &TranscriptCoverageEntry> = HashMap::new();
-    for entry in entries {
+    // Step 1: best transcript per gene.
+    let mut best_per_gene: HashMap<u32, usize> = HashMap::new();
+    for &idx in order {
+        let entry = &entries[idx];
         if entry.coverage.len() < MIN_TRANSCRIPT_LENGTH_FOR_BIAS || entry.mean_coverage < 1.0 {
             continue;
         }
-        let gene = entry.gene_idx;
-        let dominated = match best_per_gene.get(&gene) {
+        let better = match best_per_gene.get(&entry.gene_idx) {
             None => true,
-            Some(best) => entry.mean_coverage >= best.mean_coverage,
+            Some(&best) => entry.mean_coverage > entries[best].mean_coverage,
         };
-        if dominated {
-            best_per_gene.insert(gene, entry);
+        if better {
+            best_per_gene.insert(entry.gene_idx, idx);
         }
     }
-
-    // Collect qualifying transcripts and sort by mean coverage descending
-    let mut qualifying: Vec<(f64, &TranscriptCoverageEntry)> = best_per_gene
-        .values()
-        .map(|e| (e.mean_coverage, *e))
-        .collect();
-
-    if qualifying.is_empty() {
+    if best_per_gene.is_empty() {
         return (f64::NAN, f64::NAN, f64::NAN);
     }
 
-    // Sort by mean coverage descending, take top N
-    qualifying.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    qualifying.truncate(NUM_TRANSCRIPTS_FOR_BIAS);
+    // Step 2: keep transcripts at or above the 1001st best mean coverage.
+    let mut means: Vec<f64> = best_per_gene
+        .values()
+        .map(|&i| entries[i].mean_coverage)
+        .collect();
+    means.sort_by(java_double_cmp);
+    let min_mean = means[means.len().saturating_sub(NUM_TRANSCRIPTS_FOR_BIAS + 1)];
 
-    let mut five_prime_biases = Vec::with_capacity(qualifying.len());
-    let mut three_prime_biases = Vec::with_capacity(qualifying.len());
-    let mut five_three_biases = Vec::with_capacity(qualifying.len());
+    let mut five_prime_biases = Vec::new();
+    let mut three_prime_biases = Vec::new();
+    let mut five_three_biases = Vec::new();
 
-    for (_, entry) in &qualifying {
-        let cov = &entry.coverage;
-        let len = cov.len();
-        if len < NUM_PRIME_BASES {
+    for &idx in best_per_gene.values() {
+        let entry = &entries[idx];
+        if entry.mean_coverage < min_mean {
             continue;
         }
-
-        // For negative strand, reverse the array conceptually
-        let (five_prime_sum, three_prime_sum, whole_sum) = if entry.strand == '-' {
-            // 5' end is at the END of the array for negative strand
-            let five_sum: f64 = cov[len - NUM_PRIME_BASES..].iter().map(|&v| v as f64).sum();
-            let three_sum: f64 = cov[..NUM_PRIME_BASES].iter().map(|&v| v as f64).sum();
-            let whole_sum: f64 = cov.iter().map(|&v| v as f64).sum();
-            (five_sum, three_sum, whole_sum)
-        } else {
-            let five_sum: f64 = cov[..NUM_PRIME_BASES].iter().map(|&v| v as f64).sum();
-            let three_sum: f64 = cov[len - NUM_PRIME_BASES..].iter().map(|&v| v as f64).sum();
-            let whole_sum: f64 = cov.iter().map(|&v| v as f64).sum();
-            (five_sum, three_sum, whole_sum)
+        let cov = &entry.coverage;
+        let len = cov.len();
+        // Picard's MathUtil.mean: sequential sum / count. For minus-strand
+        // genes the array is reversed, so the 5' end is at the end.
+        let mean_of = |range: std::ops::Range<usize>| -> f64 {
+            let n = range.len() as f64;
+            range.map(|i| cov[i] as f64).sum::<f64>() / n
         };
-
-        let five_mean = five_prime_sum / NUM_PRIME_BASES as f64;
-        let three_mean = three_prime_sum / NUM_PRIME_BASES as f64;
-        let whole_mean = whole_sum / len as f64;
+        let (five_mean, three_mean) = if entry.strand == '-' {
+            (
+                mean_of(len - NUM_PRIME_BASES..len),
+                mean_of(0..NUM_PRIME_BASES),
+            )
+        } else {
+            (
+                mean_of(0..NUM_PRIME_BASES),
+                mean_of(len - NUM_PRIME_BASES..len),
+            )
+        };
+        let whole_mean = mean_of(0..len);
 
         five_prime_biases.push(five_mean / whole_mean);
         three_prime_biases.push(three_mean / whole_mean);
-        // The 5'/3' ratio can be Infinity or NaN when three_mean == 0.
-        // Filter NaN values only (not Infinity) to match upstream qualimap
-        // behavior — Java's StatUtils.percentile handles Infinity correctly
-        // via Arrays.sort but NaN would produce meaningless results.
-        let ratio = five_mean / three_mean;
-        if !ratio.is_nan() {
-            five_three_biases.push(ratio);
-        }
+        five_three_biases.push(five_mean / three_mean);
     }
 
-    let five = median(&mut five_prime_biases);
-    let three = median(&mut three_prime_biases);
-    let five_three = median(&mut five_three_biases);
+    debug!(
+        "Qualimap 5'-3' bias: {} transcripts, {} with no coverage at either end (NaN)",
+        five_three_biases.len(),
+        five_three_biases.iter().filter(|v| v.is_nan()).count()
+    );
 
-    (five, three, five_three)
+    (
+        commons_math_median(&mut five_prime_biases),
+        commons_math_median(&mut three_prime_biases),
+        commons_math_median(&mut five_three_biases),
+    )
 }
 
-/// Compute the median of a slice of f64 values.
+/// Order doubles as Java's `Arrays.sort(double[])` does: NaN sorts after
+/// +Infinity (whatever its sign bit) and -0.0 before 0.0.
+fn java_double_cmp(a: &f64, b: &f64) -> std::cmp::Ordering {
+    match (a.is_nan(), b.is_nan()) {
+        (false, false) => a.total_cmp(b),
+        (a_nan, b_nan) => a_nan.cmp(&b_nan),
+    }
+}
+
+/// Commons Math 2.0 `StatUtils.percentile(values, 50)`, as Qualimap uses it.
 ///
-/// Qualimap uses Apache Commons Math 2.0 `StatUtils.percentile(array, 50)`,
-/// which filters NaN values and computes a standard median.
-fn median(values: &mut [f64]) -> f64 {
-    if values.is_empty() {
-        return f64::NAN;
+/// The values are sorted with `Arrays.sort` (NaN last, not removed), then
+/// `pos = p * (n + 1) / 100` is interpolated between its neighbours as
+/// `lower + (pos - floor(pos)) * (upper - lower)`.
+fn commons_math_median(values: &mut [f64]) -> f64 {
+    const P: f64 = 50.0;
+    let length = values.len();
+    match length {
+        0 => return f64::NAN,
+        1 => return values[0],
+        _ => {}
     }
-    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let n = values.len();
-    if n.is_multiple_of(2) {
-        (values[n / 2 - 1] + values[n / 2]) / 2.0
-    } else {
-        values[n / 2]
+    let n = length as f64;
+    let pos = P * (n + 1.0) / 100.0;
+    let fpos = pos.floor();
+    let int_pos = fpos as usize;
+    let dif = pos - fpos;
+    values.sort_by(java_double_cmp);
+    if pos < 1.0 {
+        return values[0];
     }
+    if pos >= n {
+        return values[length - 1];
+    }
+    let lower = values[int_pos - 1];
+    let upper = values[int_pos];
+    lower + dif * (upper - lower)
 }
 
 // ============================= Coverage Histogram ==============================
@@ -434,7 +452,7 @@ pub fn write_qualimap_results(
     let high_profile = compute_coverage_profile(&high_entries);
 
     // --- Compute bias ---
-    let (five_bias, three_bias, five_three_bias) = compute_bias(&entries);
+    let (five_bias, three_bias, five_three_bias) = compute_bias(&entries, &java_ordered_indices);
 
     // --- Compute mean coverage histogram ---
     let coverage_histogram = compute_mean_coverage_histogram(&entries);
@@ -965,10 +983,20 @@ mod tests {
     }
 
     #[test]
-    fn test_median() {
-        assert_eq!(median(&mut [1.0, 3.0, 2.0]), 2.0);
-        assert_eq!(median(&mut [1.0, 2.0, 3.0, 4.0]), 2.5);
-        assert!(median(&mut []).is_nan());
+    fn test_commons_math_median() {
+        assert_eq!(commons_math_median(&mut [1.0, 3.0, 2.0]), 2.0);
+        assert_eq!(commons_math_median(&mut [1.0, 2.0, 3.0, 4.0]), 2.5);
+        assert_eq!(commons_math_median(&mut [7.0]), 7.0);
+        assert!(commons_math_median(&mut []).is_nan());
+        // NaN is kept and sorts last (whatever its sign), like Java's
+        // Arrays.sort, which moves the median up; +Infinity sorts before NaN.
+        assert_eq!(commons_math_median(&mut [f64::NAN, 1.0, 2.0, 3.0]), 2.5);
+        assert_eq!(
+            commons_math_median(&mut [-f64::NAN, f64::INFINITY, 1.0, 2.0]),
+            f64::INFINITY
+        );
+        // `lower + 0 * (NaN - lower)` is NaN, as in Java.
+        assert!(commons_math_median(&mut [f64::NAN, 1.0, 2.0]).is_nan());
     }
 
     /// Helper: build a single-transcript slice for compute_coverage_profile.

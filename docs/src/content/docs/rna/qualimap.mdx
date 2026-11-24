@@ -146,11 +146,18 @@ Coverage bias metrics computed from the gene body coverage profile:
      5'-3' bias = 1.11
 ```
 
-| Metric     | Description                                                                             |
-| ---------- | --------------------------------------------------------------------------------------- |
-| 5' bias    | Ratio of median coverage in the 5' region (first 100bp) to the median of the middle 80% |
-| 3' bias    | Ratio of median coverage in the 3' region (last 100bp) to the median of the middle 80%  |
-| 5'-3' bias | Ratio of 5' median to 3' median                                                         |
+| Metric     | Description                                                                         |
+| ---------- | ----------------------------------------------------------------------------------- |
+| 5' bias    | Median over transcripts of mean coverage of the first 100 bases / mean coverage    |
+| 3' bias    | Median over transcripts of mean coverage of the last 100 bases / mean coverage     |
+| 5'-3' bias | Median over transcripts of mean coverage of the first 100 / of the last 100 bases  |
+
+As in Qualimap, the transcripts are the best-covered transcript of each gene (at
+least 500 bp long, mean coverage at least 1), limited to those at or above the
+1001st highest mean coverage. The medians are Commons Math 2.0 percentiles: a
+transcript with no coverage at either end gives a 5'/3' ratio of NaN, which is
+kept and sorted last, so it raises the 5'-3' bias median rather than being
+dropped.
 
 Bias values close to 1.0 indicate uniform coverage. Values significantly above
 1.0 for 5' bias or below 1.0 for 3' bias suggest degradation or protocol issues.
@@ -345,11 +352,10 @@ Both tools were run on the same BAM file with matching parameters
 are from the AWS benchmark run (2026-03-09).
 
 <Aside type="tip" title="Deterministic output">
-Qualimap uses `HashMap` internally, whose iteration order
-is not guaranteed across JVM versions. This means bias metrics (especially
-5'-3' bias) can vary slightly between runs or environments in the Java
-version. RustQC avoids this by using a stable tie-breaking rule when
-multiple transcripts of the same gene have identical mean coverage.
+Qualimap uses `HashMap` internally. When several transcripts of a gene have
+the same mean coverage, the one it visits first is used for the bias metrics.
+RustQC reproduces Java's `HashMap` iteration order for these ties, so its output
+does not depend on thread count or run.
 </Aside>
 
 <details>
@@ -384,10 +390,10 @@ multiple transcripts of the same gene have identical mean coverage.
 | ---------- | --------------- | ------ | -------- |
 | 5' bias    | 0.71            | 0.71   | Yes      |
 | 3' bias    | 0.57            | 0.57   | Yes      |
-| 5'-3' bias | 1.30            | 1.19   | Minor diff |
+| 5'-3' bias | 1.3             | 1.3    | Yes      |
 
-The 5'-3' bias shows a minor difference (1.30 vs 1.19) on this small dataset.
-All other values are identical.
+All values are identical (`rnaseq_qc_results.txt` matches apart from the input
+paths).
 
 </details>
 
