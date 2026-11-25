@@ -208,6 +208,8 @@ RustQC's read counting uses the same algorithm as Subread featureCounts:
 - Strand awareness: configurable via the `-s` / `--stranded` flag
 - Multi-mapping: tracked separately for unique and multi-mapper columns
 
+One known gap: when a fragment has supplementary records in the order R2, other, R1, R1-supplementary, Rsubread pairs a record with the one just before it, so R1 pairs with its supplementary record. RustQC pairs R2 with R1 instead. Each such fragment can then shift that gene's counts in dupRadar's duplication matrix by one. The featureCounts counts and summary are unaffected. STAR output and the nf-core test data contain no supplementary records, so this does not occur there.
+
 <details>
 <summary>Assignment statistics - small dataset (test, ~52K reads)</summary>
 
