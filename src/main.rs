@@ -76,6 +76,8 @@ fn main() -> Result<()> {
     let verbosity = match &cli.command {
         cli::Commands::Rna(args) if args.quiet => Verbosity::Quiet,
         cli::Commands::Rna(args) if args.verbose => Verbosity::Verbose,
+        cli::Commands::Bamqc(args) if args.quiet => Verbosity::Quiet,
+        cli::Commands::Bamqc(args) if args.verbose => Verbosity::Verbose,
         _ => Verbosity::Normal,
     };
 
@@ -94,7 +96,86 @@ fn main() -> Result<()> {
 
     match cli.command {
         cli::Commands::Rna(args) => run_rna(args, &ui),
+        cli::Commands::Bamqc(args) => run_bamqc(args, &ui),
     }
+}
+
+/// Run the `bamqc` subcommand: generic BAM/CRAM QC in a single streaming pass.
+///
+/// # Arguments
+/// * `args` - Parsed CLI arguments
+/// * `ui` - Terminal UI handle
+fn run_bamqc(args: cli::BamqcArgs, ui: &Ui) -> Result<()> {
+    use rustqc::bamqc;
+
+    let start = Instant::now();
+    let sample_name = args.sample_name.clone().unwrap_or_else(|| {
+        Path::new(&args.input)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("sample")
+            .to_string()
+    });
+
+    ui.blank();
+    ui.step(&format!("Processing {}", args.input));
+
+    let mut reader = rust_htslib::bam::Reader::from_path(&args.input)
+        .with_context(|| format!("Failed to open alignment file: {}", args.input))?;
+    if let Some(ref_path) = args.reference.as_deref() {
+        reader
+            .set_reference(ref_path)
+            .with_context(|| format!("Failed to set reference FASTA: {}", ref_path))?;
+    }
+    if args.threads > 1 {
+        reader
+            .set_threads(args.threads.saturating_sub(1))
+            .context("Failed to set htslib decompression threads")?;
+    }
+
+    let header = reader.header().clone();
+    let contigs: Vec<(String, u64)> = (0..header.target_count())
+        .map(|tid| {
+            (
+                String::from_utf8_lossy(header.tid2name(tid)).to_string(),
+                header.target_len(tid).unwrap_or(0),
+            )
+        })
+        .collect();
+    ensure!(
+        !contigs.is_empty(),
+        "Alignment file has no reference sequences in its header: {}",
+        args.input
+    );
+
+    let mut accum = bamqc::BamqcAccum::new(contigs, args.skip_duplicated);
+    let mut record = rust_htslib::bam::Record::new();
+    let mut n = 0u64;
+    while let Some(res) = reader.read(&mut record) {
+        res.context("Error reading alignment record")?;
+        accum.process_read(&record);
+        n += 1;
+    }
+    let result = accum.into_result();
+
+    ui.detail(&format!(
+        "{} records, mean coverage {:.2}X, {:.2}% of reference covered",
+        format_count(n),
+        result.mean_coverage,
+        result.genome_fraction_at(1),
+    ));
+
+    let outdir = Path::new(&args.outdir);
+    let written = bamqc::write_all(&result, &sample_name, &args.input, outdir)?;
+
+    ui.output_group("bamqc");
+    for path in &written {
+        ui.output_item("bamqc", &path.display().to_string());
+    }
+
+    ui.blank();
+    ui.detail(&format!("Finished in {}", format_duration(start.elapsed())));
+    Ok(())
 }
 
 /// Reconstruct the command line for the featureCounts-compatible header comment.

@@ -73,6 +73,10 @@ export default defineConfig({
           ],
         },
         {
+          label: "Genomic",
+          items: [{ label: "bamqc", slug: "bamqc" }],
+        },
+        {
           label: "About",
           items: [
             {

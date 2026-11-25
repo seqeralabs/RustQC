@@ -1026,3 +1026,118 @@ fn test_dup_check_parallel_uses_global_duplicate_state() {
 
     let _ = fs::remove_dir_all(root);
 }
+
+// ============================================================================
+// bamqc subcommand (Qualimap bamqc mode)
+// ============================================================================
+
+/// Run `rustqc bamqc` on the test BAM.
+fn run_bamqc(outdir: &str, extra: &[&str]) -> std::process::Output {
+    let binary = rustqc_binary();
+    let mut args = vec!["bamqc", "tests/data/test.bam", "--outdir", outdir];
+    args.extend_from_slice(extra);
+    Command::new(&binary)
+        .args(&args)
+        .output()
+        .expect("Failed to run rustqc bamqc")
+}
+
+/// Extract a `key = value` line from genome_results.txt.
+fn genome_results_value(contents: &str, key: &str) -> String {
+    contents
+        .lines()
+        .find(|l| l.trim_start().starts_with(key))
+        .unwrap_or_else(|| panic!("missing '{key}' in genome_results.txt"))
+        .split('=')
+        .nth(1)
+        .unwrap()
+        .trim()
+        .to_string()
+}
+
+#[test]
+fn test_bamqc_outputs_and_coverage_match_samtools() {
+    let root = unique_test_dir("bamqc");
+    let outdir = root.display().to_string();
+    let output = run_bamqc(&outdir, &[]);
+    assert!(
+        output.status.success(),
+        "rustqc bamqc failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    for file in [
+        "genome_results.txt",
+        "raw_data_qualimapReport/coverage_histogram.txt",
+        "raw_data_qualimapReport/genome_fraction_coverage.txt",
+        "raw_data_qualimapReport/mapped_reads_gc-content_distribution.txt",
+        "raw_data_qualimapReport/mapped_reads_nucleotide_content.txt",
+        "raw_data_qualimapReport/insert_size_histogram.txt",
+    ] {
+        assert!(
+            Path::new(&format!("{outdir}/{file}")).exists(),
+            "missing bamqc output: {file}"
+        );
+    }
+
+    let contents = fs::read_to_string(format!("{outdir}/genome_results.txt")).unwrap();
+
+    // Reference: two 20 kb contigs
+    assert_eq!(
+        genome_results_value(&contents, "number of bases"),
+        "40,000 bp"
+    );
+    assert_eq!(genome_results_value(&contents, "number of contigs"), "2");
+
+    // Reads: 488 records, 483 mapped
+    assert_eq!(genome_results_value(&contents, "number of reads"), "488");
+    assert!(
+        genome_results_value(&contents, "number of mapped reads").starts_with("483"),
+        "unexpected mapped read count"
+    );
+
+    // Coverage, cross-checked against
+    //   samtools depth -a -J -g DUP tests/data/test.bam
+    // (duplicates included, matching Qualimap's default)
+    assert_eq!(
+        genome_results_value(&contents, "mean coverageData"),
+        "0.6038X"
+    );
+    assert!(
+        contents.contains("There is a 12.16% of reference with a coverageData >= 1X"),
+        "genome fraction at 1X must match samtools depth"
+    );
+    assert!(
+        contents.contains("There is a 4.78% of reference with a coverageData >= 5X"),
+        "genome fraction at 5X must match samtools depth"
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn test_bamqc_skip_duplicated_matches_samtools_default() {
+    let root = unique_test_dir("bamqc-nodup");
+    let outdir = root.display().to_string();
+    let output = run_bamqc(&outdir, &["--skip-duplicated"]);
+    assert!(
+        output.status.success(),
+        "rustqc bamqc failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let contents = fs::read_to_string(format!("{outdir}/genome_results.txt")).unwrap();
+
+    // Cross-checked against `samtools depth -a -J tests/data/test.bam`, whose
+    // default filter excludes duplicates
+    assert_eq!(
+        genome_results_value(&contents, "mean coverageData"),
+        "0.4325X"
+    );
+    assert!(
+        contents.contains("There is a 11.55% of reference with a coverageData >= 1X"),
+        "genome fraction at 1X must match samtools depth"
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}

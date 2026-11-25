@@ -62,6 +62,10 @@ src/
   config.rs         — YAML configuration loading (serde), nested tool configs
   io.rs             — Shared I/O utilities (gzip-transparent file reading)
   gtf.rs            — GTF annotation file parser (with configurable attribute extraction)
+  bamqc/
+    mod.rs          — Re-exports the bamqc accumulator and writers
+    accumulator.rs  — Single-pass generic BAM QC metrics (exact per-base depth)
+    output.rs       — Qualimap bamqc-compatible output files
   rna/
     mod.rs          — Re-exports all submodules (dupradar, featurecounts, rseqc, bam_flags, cpp_rng, preseq, qualimap)
     bam_flags.rs    — BAM flag constants
@@ -111,9 +115,11 @@ Nested module structure — top-level modules (`cli`, `config`, `io`, `gtf`, `rn
 in `main.rs`, no `lib.rs`. The `rna` module contains sub-modules for each tool group.
 Inter-module access uses `crate::` paths (e.g., `use crate::rna::dupradar::counting::GeneCounts;`).
 
-The CLI uses a single subcommand:
+The CLI has two subcommands:
 
 - `rustqc rna <BAM>... --gtf <GTF> [OPTIONS]`
+- `rustqc bamqc <BAM> [OPTIONS]` — generic genomic QC (Qualimap `bamqc` mode),
+  no annotation required
 
 A GTF gene annotation file (`--gtf`) is required. This runs all analyses:
 dupRadar duplicate rate analysis, featureCounts-compatible gene counting,
@@ -273,6 +279,12 @@ Both checks are skipped when `--skip-dup-check` is passed (stored as `RnaArgs.sk
 forwarded to `count_reads()` as the `skip_dup_check: bool` parameter).
 
 ## Notes for Agents
+
+- `rustqc bamqc` streams a coordinate-sorted file once and computes depth exactly
+  via start/end delta events folded in as the file advances — do not replace this
+  with sampling or a per-base array. Coverage excludes secondary alignments and
+  includes duplicates by default (Qualimap's default); `--skip-duplicated` excludes
+  them. Both modes are pinned in integration tests against `samtools depth`.
 
 - A `.pre-commit-config.yaml` is provided for local git hooks (fmt, clippy, file hygiene).
   Use [prek](https://github.com/j178/prek) (`prek install`) or the original
