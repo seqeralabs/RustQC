@@ -62,6 +62,11 @@ src/
   config.rs         — YAML configuration loading (serde), nested tool configs
   io.rs             — Shared I/O utilities (gzip-transparent file reading)
   gtf.rs            — GTF annotation file parser (with configurable attribute extraction)
+  align/
+    mod.rs          — Re-exports the align accumulators and writers
+    depth.rs        — mosdepth-equivalent per-base and per-window depth
+    snp.rs          — NGSCheckMate SNP panel parsing and allele counting
+    output.rs       — mosdepth + NGSCheckMate VCF writers
   rna/
     mod.rs          — Re-exports all submodules (dupradar, featurecounts, rseqc, bam_flags, cpp_rng, preseq, qualimap)
     bam_flags.rs    — BAM flag constants
@@ -111,9 +116,11 @@ Nested module structure — top-level modules (`cli`, `config`, `io`, `gtf`, `rn
 in `main.rs`, no `lib.rs`. The `rna` module contains sub-modules for each tool group.
 Inter-module access uses `crate::` paths (e.g., `use crate::rna::dupradar::counting::GeneCounts;`).
 
-The CLI uses a single subcommand:
+The CLI has two subcommands:
 
 - `rustqc rna <BAM>... --gtf <GTF> [OPTIONS]`
+- `rustqc align <BAM> [OPTIONS]` — single-pass DNA alignment QC (samtools stats,
+  mosdepth-compatible depth, NGSCheckMate genotyping); no annotation required
 
 A GTF gene annotation file (`--gtf`) is required. This runs all analyses:
 dupRadar duplicate rate analysis, featureCounts-compatible gene counting,
@@ -273,6 +280,15 @@ Both checks are skipped when `--skip-dup-check` is passed (stored as `RnaArgs.sk
 forwarded to `count_reads()` as the `skip_dup_check: bool` parameter).
 
 ## Notes for Agents
+
+- `rustqc align` output is byte-compatible with mosdepth on the test data, including
+  two quirks that must not be "cleaned up": the `<chrom>_region` rows in
+  `mosdepth.summary.txt` when `--by` is used, and the `8e-5` cumulative cutoff that
+  skips the sparse tail of `mosdepth.global.dist.txt`. Depth excludes unmapped,
+  secondary, QC-fail and duplicate records (mosdepth's default `--flag 1796`).
+- The NGSCheckMate SNP BED must be the 6-column layout with ref/alt alleles; a
+  shorter BED is rejected rather than guessed at, because per-sample VCFs have to
+  share a common allele set to be comparable.
 
 - A `.pre-commit-config.yaml` is provided for local git hooks (fmt, clippy, file hygiene).
   Use [prek](https://github.com/j178/prek) (`prek install`) or the original

@@ -1026,3 +1026,126 @@ fn test_dup_check_parallel_uses_global_duplicate_state() {
 
     let _ = fs::remove_dir_all(root);
 }
+
+// ============================================================================
+// align subcommand (samtools stats + mosdepth + NGSCheckMate)
+// ============================================================================
+
+#[test]
+fn test_align_outputs_match_mosdepth_reference() {
+    let root = unique_test_dir("align");
+    let outdir = root.display().to_string();
+
+    // Three SNP sites: one covered by a single read, two uncovered.
+    let snp_bed = root.join("snps.bed");
+    fs::write(
+        &snp_bed,
+        "chr1\t1014\t1015\trs_test1\tA\tG\n\
+         chr1\t2999\t3000\trs_test2\tC\tT\n\
+         chr2\t999\t1000\trs_test3\tG\tA\n",
+    )
+    .unwrap();
+
+    let binary = rustqc_binary();
+    let output = Command::new(&binary)
+        .args([
+            "align",
+            "tests/data/test.bam",
+            "--snp-bed",
+            snp_bed.to_str().unwrap(),
+            "--by",
+            "500",
+            "--outdir",
+            &outdir,
+        ])
+        .output()
+        .expect("Failed to run rustqc align");
+    assert!(
+        output.status.success(),
+        "rustqc align failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // --- mosdepth summary ---
+    // Reference values from `mosdepth --by 500 md tests/data/test.bam`
+    // (mosdepth 0.3.x), byte-for-byte.
+    let summary = fs::read_to_string(format!("{outdir}/test.mosdepth.summary.txt")).unwrap();
+    assert_eq!(
+        summary,
+        "chrom\tlength\tbases\tmean\tmin\tmax\n\
+         chr1\t20000\t10300\t0.52\t0\t12\n\
+         chr1_region\t20000\t10300\t0.52\t0\t12\n\
+         chr2\t20000\t7000\t0.35\t0\t40\n\
+         chr2_region\t20000\t7000\t0.35\t0\t40\n\
+         total\t40000\t17300\t0.43\t0\t40\n\
+         total_region\t40000\t17300\t0.43\t0\t40\n",
+        "summary must match mosdepth"
+    );
+
+    // --- mosdepth global distribution ---
+    let dist = fs::read_to_string(format!("{outdir}/test.mosdepth.global.dist.txt")).unwrap();
+    // mosdepth skips the sparse tail (cumulative < 8e-5), so chr2's deepest
+    // reported level is 39 even though max depth is 40.
+    assert!(
+        dist.starts_with("chr1\t12\t0.00\n"),
+        "distribution starts at the deepest reported level"
+    );
+    assert!(
+        dist.contains("\nchr2\t39\t0.00\n"),
+        "chr2 tail is skipped at 40"
+    );
+    assert!(
+        !dist.contains("chr2\t40\t"),
+        "depth 40 is below mosdepth's cutoff"
+    );
+    assert!(dist.trim_end().ends_with("total\t0\t1.00"));
+
+    // --- samtools-compatible outputs exist ---
+    for file in ["test.stats", "test.flagstat", "test.idxstats"] {
+        assert!(
+            Path::new(&format!("{outdir}/{file}")).exists(),
+            "missing output: {file}"
+        );
+    }
+    let flagstat = fs::read_to_string(format!("{outdir}/test.flagstat")).unwrap();
+    assert!(
+        flagstat.starts_with("488 + 0 in total"),
+        "flagstat total should be 488, got:\n{flagstat}"
+    );
+
+    // --- regions and NGSCheckMate VCF are BGZF files that exist ---
+    assert!(Path::new(&format!("{outdir}/test.regions.bed.gz")).exists());
+    assert!(Path::new(&format!("{outdir}/test.ngscheckmate.vcf.gz")).exists());
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn test_align_rejects_snp_bed_without_alleles() {
+    let root = unique_test_dir("align-badbed");
+    let outdir = root.display().to_string();
+    let snp_bed = root.join("bad.bed");
+    fs::write(&snp_bed, "chr1\t1014\t1015\trs_test1\n").unwrap();
+
+    let binary = rustqc_binary();
+    let output = Command::new(&binary)
+        .args([
+            "align",
+            "tests/data/test.bam",
+            "--snp-bed",
+            snp_bed.to_str().unwrap(),
+            "--outdir",
+            &outdir,
+        ])
+        .output()
+        .expect("Failed to run rustqc align");
+
+    assert!(!output.status.success(), "should reject a 4-column SNP BED");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("6-column NGSCheckMate layout"),
+        "error should name the expected layout:\n{stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}

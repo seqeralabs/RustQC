@@ -73,6 +73,10 @@ export default defineConfig({
           ],
         },
         {
+          label: "DNA",
+          items: [{ label: "align", slug: "align" }],
+        },
+        {
           label: "About",
           items: [
             {
