@@ -85,7 +85,10 @@ pub struct Gene {
 ///
 /// GTF attributes are semicolon-separated key-value pairs like:
 /// `gene_id "ENSG00000223972"; gene_name "DDX11L1";`
-fn get_attribute(attributes: &str, key: &str) -> Option<String> {
+///
+/// The value is returned borrowed from `attributes` so callers only allocate
+/// when they need to keep it.
+fn get_attribute<'a>(attributes: &'a str, key: &str) -> Option<&'a str> {
     for attr in attributes.split(';') {
         let attr = attr.trim();
         if attr.is_empty() {
@@ -96,12 +99,113 @@ fn get_attribute(attributes: &str, key: &str) -> Option<String> {
             let (k, v) = attr.split_at(pos);
             if k.trim() == key {
                 // Remove surrounding quotes and whitespace
-                let v = v.trim().trim_matches('"');
-                return Some(v.to_string());
+                return Some(v.trim().trim_matches('"'));
             }
         }
     }
     None
+}
+
+/// Extract two attribute values in a single pass over the attribute string.
+///
+/// `parse_gtf` needs `gene_id` and `transcript_id` for every feature line it
+/// keeps. Ensembl/GENCODE lines carry a dozen attributes, so scanning once for
+/// both is materially cheaper than calling [`get_attribute`] twice.
+fn get_two_attributes<'a>(
+    attributes: &'a str,
+    key1: &str,
+    key2: &str,
+) -> (Option<&'a str>, Option<&'a str>) {
+    let mut val1 = None;
+    let mut val2 = None;
+
+    for attr in attributes.split(';') {
+        let attr = attr.trim();
+        if attr.is_empty() {
+            continue;
+        }
+        let Some(pos) = attr.find(|c: char| c.is_whitespace()) else {
+            continue;
+        };
+        let (k, v) = attr.split_at(pos);
+        let k = k.trim();
+        // First occurrence wins, matching get_attribute's behaviour.
+        if val1.is_none() && k == key1 {
+            val1 = Some(v.trim().trim_matches('"'));
+        } else if val2.is_none() && k == key2 {
+            val2 = Some(v.trim().trim_matches('"'));
+        }
+        if val1.is_some() && val2.is_some() {
+            break;
+        }
+    }
+
+    (val1, val2)
+}
+
+/// Split a GTF line into its 9 tab-separated fields without allocating.
+///
+/// Returns `None` if the line has fewer than 9 fields, which is the same
+/// "skip this line" condition the previous `split('\t').collect()` produced.
+/// Field 9 runs to the next tab or to end of line, also matching `split`.
+#[inline]
+fn split_gtf_fields(line: &str) -> Option<[&str; 9]> {
+    let mut fields: [&str; 9] = [""; 9];
+    let mut start = 0usize;
+    let mut n = 0usize;
+
+    for pos in memchr::memchr_iter(b'\t', line.as_bytes()) {
+        // Tab is ASCII, so these indices are always UTF-8 boundaries.
+        fields[n] = &line[start..pos];
+        n += 1;
+        start = pos + 1;
+        if n == 8 {
+            break;
+        }
+    }
+    if n < 8 {
+        return None;
+    }
+
+    let rest = &line[start..];
+    fields[8] = match memchr::memchr(b'\t', rest.as_bytes()) {
+        Some(p) => &rest[..p],
+        None => rest,
+    };
+    Some(fields)
+}
+
+/// Borrowed lookup key for the `(gene_id, transcript_id)` transcript map.
+///
+/// Lets the parser probe `tx_builders` with `&str` slices from the line buffer
+/// and allocate the owned `String` key only when a new transcript is inserted.
+struct TxKeyRef<'a>(&'a str, &'a str);
+
+impl std::hash::Hash for TxKeyRef<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // Must match `(String, String)`'s derived tuple hash: String hashes as str.
+        self.0.hash(state);
+        self.1.hash(state);
+    }
+}
+
+impl indexmap::Equivalent<(String, String)> for TxKeyRef<'_> {
+    fn equivalent(&self, key: &(String, String)) -> bool {
+        self.0 == key.0 && self.1 == key.1
+    }
+}
+
+/// Strip a trailing `\n` and optional `\r` from a raw line buffer.
+#[inline]
+fn trim_line_end(buf: &[u8]) -> &[u8] {
+    let mut end = buf.len();
+    if end > 0 && buf[end - 1] == b'\n' {
+        end -= 1;
+        if end > 0 && buf[end - 1] == b'\r' {
+            end -= 1;
+        }
+    }
+    &buf[..end]
 }
 
 /// Compute the total number of non-overlapping bases across a set of intervals.
@@ -171,7 +275,7 @@ struct TranscriptBuilder {
 /// # Returns
 /// An IndexMap preserving insertion order of gene_id -> Gene
 pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<String, Gene>> {
-    let reader = crate::io::open_reader(path)
+    let mut reader = crate::io::open_reader(path)
         .with_context(|| format!("Failed to open GTF file: {}", path))?;
 
     let mut genes: IndexMap<String, Gene> = IndexMap::new();
@@ -180,18 +284,31 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
     // Use IndexMap to preserve insertion order within each gene
     let mut tx_builders: IndexMap<(String, String), TranscriptBuilder> = IndexMap::new();
 
-    for line in reader.lines() {
-        let line = line.context("Failed to read line from GTF file")?;
+    // Reused for every line so the parser does not allocate a String per line.
+    // Annotation files run to millions of lines, so that adds up.
+    let mut buf: Vec<u8> = Vec::with_capacity(4096);
+
+    loop {
+        buf.clear();
+        let n = reader
+            .read_until(b'\n', &mut buf)
+            .context("Failed to read line from GTF file")?;
+        if n == 0 {
+            break;
+        }
+        let raw = trim_line_end(&buf);
 
         // Skip comments and empty lines
-        if line.starts_with('#') || line.is_empty() {
+        if raw.is_empty() || raw[0] == b'#' {
             continue;
         }
 
-        let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() < 9 {
+        let line = std::str::from_utf8(raw)
+            .with_context(|| format!("GTF file contains invalid UTF-8: {}", path))?;
+
+        let Some(fields) = split_gtf_fields(line) else {
             continue;
-        }
+        };
 
         let feature_type = fields[2];
 
@@ -204,7 +321,7 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
             continue;
         }
 
-        let chrom = fields[0].to_string();
+        let chrom = fields[0];
         let start: u64 = fields[3]
             .parse()
             .with_context(|| format!("Invalid start position: {}", fields[3]))?;
@@ -222,64 +339,82 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
         let strand = fields[6].chars().next().unwrap_or('.');
 
         let attr_str = fields[8];
-        let gene_id = match get_attribute(attr_str, "gene_id") {
-            Some(id) => id,
-            None => continue, // Skip features without gene_id
+        // Both ids are needed for every line that gets this far, so scan once.
+        let (gene_id, transcript_id) = get_two_attributes(attr_str, "gene_id", "transcript_id");
+        let Some(gene_id) = gene_id else {
+            continue; // Skip features without gene_id
         };
 
         // For exon features, update the gene-level data (unchanged from original)
         if feature_type == "exon" {
-            let exon = Exon {
-                chrom: chrom.clone(),
-                start,
-                end,
-                strand,
-            };
-
-            // Extract extra attributes from the first exon encountered for this gene
-            genes
-                .entry(gene_id.clone())
-                .and_modify(|gene| {
-                    gene.start = gene.start.min(start);
-                    gene.end = gene.end.max(end);
-                    gene.exons.push(exon.clone());
-                })
-                .or_insert_with(|| {
-                    let mut attrs = HashMap::new();
-                    for attr_name in extra_attributes {
-                        if let Some(val) = get_attribute(attr_str, attr_name) {
-                            attrs.insert(attr_name.clone(), val);
-                        }
+            // Look up first so the common case (gene already seen) allocates
+            // only the per-exon chromosome string.
+            if let Some(gene) = genes.get_mut(gene_id) {
+                gene.start = gene.start.min(start);
+                gene.end = gene.end.max(end);
+                gene.exons.push(Exon {
+                    chrom: chrom.to_string(),
+                    start,
+                    end,
+                    strand,
+                });
+            } else {
+                // Extract extra attributes from the first exon encountered for this gene
+                let mut attrs = HashMap::new();
+                for attr_name in extra_attributes {
+                    if let Some(val) = get_attribute(attr_str, attr_name) {
+                        attrs.insert(attr_name.clone(), val.to_string());
                     }
+                }
+                genes.insert(
+                    gene_id.to_string(),
                     Gene {
-                        gene_id: gene_id.clone(),
-                        chrom: chrom.clone(),
+                        gene_id: gene_id.to_string(),
+                        chrom: chrom.to_string(),
                         start,
                         end,
                         strand,
-                        exons: vec![exon],
+                        exons: vec![Exon {
+                            chrom: chrom.to_string(),
+                            start,
+                            end,
+                            strand,
+                        }],
                         effective_length: 0, // computed later
                         attributes: attrs,
                         transcripts: Vec::new(), // populated later
-                    }
-                });
+                    },
+                );
+            }
         }
 
         // Accumulate transcript-level data for both exon and CDS features.
         // Features without transcript_id are grouped under a synthetic key.
-        let transcript_id = get_attribute(attr_str, "transcript_id")
-            .unwrap_or_else(|| format!("{}__no_tx", gene_id));
+        let synthetic_tx_id;
+        let transcript_id = match transcript_id {
+            Some(id) => id,
+            None => {
+                synthetic_tx_id = format!("{}__no_tx", gene_id);
+                &synthetic_tx_id
+            }
+        };
 
-        let key = (gene_id.clone(), transcript_id.clone());
-        let builder = tx_builders.entry(key).or_insert_with(|| TranscriptBuilder {
-            transcript_id,
-            chrom: chrom.clone(),
-            strand,
-            exons: Vec::new(),
-            cds: Vec::new(),
-            start_codons: Vec::new(),
-            stop_codons: Vec::new(),
-        });
+        // Probe with borrowed slices; only allocate the owned key on insert.
+        let builder = match tx_builders.get_mut(&TxKeyRef(gene_id, transcript_id)) {
+            Some(builder) => builder,
+            None => {
+                let key = (gene_id.to_string(), transcript_id.to_string());
+                tx_builders.entry(key).or_insert_with(|| TranscriptBuilder {
+                    transcript_id: transcript_id.to_string(),
+                    chrom: chrom.to_string(),
+                    strand,
+                    exons: Vec::new(),
+                    cds: Vec::new(),
+                    start_codons: Vec::new(),
+                    stop_codons: Vec::new(),
+                })
+            }
+        };
 
         match feature_type {
             "exon" => builder.exons.push((start, end)),
@@ -419,8 +554,10 @@ pub fn attribute_exists_in_gtf(path: &str, attribute_name: &str, max_lines: usiz
         if line.starts_with('#') || line.is_empty() {
             continue;
         }
-        let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() < 9 || fields[2] != "exon" {
+        let Some(fields) = split_gtf_fields(&line) else {
+            continue;
+        };
+        if fields[2] != "exon" {
             continue;
         }
         if get_attribute(fields[8], attribute_name).is_some() {
@@ -442,15 +579,58 @@ mod tests {
     fn test_get_attribute() {
         let attrs =
             r#"gene_id "ENSG00000223972"; transcript_id "ENST00000456328"; gene_name "DDX11L1";"#;
-        assert_eq!(
-            get_attribute(attrs, "gene_id"),
-            Some("ENSG00000223972".to_string())
-        );
-        assert_eq!(
-            get_attribute(attrs, "gene_name"),
-            Some("DDX11L1".to_string())
-        );
+        assert_eq!(get_attribute(attrs, "gene_id"), Some("ENSG00000223972"));
+        assert_eq!(get_attribute(attrs, "gene_name"), Some("DDX11L1"));
         assert_eq!(get_attribute(attrs, "missing"), None);
+    }
+
+    #[test]
+    fn test_get_two_attributes_single_pass() {
+        let attrs =
+            r#"gene_id "ENSG1"; transcript_id "ENST1"; gene_name "NAME"; transcript_id "ENST2";"#;
+        // Both found, first occurrence wins (same as get_attribute).
+        assert_eq!(
+            get_two_attributes(attrs, "gene_id", "transcript_id"),
+            (Some("ENSG1"), Some("ENST1"))
+        );
+        // Order of the requested keys does not matter.
+        assert_eq!(
+            get_two_attributes(attrs, "transcript_id", "gene_id"),
+            (Some("ENST1"), Some("ENSG1"))
+        );
+        // Missing keys come back as None.
+        assert_eq!(
+            get_two_attributes(attrs, "gene_id", "missing"),
+            (Some("ENSG1"), None)
+        );
+    }
+
+    #[test]
+    fn test_split_gtf_fields() {
+        let line = "chr1\tensembl\texon\t100\t200\t.\t+\t.\tgene_id \"G1\";";
+        let fields = split_gtf_fields(line).expect("9 fields");
+        assert_eq!(fields[0], "chr1");
+        assert_eq!(fields[2], "exon");
+        assert_eq!(fields[3], "100");
+        assert_eq!(fields[4], "200");
+        assert_eq!(fields[6], "+");
+        assert_eq!(fields[8], "gene_id \"G1\";");
+
+        // Fewer than 9 fields is skipped, matching the previous behaviour.
+        assert!(split_gtf_fields("chr1\tensembl\texon").is_none());
+
+        // A 10th field is truncated at the tab, like split('\t').nth(8).
+        let extra = "a\tb\tc\td\te\tf\tg\th\tattrs\ttrailing";
+        assert_eq!(split_gtf_fields(extra).unwrap()[8], "attrs");
+    }
+
+    #[test]
+    fn test_trim_line_end() {
+        assert_eq!(trim_line_end(b"abc\n"), b"abc");
+        assert_eq!(trim_line_end(b"abc\r\n"), b"abc");
+        assert_eq!(trim_line_end(b"abc"), b"abc");
+        assert_eq!(trim_line_end(b"\n"), b"");
+        assert_eq!(trim_line_end(b""), b"");
     }
 
     #[test]
