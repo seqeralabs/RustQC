@@ -246,6 +246,70 @@ Preseq runs by default and can be skipped entirely with `--skip-preseq`.
 
 ---
 
+## `dna`
+
+DNA quality control: depth of coverage, Picard metrics, samtools-compatible
+outputs and library complexity, in a single pass. Needs no annotation. See the
+[DNA overview](/dna/overview/) for what each output contains.
+
+### Synopsis
+
+```bash
+rustqc dna <INPUT>... [OPTIONS]
+```
+
+### Shared options
+
+`-o/--outdir`, `--sample-name`, `--flat-output`, `-c/--config`,
+`-j/--json-summary`, `-t/--threads`, `-p/--paired`, `-q/--quiet`,
+`-v/--verbose`, `--skip-dup-check`, `--skip-preseq` and the `--preseq-*` family
+all behave exactly as they do for `rna`, with the same short flags and the same
+`RUSTQC_*` environment variables.
+
+<Aside type="caution" title="One shared flag has a different default">
+`-Q/--mapq` defaults to **0** here, not 30. That is mosdepth's default, and
+matching it is what makes RustQC's depth figures agree with mosdepth's.
+</Aside>
+
+### DNA-specific options
+
+| Option                          | Default                | Description                                                          |
+| ------------------------------- | ---------------------- | -------------------------------------------------------------------- |
+| `-r, --reference <FASTA>`       | none                   | Required for CRAM, `CollectWgsMetrics` and `CollectGcBiasMetrics`     |
+| `--targets <BED>`               | none                   | Switches on targeted mode and `CollectHsMetrics`                     |
+| `--baits <BED>`                 | same as `--targets`    | Capture bait intervals, when they differ from the targets            |
+| `--depth-thresholds <N,...>`    | `1,5,10,15,20,30,50`   | Coverage thresholds to report                                        |
+| `--window-size <N>`             | none                   | Fixed-width windows for per-window depth, mosdepth's `--by`           |
+| `--coverage-cap <N>`            | `250`                  | Picard `COVERAGE_CAP`                                                |
+| `--min-base-quality <N>`        | `20`                   | Picard `MINIMUM_BASE_QUALITY`                                        |
+| `--skip-per-base`               | off                    | Suppress `per-base.bed.gz`, by far the largest output                |
+| `--skip-gc-bias`                | off                    | Skip `CollectGcBiasMetrics`                                          |
+| `--max-depth-workers <N>`       | derived from RAM       | Cap on concurrently live per-contig depth arrays                     |
+
+### Examples
+
+```bash
+# Whole genome, with the reference so every metric is available
+rustqc dna sample.bam --reference genome.fasta --outdir results/
+
+# Per-window depth and a custom threshold set
+rustqc dna sample.bam -r genome.fasta --window-size 500 --depth-thresholds 1,10,30
+
+# Targeted (exome or panel) mode
+rustqc dna sample.bam -r genome.fasta --targets exome.bed --outdir results/
+
+# Large genome on a shared machine: bound the depth memory explicitly
+rustqc dna sample.bam -r genome.fasta --threads 16 --max-depth-workers 2
+```
+
+<Aside type="note" title="Duplicate marking is required">
+Input must be duplicate-marked rather than duplicate-removed. Several metrics
+are defined against the duplicate fraction. RustQC refuses input with no
+duplicate flags at all unless `--skip-dup-check` is passed.
+</Aside>
+
+---
+
 ## Exit codes
 
 | Code | Meaning                                                                |
