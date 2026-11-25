@@ -3,8 +3,12 @@
 //! Processes BAM records using Qualimap's counting rules:
 //! - M-only CIGAR blocks (no insertion/deletion/softclip contribution)
 //! - Enclosure-based gene assignment (each M-block must be fully contained in exons of the same gene)
-//! - PE reads: combine both mates' M-blocks, assign on combined set, count numReads=2
-//! - Multi-mappers excluded entirely (NH > 1)
+//! - Read selection as in Qualimap 2.3 `ComputeCountsTask` (`checkRead`,
+//!   `computeReadWeight`): secondary, supplementary and QC-fail records are
+//!   processed like any other; reads with NH > 1 or on a sequence without
+//!   annotated exons are counted and dropped
+//! - PE proper pairs: records are grouped by read name; a group of exactly two
+//!   is one fragment (numReads=2), other groups are skipped
 //! - Junction motif extraction from read sequence at N-operation boundaries
 
 use std::collections::{HashMap, HashSet};
@@ -41,11 +45,25 @@ struct CachedBlockHits {
 use crate::rna::bam_flags::*;
 
 // ============================================================
-// Mate buffer for PE reads
+// Read-name groups for PE fragments
 // ============================================================
 
-/// Key for mate buffering: (qname_hash, r1_tid, r1_pos, r2_tid, r2_pos).
-type MateKey = (u64, i32, i64, i32, i64);
+/// The proper-pair records seen so far for one read name.
+///
+/// Qualimap reads a name-sorted BAM in `-pe` mode and collects consecutive
+/// proper-pair records with the same name into a fragment
+/// (`ComputeCountsTask.run`). `processFragment` then counts a fragment of
+/// exactly two records and skips any other size: a single record
+/// (`numSingleReadOnly`) or more than two (e.g. a pair plus a supplementary or
+/// secondary record that passed the NH check).
+#[derive(Debug, Clone, Default)]
+struct PendingFragment {
+    /// The records of this name that passed the read filters.
+    mates: Vec<MateData>,
+    /// Whether more records of this name may still follow after two have been
+    /// seen, so the fragment has to wait for the end of the input.
+    hold: bool,
+}
 
 /// A splice junction motif extracted from the read sequence at an N-operation.
 #[derive(Debug, Clone)]
@@ -58,8 +76,8 @@ struct JunctionMotif {
 
 /// Per-mate data passed through the PE reconciliation pipeline.
 ///
-/// Groups the per-read data needed for `reconcile_pair()` and
-/// `classify_and_count()`, reducing parameter counts.
+/// Groups the per-read data needed for `process_fragment()` and
+/// `process_single()`, reducing parameter counts.
 #[derive(Debug, Clone)]
 struct MateData {
     /// M-only aligned blocks (0-based half-open).
@@ -72,6 +90,14 @@ struct MateData {
     is_reverse: bool,
     /// Whether this mate is the first read in pair (flag 0x40).
     is_first_of_pair: bool,
+    /// Reference sequence id (resolved through `QualimapAccum::chrom_names`).
+    tid: i32,
+    /// Number of N operations (Qualimap `numReadsWithJunction` increments).
+    n_op_count: usize,
+    /// Junction motifs read from the sequence at N operations.
+    motifs: Vec<JunctionMotif>,
+    /// `(posInRef1, posInRef2)` for each N operation.
+    junction_ref_positions: Vec<(i32, i32)>,
 }
 
 // ============================================================
@@ -84,9 +110,9 @@ struct MateData {
 /// in `rnaseq_qc_results.txt`.
 #[derive(Debug, Clone, Default)]
 pub struct QualimapCounters {
-    /// Total primary alignments processed.
+    /// Mapped records not flagged secondary (supplementary and QC-fail included).
     pub primary_alignments: u64,
-    /// Total secondary alignments seen (skipped).
+    /// Mapped records flagged secondary.
     pub secondary_alignments: u64,
     /// Unmapped reads (flag 0x4).
     pub not_aligned: u64,
@@ -106,7 +132,7 @@ pub struct QualimapCounters {
     /// overlapping exon" in Qualimap terminology). Only counted once per
     /// read/fragment that has any M-block overlapping an exon.
     pub overlapping_exon: u64,
-    /// Total reads counted (numReads: for PE, 2 per fragment).
+    /// Mapped records on an annotated sequence (Qualimap `readCount`).
     pub read_count: u64,
     /// Left mates in proper pairs (flag 0x2 + 0x40).
     pub left_proper_in_pair: u64,
@@ -126,8 +152,12 @@ pub struct QualimapCounters {
     ///
     /// Matches Qualimap Java's `partlyKnownJunctions` counter.
     pub partly_known_junction_events: u64,
-    /// Total supplementary alignments seen (skipped).
+    /// Supplementary records that passed the read filters (processed like
+    /// any other read, as Qualimap does).
     pub supplementary: u64,
+    /// Mapped reads on a sequence with no annotated exon (Qualimap
+    /// `seqNotFoundCount`, "Missing chromosome in annotation").
+    pub seq_not_found: u64,
     /// SSP forward-strand estimation counter.
     pub ssp_fwd: u64,
     /// SSP reverse-strand estimation counter.
@@ -155,6 +185,7 @@ impl QualimapCounters {
         self.known_junction_events += other.known_junction_events;
         self.partly_known_junction_events += other.partly_known_junction_events;
         self.supplementary += other.supplementary;
+        self.seq_not_found += other.seq_not_found;
         self.ssp_fwd += other.ssp_fwd;
         self.ssp_rev += other.ssp_rev;
     }
@@ -201,8 +232,10 @@ pub struct QualimapAccum {
     pub coverage: TranscriptCoverage,
     /// Junction splice motif counts.
     pub junction_motifs: JunctionMotifCounts,
-    /// Mate buffer for PE reconciliation.
-    mate_buffer: HashMap<MateKey, MateData>,
+    /// Proper-pair records waiting for the rest of their read-name group.
+    fragments: HashMap<Box<[u8]>, PendingFragment>,
+    /// Chromosome name for each reference id seen (for deferred fragments).
+    chrom_names: HashMap<i32, String>,
     /// Strandedness protocol.
     stranded: Strandedness,
 }
@@ -214,19 +247,21 @@ impl QualimapAccum {
             counters: QualimapCounters::default(),
             coverage: TranscriptCoverage::new(),
             junction_motifs: JunctionMotifCounts::default(),
-            mate_buffer: HashMap::new(),
+            fragments: HashMap::new(),
+            chrom_names: HashMap::new(),
             stranded,
         }
     }
 
     /// Process a single BAM record.
     ///
-    /// Applies Qualimap's filtering and counting logic:
-    /// 1. Skip unmapped, secondary, QC-fail, supplementary reads
-    /// 2. Skip multi-mappers (NH > 1)
+    /// Applies Qualimap's filtering and counting logic (`ComputeCountsTask`):
+    /// 1. `checkRead`: count unmapped, secondary and primary records; drop
+    ///    reads on a sequence without annotated exons
+    /// 2. `computeReadWeight`: drop multi-mappers (NH > 1)
     /// 3. Extract M-only CIGAR blocks
-    /// 4. For SE: assign immediately via enclosure check
-    /// 5. For PE: buffer mate, assign when pair is complete
+    /// 4. Single reads and non-proper pairs: assign immediately
+    /// 5. Proper pairs: group by read name, assign once the group is complete
     ///
     /// # Arguments
     /// * `record` - The BAM record to process.
@@ -247,59 +282,50 @@ impl QualimapAccum {
             return;
         }
 
-        // Multi-mapper check on ALL mapped reads (including secondary).
-        // Qualimap increments alignmentNotUnique before the skipSecondary check,
-        // so secondary reads with NH>1 are counted in both secondary AND non-unique.
-        let is_multi_mapped = get_nh_tag(record).is_some_and(|nh| nh > 1);
-        if is_multi_mapped {
-            self.counters.alignment_not_unique += 1;
-        }
-
-        // Track secondary vs primary
+        // Track secondary vs primary (Qualimap ComputeCountsTask.checkRead).
         let is_secondary = flags & BAM_FSECONDARY != 0;
         if is_secondary {
             self.counters.secondary_alignments += 1;
-            // Qualimap skipSecondary=true by default in RNA-Seq mode.
-            // Secondary reads are counted but excluded from all downstream
-            // gene assignment, SSP, and junction analysis.
-            return;
-        }
-        self.counters.primary_alignments += 1;
+        } else {
+            self.counters.primary_alignments += 1;
 
-        // Count left/right reads for ALL primary paired reads (not just proper pair).
-        // Qualimap: leftProperInPair counts first-of-pair, rightProperInPair counts
-        // second-of-pair — despite the name, they don't check the proper-pair flag.
-        // bothProperInPair counts reads that ARE proper pair (used for numberOfMappedPairs).
-        if flags & BAM_FPAIRED != 0 {
-            if flags & BAM_FREAD1 != 0 {
-                self.counters.left_proper_in_pair += 1;
-            }
-            if flags & BAM_FREAD2 != 0 {
-                self.counters.right_proper_in_pair += 1;
-            }
-            if flags & BAM_FPROPER_PAIR != 0 {
-                self.counters.both_proper_in_pair += 1;
+            // Count left/right reads for ALL primary paired reads (not just proper pair).
+            // Qualimap: leftProperInPair counts first-of-pair, rightProperInPair counts
+            // second-of-pair — despite the name, they don't check the proper-pair flag.
+            // bothProperInPair counts reads that ARE proper pair (used for numberOfMappedPairs).
+            if flags & BAM_FPAIRED != 0 {
+                if flags & BAM_FREAD1 != 0 {
+                    self.counters.left_proper_in_pair += 1;
+                }
+                if flags & BAM_FREAD2 != 0 {
+                    self.counters.right_proper_in_pair += 1;
+                }
+                if flags & BAM_FPROPER_PAIR != 0 {
+                    self.counters.both_proper_in_pair += 1;
+                }
             }
         }
 
-        // Skip supplementary and QC-fail (these never contribute)
-        if flags & BAM_FSUPPLEMENTARY != 0 {
-            self.counters.supplementary += 1;
+        // checkRead then drops reads on a sequence with no annotated exon
+        // ("Missing chromosome in annotation"), before the NH check.
+        if index.exon_tree(chrom).is_none() {
+            self.counters.seq_not_found += 1;
             return;
         }
-        if flags & BAM_FQCFAIL != 0 {
-            return;
-        }
-
-        // readCount: primary reads that pass initial filters
-        // (Qualimap: readCount counts all non-secondary, non-supplementary reads)
+        // readCount: reads that passed checkRead
         self.counters.read_count += 1;
 
-        // Skip multi-mappers from gene assignment, junction counting, and coverage.
-        // Coverage is added only for uniquely-mapped reads, restricted to fully-enclosed
-        // M-blocks, matching the correct Qualimap coverage model.
-        if is_multi_mapped {
+        // Multi-mapper check (computeReadWeight). Qualimap's
+        // skipSecondaryAlignments is false, so this applies to secondary
+        // alignments too, and a missing NH tag counts as NH = 1.
+        let nh = get_nh_tag(record);
+        if nh.is_some_and(|nh| nh > 1) {
+            self.counters.alignment_not_unique += 1;
             return;
+        }
+        // Supplementary and QC-fail records are not filtered by Qualimap.
+        if flags & BAM_FSUPPLEMENTARY != 0 {
+            self.counters.supplementary += 1;
         }
 
         // Extract M-only CIGAR blocks (replicating Qualimap's CIGAR bug where
@@ -307,37 +333,6 @@ impl QualimapAccum {
         // motifs in a single CIGAR pass, avoiding a second record.cigar() call.
         let (m_blocks, n_op_count, motifs, junction_ref_positions) =
             extract_m_blocks_and_junctions(record);
-
-        if m_blocks.is_empty() {
-            return;
-        }
-        // Qualimap increments numReadsWithJunction for every N-operation,
-        // even when the motif extraction guard fails. Match that behavior.
-        self.counters.reads_at_junctions += n_op_count as u64;
-
-        // Count junction motifs per-read, matching Qualimap which
-        // calls collectJunctionInfo independently for each SAMRecord.
-        for motif in &motifs {
-            *self
-                .junction_motifs
-                .counts
-                .entry((motif.donor, motif.acceptor))
-                .or_insert(0) += 1;
-        }
-
-        // Classify junction events as known/partly known/novel using the
-        // Qualimap junction location map (exon boundary positions ±1 tolerance).
-        for &(pos_ref1, pos_ref2) in &junction_ref_positions {
-            let j1 = index.has_junction_overlap(chrom, pos_ref1);
-            let j2 = index.has_junction_overlap(chrom, pos_ref2);
-            if j1 && j2 {
-                self.counters.known_junction_events += 1;
-            } else if j1 || j2 {
-                self.counters.partly_known_junction_events += 1;
-            }
-            // Novel junctions (neither matches) are computed as:
-            // reads_at_junctions - known - partly_known
-        }
 
         // --- Cache tree query results for all M-blocks ---
         // Query the merged exon tree ONCE per block set and reuse the results
@@ -360,13 +355,10 @@ impl QualimapAccum {
         let enclosing_genes =
             find_enclosing_genes_cached(&cached_hits, self.stranded, is_reverse, is_first_of_pair);
 
-        // --- Coverage: per-block, strand-independent (Qualimap model) ---
-        // Qualimap adds coverage per M-block to each enclosing gene, without
-        // strand filtering. This is separate from gene assignment counting.
-        // For SE reads: add coverage now. For PE: deferred to reconcile_pair().
-        if flags & BAM_FPAIRED == 0 || flags & BAM_FPROPER_PAIR == 0 {
-            self.add_per_block_coverage_cached(&m_blocks, &cached_hits, index);
-        }
+        let tid = record.tid();
+        self.chrom_names
+            .entry(tid)
+            .or_insert_with(|| chrom.to_string());
 
         // Bundle per-read data for downstream use
         let data = MateData {
@@ -375,51 +367,112 @@ impl QualimapAccum {
             cached_hits,
             is_reverse,
             is_first_of_pair,
+            tid,
+            n_op_count,
+            motifs,
+            junction_ref_positions,
         };
 
         // PE path: check BAM flags directly (no library-level paired flag needed)
         if flags & BAM_FPAIRED != 0 && flags & BAM_FPROPER_PAIR != 0 {
-            // PE proper pair: buffer and combine with mate (Qualimap name-sorts
-            // and processes both mates' intervals together as a fragment).
-            self.process_pe_read(record, data, chrom, index);
+            // A pair is complete with its two primary records unless the name
+            // may have more records that pass the filters: a supplementary
+            // record (announced by the SA tag on every part of a chimeric
+            // alignment), or secondary records, which are only kept when they
+            // lack an NH tag (with NH present they have NH > 1).
+            let extra_records_possible = flags & (BAM_FSECONDARY | BAM_FSUPPLEMENTARY) != 0
+                || nh.is_none()
+                || record.aux(b"SA").is_ok();
+            self.add_to_fragment(record.qname(), data, extra_records_possible, index);
         } else {
-            // SE mode or non-proper pair: assign immediately (numReads = 1)
-            self.classify_and_count(&data, chrom, index, 1);
+            // SE mode or non-proper pair: processRead (numReads = 1)
+            self.process_single(&data, index);
         }
     }
 
-    /// Process a PE read — buffer first mate, reconcile when second arrives.
-    fn process_pe_read(
+    /// Add a proper-pair record to its read-name group and count the group
+    /// as soon as it is known to be a complete two-record fragment.
+    fn add_to_fragment(
         &mut self,
-        record: &bam::Record,
+        qname: &[u8],
         data: MateData,
-        chrom: &str,
+        extra_records_possible: bool,
         index: &QualimapIndex,
     ) {
-        let key = make_mate_key(record);
-
-        if let Some(mate) = self.mate_buffer.remove(&key) {
-            // Found the mate — reconcile the pair.
-            // Current read is r1 (second-seen), buffered mate is r2 (first-seen).
-            self.reconcile_pair(&data, &mate, chrom, index);
-        } else {
-            // First mate seen — buffer it
-            self.mate_buffer.insert(key, data);
+        let group = self.fragments.entry(qname.into()).or_default();
+        group.mates.push(data);
+        group.hold |= extra_records_possible;
+        if group.mates.len() == 2 && !group.hold {
+            let group = self
+                .fragments
+                .remove(qname)
+                .expect("fragment group was just inserted");
+            self.process_fragment(&group.mates[0], &group.mates[1], index);
         }
     }
 
-    /// Reconcile a PE pair: combine M-blocks and gene assignments.
+    /// Chromosome name of a record's reference id.
+    fn chrom_of(&self, tid: i32) -> &str {
+        self.chrom_names.get(&tid).map(String::as_str).unwrap_or("")
+    }
+
+    /// Junction statistics of one record (`collectJunctionInfo`), which
+    /// Qualimap gathers in `getReadIntervals` only for reads it counts.
+    fn count_junctions(&mut self, data: &MateData, index: &QualimapIndex) {
+        // Qualimap increments numReadsWithJunction for every N-operation,
+        // even when the motif extraction guard fails. Match that behavior.
+        self.counters.reads_at_junctions += data.n_op_count as u64;
+
+        // Count junction motifs per-read, matching Qualimap which
+        // calls collectJunctionInfo independently for each SAMRecord.
+        for motif in &data.motifs {
+            *self
+                .junction_motifs
+                .counts
+                .entry((motif.donor, motif.acceptor))
+                .or_insert(0) += 1;
+        }
+
+        // Classify junction events as known/partly known/novel using the
+        // Qualimap junction location map (exon boundary positions ±1 tolerance).
+        let chrom = self.chrom_of(data.tid);
+        let (mut known, mut partly_known) = (0, 0);
+        for &(pos_ref1, pos_ref2) in &data.junction_ref_positions {
+            let j1 = index.has_junction_overlap(chrom, pos_ref1);
+            let j2 = index.has_junction_overlap(chrom, pos_ref2);
+            if j1 && j2 {
+                known += 1;
+            } else if j1 || j2 {
+                partly_known += 1;
+            }
+            // Novel junctions (neither matches) are computed as:
+            // reads_at_junctions - known - partly_known
+        }
+        self.counters.known_junction_events += known;
+        self.counters.partly_known_junction_events += partly_known;
+    }
+
+    /// Count a two-record PE fragment (`processFragment` with two reads).
     ///
-    /// Qualimap intersects the enclosing gene sets of both mates.
+    /// Qualimap keeps the genes that enclose every M-block of both records.
     /// If exactly one gene encloses ALL M-blocks of BOTH mates → assigned.
     /// If >1 gene → ambiguous. If 0 genes → check intronic/intergenic.
-    fn reconcile_pair(&mut self, r1: &MateData, r2: &MateData, chrom: &str, index: &QualimapIndex) {
-        // Intersect the enclosing gene sets from both mates (already computed).
-        let assigned_genes: HashSet<u32> = r1
-            .enclosing_genes
-            .intersection(&r2.enclosing_genes)
-            .copied()
-            .collect();
+    fn process_fragment(&mut self, r1: &MateData, r2: &MateData, index: &QualimapIndex) {
+        self.count_junctions(r1, index);
+        self.count_junctions(r2, index);
+
+        // A record without M-blocks adds no interval, so it does not
+        // constrain the genes of the fragment.
+        let assigned_genes: HashSet<u32> = match (r1.m_blocks.is_empty(), r2.m_blocks.is_empty()) {
+            (false, false) => r1
+                .enclosing_genes
+                .intersection(&r2.enclosing_genes)
+                .copied()
+                .collect(),
+            (false, true) => r1.enclosing_genes.clone(),
+            (true, false) => r2.enclosing_genes.clone(),
+            (true, true) => HashSet::new(),
+        };
 
         // --- Coverage: per-block, strand-independent (Qualimap model) ---
         // Use cached hits from both mates to add coverage without re-querying the tree.
@@ -427,22 +480,22 @@ impl QualimapAccum {
         self.add_per_block_coverage_cached(&r2.m_blocks, &r2.cached_hits, index);
 
         // Check for overlapping_exon using cached hits from both mates.
-        // At most one increment per fragment: check r2 only if r1 didn't trigger.
-        if !check_has_overlap_not_enclosed(&r1.cached_hits) {
-            self.check_overlapping_exon_cached(&r2.cached_hits);
-        } else {
+        // At most one increment per fragment.
+        if check_has_overlap_not_enclosed(&r1.cached_hits)
+            || check_has_overlap_not_enclosed(&r2.cached_hits)
+        {
             self.counters.overlapping_exon += 1;
         }
 
-        // Combine blocks for intronic/intergenic classification only when needed
         match assigned_genes.len() {
             0 => {
                 // No gene encloses all blocks — classify as intronic or intergenic
-                let mut combined_blocks: Vec<(i32, i32)> =
-                    Vec::with_capacity(r1.m_blocks.len() + r2.m_blocks.len());
-                combined_blocks.extend_from_slice(&r1.m_blocks);
-                combined_blocks.extend_from_slice(&r2.m_blocks);
-                self.classify_no_feature(&combined_blocks, chrom, index, 2);
+                let intronic = self.overlaps_intron(r1, index) || self.overlaps_intron(r2, index);
+                if intronic {
+                    self.counters.intronic_reads += 2;
+                } else {
+                    self.counters.intergenic_reads += 2;
+                }
                 // Qualimap: noFeature += numReads (2 for PE fragment)
                 self.counters.no_feature += 2;
             }
@@ -460,35 +513,31 @@ impl QualimapAccum {
 
         // SSP estimation using cached hits — avoids re-querying the tree.
         self.count_ssp_for_blocks_cached(&r1.cached_hits, r1.is_reverse, r1.is_first_of_pair);
-        let r2_is_first = !r1.is_first_of_pair;
-        self.count_ssp_for_blocks_cached(&r2.cached_hits, r2.is_reverse, r2_is_first);
+        self.count_ssp_for_blocks_cached(&r2.cached_hits, r2.is_reverse, r2.is_first_of_pair);
     }
 
-    /// Classify and count a fragment (SE read or single-mate data).
-    ///
-    /// Shared logic for SE reads, non-proper pairs, and cross-chromosome
-    /// mate reconciliation. `num_reads` is 1 for SE / non-proper and 2 for
-    /// cross-chromosome PE fragments.
-    fn classify_and_count(
-        &mut self,
-        data: &MateData,
-        chrom: &str,
-        index: &QualimapIndex,
-        num_reads: u64,
-    ) {
+    /// Count a single read: SE reads and non-proper pairs (`processRead`).
+    fn process_single(&mut self, data: &MateData, index: &QualimapIndex) {
+        self.count_junctions(data, index);
+        self.add_per_block_coverage_cached(&data.m_blocks, &data.cached_hits, index);
+
         // Check for overlapping_exon using cached results.
         self.check_overlapping_exon_cached(&data.cached_hits);
 
         match data.enclosing_genes.len() {
             0 => {
-                self.classify_no_feature(&data.m_blocks, chrom, index, num_reads);
-                self.counters.no_feature += num_reads;
+                if self.overlaps_intron(data, index) {
+                    self.counters.intronic_reads += 1;
+                } else {
+                    self.counters.intergenic_reads += 1;
+                }
+                self.counters.no_feature += 1;
             }
             1 => {
-                self.counters.exonic_reads += num_reads;
+                self.counters.exonic_reads += 1;
             }
             _ => {
-                self.counters.ambiguous += num_reads;
+                self.counters.ambiguous += 1;
             }
         }
 
@@ -532,28 +581,20 @@ impl QualimapAccum {
         }
     }
 
-    /// Classify a read that wasn't assigned to any gene as intronic or intergenic.
-    fn classify_no_feature(
-        &mut self,
-        m_blocks: &[(i32, i32)],
-        chrom: &str,
-        index: &QualimapIndex,
-        num_reads: u64,
-    ) {
-        // Classify as intronic or intergenic
-        if let Some(intron_tree) = index.intron_tree(chrom) {
-            for &(start, end) in m_blocks {
-                let mut found_intron = false;
-                intron_tree.query(start, end, |_iv| {
-                    found_intron = true;
-                });
-                if found_intron {
-                    self.counters.intronic_reads += num_reads;
-                    return;
-                }
-            }
-        }
-        self.counters.intergenic_reads += num_reads;
+    /// Whether any M-block of a record overlaps an intron
+    /// (`collectNonFeatureMappedReadInfo`): a no-feature read is intronic if
+    /// so, intergenic otherwise.
+    fn overlaps_intron(&self, data: &MateData, index: &QualimapIndex) -> bool {
+        let Some(intron_tree) = index.intron_tree(self.chrom_of(data.tid)) else {
+            return false;
+        };
+        data.m_blocks.iter().any(|&(start, end)| {
+            let mut found_intron = false;
+            intron_tree.query(start, end, |_iv| {
+                found_intron = true;
+            });
+            found_intron
+        })
     }
 
     /// Count SSP votes using pre-computed cached block hits.
@@ -585,76 +626,40 @@ impl QualimapAccum {
         }
     }
 
-    /// Flush any remaining unpaired mates at the end of a chromosome batch.
+    /// Count the read-name groups still open at the end of the input.
     ///
-    /// PE mates that were never reconciled are treated as singletons and
-    /// Qualimap skips proper-pair fragments where only one mate survived
-    /// filters (numSingleReadOnly). We simply discard orphaned mates.
-    pub fn flush_unpaired(&mut self, _index: &QualimapIndex) {
-        // Qualimap behaviour: if a proper-pair read's mate was filtered out
-        // (by NH>1, unmapped, etc.), the fragment is skipped entirely —
-        // neither exonic nor noFeature is counted. We match this by simply
-        // draining the mate buffer without processing.
-        self.mate_buffer.clear();
-    }
-
-    /// Merge another `QualimapAccum` into this one.
-    ///
-    /// Used when combining results from parallel chromosome batches.
-    pub fn merge(&mut self, other: QualimapAccum) {
-        self.counters.merge(&other.counters);
-        self.coverage.merge(other.coverage);
-        self.junction_motifs.merge(&other.junction_motifs);
-
-        // Merge mate buffers (cross-chromosome mates).
-        // When both mates were buffered in different per-chromosome batches,
-        // reconcile them here. These are PE fragments, so num_reads = 2.
-        for (key, info) in other.mate_buffer {
-            if let Some(existing) = self.mate_buffer.remove(&key) {
-                // We don't have the chrom handy for intronic classification,
-                // so treat no-feature conservatively as intergenic.
-                let common_genes: HashSet<u32> = existing
-                    .enclosing_genes
-                    .intersection(&info.enclosing_genes)
-                    .copied()
-                    .collect();
-
-                // Union fallback: if one mate has no enclosing genes, use
-                // the other mate's set (cross-chrom pairs often have one
-                // mate in an unannotated region).
-                let assigned = if existing.enclosing_genes.is_empty()
-                    && !info.enclosing_genes.is_empty()
-                {
-                    info.enclosing_genes.clone()
-                } else if info.enclosing_genes.is_empty() && !existing.enclosing_genes.is_empty() {
-                    existing.enclosing_genes.clone()
-                } else {
-                    common_genes
-                };
-
-                // PE fragment: count both reads (num_reads = 2)
-                match assigned.len() {
-                    0 => {
-                        self.counters.no_feature += 2;
-                        self.counters.intergenic_reads += 2;
-                    }
-                    1 => {
-                        self.counters.exonic_reads += 2;
-                    }
-                    _ => {
-                        self.counters.ambiguous += 2;
-                    }
-                }
-            } else {
-                self.mate_buffer.insert(key, info);
+    /// Groups of exactly two records are fragments; Qualimap skips the rest
+    /// (a single record whose mate was filtered out, or more than two
+    /// records). Call once, after all accumulators have been merged.
+    pub fn flush_unpaired(&mut self, index: &QualimapIndex) {
+        let groups: Vec<PendingFragment> = self.fragments.drain().map(|(_, g)| g).collect();
+        for group in groups {
+            if let [r1, r2] = group.mates.as_slice() {
+                self.process_fragment(r1, r2, index);
             }
         }
     }
 
-    /// Get the number of unmatched mates still in the buffer.
+    /// Merge another `QualimapAccum` into this one.
+    ///
+    /// Used when combining results from parallel chromosome batches. Open
+    /// read-name groups are combined and counted by `flush_unpaired`.
+    pub fn merge(&mut self, other: QualimapAccum) {
+        self.counters.merge(&other.counters);
+        self.coverage.merge(other.coverage);
+        self.junction_motifs.merge(&other.junction_motifs);
+        self.chrom_names.extend(other.chrom_names);
+        for (qname, group) in other.fragments {
+            let mine = self.fragments.entry(qname).or_default();
+            mine.mates.extend(group.mates);
+            mine.hold |= group.hold;
+        }
+    }
+
+    /// Get the number of read names with an open fragment group.
     #[allow(dead_code)]
     pub fn unmatched_count(&self) -> usize {
-        self.mate_buffer.len()
+        self.fragments.len()
     }
 
     /// Convert this accumulator into a `QualimapResult`.
@@ -677,6 +682,7 @@ impl QualimapAccum {
             secondary_alignments: self.counters.secondary_alignments,
             not_aligned: self.counters.not_aligned,
             alignment_not_unique: self.counters.alignment_not_unique,
+            seq_not_found: self.counters.seq_not_found,
             exonic_reads: self.counters.exonic_reads,
             ambiguous_reads: self.counters.ambiguous,
             no_feature: self.counters.no_feature,
@@ -837,7 +843,7 @@ fn decode_base(encoded: u8) -> u8 {
 
 /// Check whether any cached block hit has an overlap that is not fully enclosed.
 ///
-/// Pure predicate — does not modify any counters. Used in `reconcile_pair` to
+/// Pure predicate — does not modify any counters. Used in `process_fragment` to
 /// avoid double-incrementing `overlapping_exon` when checking both mates.
 fn check_has_overlap_not_enclosed(cached_hits: &[CachedBlockHits]) -> bool {
     cached_hits.iter().any(|h| h.has_overlap_not_enclosed)
@@ -987,29 +993,6 @@ fn find_enclosing_genes(
     find_enclosing_genes_cached(&cached_hits, stranded, is_reverse, is_first_of_pair)
 }
 
-/// Build a mate buffer key from a BAM record.
-///
-/// Uses FNV-1a hash of qname + r1-centric ordering of positions.
-fn make_mate_key(record: &bam::Record) -> MateKey {
-    let qname_hash = hash_qname(record.qname());
-    let tid = record.tid();
-    let pos = record.pos();
-    let mate_tid = record.mtid();
-    let mate_pos = record.mpos();
-
-    // Always store with read1 position first for consistent lookup
-    if tid < mate_tid || (tid == mate_tid && pos <= mate_pos) {
-        (qname_hash, tid, pos, mate_tid, mate_pos)
-    } else {
-        (qname_hash, mate_tid, mate_pos, tid, pos)
-    }
-}
-
-/// FNV-1a hash of a byte slice (for qname hashing).
-fn hash_qname(qname: &[u8]) -> u64 {
-    crate::io::fnv1a(qname)
-}
-
 // ============================================================
 // Unit tests
 // ============================================================
@@ -1017,15 +1000,6 @@ fn hash_qname(qname: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_hash_qname_deterministic() {
-        let h1 = hash_qname(b"read1");
-        let h2 = hash_qname(b"read1");
-        let h3 = hash_qname(b"read2");
-        assert_eq!(h1, h2);
-        assert_ne!(h1, h3);
-    }
 
     #[test]
     fn test_decode_base() {

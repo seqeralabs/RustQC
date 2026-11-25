@@ -10,6 +10,9 @@ use anyhow::{Context, Result};
 use log::debug;
 
 use super::coverage::TranscriptCoverage;
+use super::format::{
+    format_decimal, format_long, format_percentage, java_double_to_string, percentage_of,
+};
 use super::index::QualimapIndex;
 use super::plots;
 use super::QualimapResult;
@@ -29,71 +32,13 @@ const LOW_TIER_COUNT: usize = 500;
 /// Number of top transcripts used for 5'-3' bias calculation, as Qualimap
 /// prints it. Its selection code actually keeps the top 1001 (see
 /// [`compute_bias`]).
-const NUM_TRANSCRIPTS_FOR_BIAS: usize = 1000;
+pub(super) const NUM_TRANSCRIPTS_FOR_BIAS: usize = 1000;
 
 /// Number of bases at 5'/3' ends used for bias calculation.
-const NUM_PRIME_BASES: usize = 100;
+pub(super) const NUM_PRIME_BASES: usize = 100;
 
 /// Minimum transcript length for bias calculation.
 const MIN_TRANSCRIPT_LENGTH_FOR_BIAS: usize = 500;
-
-// ============================= Number Formatting ===============================
-
-/// Format an integer with comma separators (e.g., 1234567 → "1,234,567").
-use crate::io::format_with_commas;
-
-/// Format a percentage with Qualimap-style precision.
-///
-/// Qualimap uses Java's default `String.format("%.2f", val)` but with
-/// trailing-zero trimming on the decimal part. Looking at real output:
-/// - 68.3% (not 68.30%)
-/// - 29.69%
-/// - 2.01%
-/// - 9.31%
-///
-/// The pattern is: 2 decimal places, then strip trailing zeros (but keep
-/// at least one decimal digit).
-fn format_percentage(val: f64) -> String {
-    let s = format!("{:.2}", val);
-    // Strip trailing zeros after decimal point, but keep at least one decimal
-    if s.contains('.') {
-        let trimmed = s.trim_end_matches('0');
-        let trimmed = if trimmed.ends_with('.') {
-            // e.g., "68." → keep at least "68.0"
-            // Actually Qualimap shows "68.3" not "68.0" — but if we get exactly
-            // an integer like 68.00, it would show "68.0" based on the trim logic.
-            // However looking at real data, Qualimap never shows ".0" — it shows
-            // integers as "68" etc. Let's check: the real data shows "68.3%", "29.69%"
-            // etc. When the value is exactly integer, Qualimap shows e.g. "9.31%".
-            // There's no case of exactly-integer percentages in the reference.
-            // Be safe: keep "X.0" format.
-            &s[..trimmed.len() + 1]
-        } else {
-            trimmed
-        };
-        trimmed.to_string()
-    } else {
-        s
-    }
-}
-
-/// Format a bias value with Qualimap-style precision.
-///
-/// Qualimap uses 2 decimal places with trailing-zero trimming.
-/// Examples: 0.71, 0.57, 1.3, 1.47, 0.31, 0.22
-fn format_bias(val: f64) -> String {
-    let s = format!("{:.2}", val);
-    if s.contains('.') {
-        let trimmed = s.trim_end_matches('0');
-        if trimmed.ends_with('.') {
-            format!("{}.0", trimmed.trim_end_matches('.'))
-        } else {
-            trimmed.to_string()
-        }
-    } else {
-        s
-    }
-}
 
 // ============================= Coverage Profile ================================
 
@@ -322,6 +267,8 @@ fn compute_mean_coverage_histogram(
 /// Write the coverage profile TSV file.
 ///
 /// Format: tab-separated, header line starting with `#`, 100 rows (0.0–99.0).
+/// Qualimap writes both columns by string concatenation, i.e. with
+/// `Double.toString` (`BamQCChart.exportData`).
 fn write_coverage_profile(profile: &[f64; NUM_BINS], path: &Path) -> Result<()> {
     use std::fs::File;
 
@@ -331,7 +278,12 @@ fn write_coverage_profile(profile: &[f64; NUM_BINS], path: &Path) -> Result<()> 
     writeln!(f, "#Transcript position\tTranscript coverage profile")?;
 
     for (i, &val) in profile.iter().enumerate() {
-        writeln!(f, "{:.1}\t{}", i as f64, val)?;
+        writeln!(
+            f,
+            "{}\t{}",
+            java_double_to_string(i as f64),
+            java_double_to_string(val)
+        )?;
     }
 
     Ok(())
@@ -452,7 +404,17 @@ pub fn write_qualimap_results(
     let high_profile = compute_coverage_profile(&high_entries);
 
     // --- Compute bias ---
-    let (five_bias, three_bias, five_three_bias) = compute_bias(&entries, &java_ordered_indices);
+    // TranscriptDataHandler.calculateCoverageBias returns early when no
+    // transcript received any coverage, leaving the three medians at 0.0.
+    let (five_bias, three_bias, five_three_bias) = if result
+        .transcript_coverage_raw
+        .num_transcripts_with_coverage()
+        == 0
+    {
+        (0.0, 0.0, 0.0)
+    } else {
+        compute_bias(&entries, &java_ordered_indices)
+    };
 
     // --- Compute mean coverage histogram ---
     let coverage_histogram = compute_mean_coverage_histogram(&entries);
@@ -568,6 +530,7 @@ pub fn write_qualimap_results(
         primary_alignments: result.primary_alignments,
         secondary_alignments: result.secondary_alignments,
         alignment_not_unique: result.alignment_not_unique,
+        seq_not_found: result.seq_not_found,
         exonic_reads: result.exonic_reads,
         ambiguous_reads: result.ambiguous_reads,
         no_feature: result.no_feature,
@@ -640,66 +603,62 @@ fn write_results_file(
         writeln!(
             f,
             "    reads aligned (left/right) = {} / {}",
-            format_with_commas(result.left_proper_in_pair),
-            format_with_commas(result.right_proper_in_pair)
+            format_long(result.left_proper_in_pair),
+            format_long(result.right_proper_in_pair)
         )?;
         writeln!(
             f,
             "    read pairs aligned  = {}",
-            format_with_commas(result.both_proper_in_pair / 2)
+            format_long(result.both_proper_in_pair / 2)
         )?;
     } else {
         writeln!(
             f,
             "    reads aligned  = {}",
-            format_with_commas(result.read_count)
+            format_long(result.primary_alignments)
         )?;
     }
     writeln!(
         f,
         "    total alignments = {}",
-        format_with_commas(result.primary_alignments + result.secondary_alignments)
+        format_long(result.primary_alignments + result.secondary_alignments)
     )?;
     writeln!(
         f,
         "    secondary alignments = {}",
-        format_with_commas(result.secondary_alignments)
+        format_long(result.secondary_alignments)
     )?;
     writeln!(
         f,
         "    non-unique alignments = {}",
-        format_with_commas(result.alignment_not_unique)
+        format_long(result.alignment_not_unique)
     )?;
     writeln!(
         f,
         "    aligned to genes  = {}",
-        format_with_commas(result.exonic_reads)
+        format_long(result.exonic_reads)
     )?;
     writeln!(
         f,
         "    ambiguous alignments = {}",
-        format_with_commas(result.ambiguous_reads)
+        format_long(result.ambiguous_reads)
     )?;
     writeln!(
         f,
         "    no feature assigned = {}",
-        format_with_commas(result.no_feature)
+        format_long(result.no_feature)
     )?;
-    writeln!(
-        f,
-        "    not aligned = {}",
-        format_with_commas(result.not_aligned)
-    )?;
+    writeln!(f, "    not aligned = {}", format_long(result.not_aligned))?;
 
-    // SSP estimation — only written when protocol was not pre-specified (unstranded)
-    // When the user specifies --stranded, Qualimap does not output this line.
+    // SSP estimation: only when the protocol is not strand-specific.
     if stranded == Strandedness::Unstranded {
-        let ssp_total = result.ssp_fwd + result.ssp_rev;
-        if ssp_total > 0 {
-            let fwd = result.ssp_fwd as f64 / ssp_total as f64;
-            let rev = result.ssp_rev as f64 / ssp_total as f64;
-            writeln!(f, "    SSP estimation (fwd/rev) = {:.2} / {:.2}", fwd, rev)?;
-        }
+        let (fwd, rev) = super::strand_estimation(result.ssp_fwd, result.ssp_rev);
+        writeln!(
+            f,
+            "    SSP estimation (fwd/rev) = {} / {}",
+            format_decimal(fwd),
+            format_decimal(rev)
+        )?;
     }
     writeln!(f)?;
     writeln!(f)?;
@@ -708,39 +667,19 @@ fn write_results_file(
     writeln!(f, ">>>>>>> Reads genomic origin")?;
     writeln!(f)?;
 
-    let total_classified = result.exonic_reads + result.intronic_reads + result.intergenic_reads;
-    if total_classified > 0 {
-        let exonic_pct = result.exonic_reads as f64 / total_classified as f64 * 100.0;
-        let intronic_pct = result.intronic_reads as f64 / total_classified as f64 * 100.0;
-        let intergenic_pct = result.intergenic_reads as f64 / total_classified as f64 * 100.0;
-
-        // overlapping exon percentage is relative to total classified
-        let overlapping_pct =
-            result.overlapping_exon_reads as f64 / total_classified as f64 * 100.0;
-
+    // Qualimap divides by exonic + "no feature" reads (RNASeqQCAnalysis.writeReport).
+    let total_reads = result.exonic_reads + result.no_feature;
+    for (label, count) in [
+        ("exonic = ", result.exonic_reads),
+        ("intronic =", result.intronic_reads),
+        ("intergenic =", result.intergenic_reads),
+        ("overlapping exon =", result.overlapping_exon_reads),
+    ] {
         writeln!(
             f,
-            "    exonic =  {} ({}%)",
-            format_with_commas(result.exonic_reads),
-            format_percentage(exonic_pct)
-        )?;
-        writeln!(
-            f,
-            "    intronic = {} ({}%)",
-            format_with_commas(result.intronic_reads),
-            format_percentage(intronic_pct)
-        )?;
-        writeln!(
-            f,
-            "    intergenic = {} ({}%)",
-            format_with_commas(result.intergenic_reads),
-            format_percentage(intergenic_pct)
-        )?;
-        writeln!(
-            f,
-            "    overlapping exon = {} ({}%)",
-            format_with_commas(result.overlapping_exon_reads),
-            format_percentage(overlapping_pct)
+            "    {label} {} ({})",
+            format_long(count),
+            format_percentage(percentage_of(count, total_reads))
         )?;
     }
     writeln!(f)?;
@@ -749,9 +688,9 @@ fn write_results_file(
     // >>>>>>> Transcript coverage profile
     writeln!(f, ">>>>>>> Transcript coverage profile")?;
     writeln!(f)?;
-    writeln!(f, "    5' bias = {}", format_bias(five_bias))?;
-    writeln!(f, "    3' bias = {}", format_bias(three_bias))?;
-    writeln!(f, "    5'-3' bias = {}", format_bias(five_three_bias))?;
+    writeln!(f, "    5' bias = {}", format_decimal(five_bias))?;
+    writeln!(f, "    3' bias = {}", format_decimal(three_bias))?;
+    writeln!(f, "    5'-3' bias = {}", format_decimal(five_three_bias))?;
     writeln!(f)?;
     writeln!(f)?;
 
@@ -761,25 +700,15 @@ fn write_results_file(
     writeln!(
         f,
         "    reads at junctions = {}",
-        format_with_commas(result.reads_at_junctions)
+        format_long(result.reads_at_junctions)
     )?;
     writeln!(f)?;
 
-    // Sort junction motifs by percentage descending
-    if result.reads_at_junctions > 0 {
-        let total_junctions = result.reads_at_junctions as f64;
-        let mut motif_pcts: Vec<(String, f64)> = result
-            .junction_motifs
-            .iter()
-            .map(|(motif, &count)| (motif.clone(), count as f64 * 100.0 / total_junctions))
-            .collect();
-        motif_pcts.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-        // Qualimap shows top 11 motifs (count <= 10 in their loop)
-        for (motif, pct) in motif_pcts.iter().take(11) {
-            // Match Java DecimalFormat("###.##"): trailing-zero trimming.
-            writeln!(f, "    {} : {}%", motif, format_bias(*pct))?;
-        }
+    // Junction motifs by percentage descending, ties broken by motif name
+    for (motif, pct) in
+        super::junction_motif_rows(&result.junction_motifs, result.reads_at_junctions)
+    {
+        writeln!(f, "    {} : {}", motif, format_percentage(pct))?;
     }
 
     Ok(())
@@ -954,33 +883,6 @@ fn java_hashmap_order_indices(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_format_with_commas() {
-        assert_eq!(format_with_commas(0), "0");
-        assert_eq!(format_with_commas(999), "999");
-        assert_eq!(format_with_commas(1000), "1,000");
-        assert_eq!(format_with_commas(1234567), "1,234,567");
-        assert_eq!(format_with_commas(87559392), "87,559,392");
-    }
-
-    #[test]
-    fn test_format_percentage() {
-        assert_eq!(format_percentage(68.30), "68.3");
-        assert_eq!(format_percentage(29.69), "29.69");
-        assert_eq!(format_percentage(2.01), "2.01");
-        assert_eq!(format_percentage(9.31), "9.31");
-        assert_eq!(format_percentage(100.00), "100.0");
-    }
-
-    #[test]
-    fn test_format_bias() {
-        assert_eq!(format_bias(0.71), "0.71");
-        assert_eq!(format_bias(0.57), "0.57");
-        assert_eq!(format_bias(1.30), "1.3");
-        assert_eq!(format_bias(1.47), "1.47");
-        assert_eq!(format_bias(0.22), "0.22");
-    }
 
     #[test]
     fn test_commons_math_median() {

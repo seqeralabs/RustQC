@@ -105,7 +105,7 @@ Alignment-level statistics for all primary reads:
 
 | Field                 | Description                                                            |
 | --------------------- | ---------------------------------------------------------------------- |
-| reads aligned         | Total primary alignments (excluding secondary, supplementary, QC-fail) |
+| reads aligned         | Primary alignments: mapped records not flagged secondary (SE)          |
 | total alignments      | All mapped reads (primary + secondary)                                 |
 | secondary alignments  | Alignments flagged as secondary (0x100)                                |
 | non-unique alignments | Multi-mappers (NH tag > 1)                                             |
@@ -125,7 +125,7 @@ against the annotation:
      exonic = 122,500,822 (76.45%)
      intronic = 29,504,572 (18.37%)
      intergenic = 8,344,022 (5.19%)
-     overlapping exon = 6,754,726 (4.20%)
+     overlapping exon = 6,754,726 (4.2%)
 ```
 
 | Field            | Description                                            |
@@ -330,6 +330,27 @@ eliminating the separate name-sort and Qualimap run required by the original Jav
 
 </details>
 
+Every number is printed the way Qualimap prints it. Qualimap formats counts,
+ratios and percentages with Java's `DecimalFormat` (at most two decimals,
+trailing zeros dropped, half-even rounding), so a whole percentage is `60%`,
+not `60.0%`, and a ratio of exactly one half is `0.5`. The coverage profile
+files use Java's `Double.toString` (`0.0`, `1.0E-4`). Reads on a sequence with
+no annotated exon are left out of the counts, as in Qualimap, and reported in
+the HTML report as "Missing chromosome in annotation".
+
+Reads are selected as Qualimap selects them. Secondary, supplementary and
+QC-fail records are not skipped: every mapped record with an NH tag of at most
+1 (or none) is counted. Proper pairs are grouped by read name, as Qualimap does
+with its name-sorted input. A group of exactly two records is one fragment, and
+Qualimap skips any other group, for example a pair plus a supplementary record.
+
+<Aside type="note" title="Junction motifs with the same count">
+Qualimap lists tied junction motifs in the order of its internal `HashMap`,
+which depends on the order it first saw each motif in the (name-sorted)
+input. RustQC cannot reproduce that order, so it lists tied motifs
+alphabetically. The motifs and their percentages are the same.
+</Aside>
+
 <details>
 <summary>Small dataset (~52K reads, chr6)</summary>
 
@@ -422,7 +443,7 @@ paths).
 | exonic fraction     | 76.45%          | 76.45% | Yes    |
 | intronic fraction   | 18.37%          | 18.37% | Yes    |
 | intergenic fraction | 5.19%           | 5.19%  | Yes    |
-| overlapping exon    | 4.20%           | 4.20%  | Yes    |
+| overlapping exon    | 4.2%            | 4.2%   | Yes    |
 
 ##### Transcript coverage profile
 
@@ -438,8 +459,9 @@ paths).
 | ------------------ | --------------- | ---------- | ------ |
 | reads at junctions | 56,119,719      | 56,119,719 | Yes    |
 
-Junction motif type percentages match with rounding differences less than 0.05
-percentage points. The underlying read counts are identical.
+Junction motif counts and percentages are identical. Motifs with the same
+count are listed alphabetically, which can differ from Qualimap's order (see the note on
+junction motifs above).
 
 </details>
 
