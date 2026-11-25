@@ -1,0 +1,2 @@
+mosdepth	0.3.14
+samtools	1.24
