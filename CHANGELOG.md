@@ -1,5 +1,23 @@
 # RustQC Changelog
 
+## Unreleased
+
+### Features
+
+- New `rustqc dna` subcommand for DNA (WGS) quality control: depth of coverage
+  with mosdepth-compatible outputs, samtools-compatible stats, flagstat and
+  idxstats, and preseq library complexity, all in a single pass over the
+  alignment with one worker per contig, plus Picard-compatible
+  CollectWgsMetrics and CollectInsertSizeMetrics. Validated for exact parity
+  against mosdepth 0.3.14, samtools 1.24 and Picard 3.4.0.
+
+### Changed
+
+- Internal: assay-agnostic analyses (BAM flag helpers, read-level statistics,
+  the samtools stats/flagstat/idxstats writers, preseq) moved from `rna` to a
+  new `common` module. The old `rustqc::rna::...` paths still resolve through
+  re-exports, so this is not a breaking change for library users.
+
 ## [Version 0.2.1](https://github.com/seqeralabs/RustQC/releases/tag/v0.2.1) - 2026-04-09
 
 ### Bug fixes
