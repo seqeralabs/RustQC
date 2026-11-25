@@ -1,0 +1,118 @@
+---
+title: Picard metrics
+description: CollectWgsMetrics, CollectInsertSizeMetrics, CollectGcBiasMetrics and CollectHsMetrics, and exactly which columns RustQC reproduces.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+<Aside type="note" title="About Picard">
+Picard is a set of command line tools for manipulating high-throughput
+sequencing data and formats.
+
+[Documentation](https://broadinstitute.github.io/picard/) | [Source code](https://github.com/broadinstitute/picard)
+</Aside>
+
+RustQC reproduces four Picard collectors, validated against Picard 3.4.0. Three
+match byte for byte; the fourth matches on every column that does not require a
+Monte Carlo simulation.
+
+## CollectWgsMetrics
+
+Written to `picard/wgs_metrics/{sample}.wgs_metrics.txt`. Needs `--reference`,
+because `GENOME_TERRITORY` counts the reference's non-N bases and cannot be
+taken from the alignment header.
+
+Every column and all 251 histogram lines match Picard, except
+`HET_SNP_SENSITIVITY` and `HET_SNP_Q`, which come from Picard's Monte Carlo
+`TheoreticalSensitivity` and are written as `?`.
+
+### The exclusion breakdown
+
+This is what separates Picard's coverage from a plain depth count, and reading
+it is the point of the tool. Unmapped, secondary and supplementary records
+never enter the calculation. Every other record's reference-consuming bases
+form the denominator of all the `PCT_EXC_*` columns. Exclusions then apply in a
+fixed order:
+
+1. `PCT_EXC_DUPE`, the whole read, when duplicate-flagged;
+2. `PCT_EXC_MAPQ`, the whole read, below the mapping quality floor;
+3. `PCT_EXC_UNPAIRED`, the whole read, when unpaired;
+4. `PCT_EXC_BASEQ`, per base, below the base quality floor;
+5. `PCT_EXC_OVERLAP`, per base, where the mate already covered it;
+6. `PCT_EXC_CAPPED`, per base, for depth beyond `--coverage-cap`.
+
+What survives is the high quality coverage the histogram reports. The figures
+reconcile: on the test data, 670989 aligned bases less 201120 duplicate, 4933
+low quality, 217866 overlapping and 105814 capped leaves the 141256 the
+histogram holds.
+
+`SD_COVERAGE` is the sample standard deviation over **every** base of the
+territory, uncovered ones included, which is why it can dwarf the mean on a
+targeted library.
+
+## CollectInsertSizeMetrics
+
+Written to `picard/insert_size/{sample}.insert_size_metrics.txt`. Matches
+Picard byte for byte, metrics row and histogram.
+
+A pair counts when it is paired, neither secondary, supplementary, duplicate
+nor unmapped, has a mapped mate, and carries a positive `TLEN`, which is what
+counts each pair once. Proper-pair is deliberately not required.
+
+`MEAN_INSERT_SIZE` and `STANDARD_DEVIATION` are computed over the histogram
+trimmed to `--deviations` median absolute deviations either side of the median,
+while `MIN` and `MAX` are over the untrimmed set, so a single far outlier moves
+the reported maximum but not the mean.
+
+## CollectGcBiasMetrics
+
+Written to `picard/gc_bias/{sample}.gc_bias.detail_metrics.txt` and
+`.summary_metrics.txt`. Needs `--reference`. Both files match Picard byte for
+byte.
+
+`NORMALIZED_COVERAGE` is the read density in a GC bin relative to the
+genome-wide density, so 1.0 means a bin is covered exactly in proportion to how
+much of the reference sits at that GC content. `AT_DROPOUT` and `GC_DROPOUT`
+accumulate, over the bins where reads are under-represented, how many
+percentage points of the reference are being missed.
+
+<Aside type="caution" title="Reverse-strand reads are binned by their far end">
+A read is assigned to the window at its alignment start, except on the reverse
+strand, where Picard uses `alignment_end - window_size`. That is not the read's
+5' end. RustQC matches Picard rather than the intuition.
+</Aside>
+
+## CollectHsMetrics
+
+Written to `picard/hs_metrics/{sample}.hs_metrics.txt`, and only when
+`--targets` is given.
+
+All 58 computable columns match Picard, including `HS_LIBRARY_SIZE`, which
+solves the Lander-Waterman equation the same way Picard's estimator does.
+
+Seven columns are not computed and are written the way Picard writes its own
+uncomputable values:
+
+| Column | Why |
+| --- | --- |
+| `HET_SNP_SENSITIVITY`, `HET_SNP_Q` | Monte Carlo theoretical sensitivity |
+| `HS_PENALTY_10X` … `HS_PENALTY_100X` | derived from the same simulation |
+| `FOLD_80_BASE_PENALTY` | derived from the same simulation |
+| `AT_DROPOUT`, `GC_DROPOUT` | per-target GC binning, not implemented |
+
+<Aside type="caution" title="HsMetrics does not filter the way WgsMetrics does">
+`CollectHsMetrics` clips overlapping mates first, at the read level, and only
+then applies the base quality floor. `CollectWgsMetrics` does the opposite.
+That is why the two report different `PCT_EXC_BASEQ` and `PCT_EXC_OVERLAP` on
+the same file, and why the two coverage figures are not comparable to each
+other. RustQC keeps a separate accumulator for each so that both agree with
+their own upstream tool.
+</Aside>
+
+## Reproducibility of the reference outputs
+
+The fixtures RustQC is validated against are regenerated by
+`tests/create_dna_test_data.sh`, which pins the tool versions and forces the
+JVM locale to English. A French default locale makes Picard write `3,531312`
+where an English one writes `3.531312`, which would make the reference outputs
+depend on the machine that produced them.

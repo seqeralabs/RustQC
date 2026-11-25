@@ -21,7 +21,17 @@ path = "src/lib.rs"
 name = "rustqc"
 path = "src/main.rs"
 
+[features]
+default = ["proteomics"]
+# Mass spectrometry support for `rustqc protein spectra`. Enabled by default;
+# disable with `--no-default-features` to drop mzdata and its transitive
+# packages, which is worth doing when only the sequencing pipelines are needed.
+proteomics = ["dep:mzdata"]
+
 [dependencies]
+# mzML reading for the protein spectra mode (optional, see the `proteomics` feature)
+mzdata = { version = "0.66", default-features = false, features = ["mzml"], optional = true }
+
 # CLI argument parsing
 clap = { version = "4", features = ["derive", "env"] }
 
