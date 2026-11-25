@@ -30,8 +30,9 @@ pub struct SaturationResult {
 /// Produces an R script matching RSeQC's `junctionSaturation_plot.r` format.
 pub fn write_r_script(result: &SaturationResult, prefix: &str) -> Result<()> {
     let r_path = format!("{prefix}.junctionSaturation_plot.r");
-    let mut f =
+    let f =
         std::fs::File::create(&r_path).with_context(|| format!("creating R script: {r_path}"))?;
+    let mut f = std::io::BufWriter::new(f);
 
     let pdf_path = format!("{prefix}.junctionSaturation_plot.pdf");
 
@@ -74,12 +75,14 @@ pub fn write_r_script(result: &SaturationResult, prefix: &str) -> Result<()> {
     writeln!(f, "dev.off()")?;
 
     info!("Wrote R script: {r_path}");
+    f.flush()?;
     Ok(())
 }
 
 /// Write a summary text file with junction saturation statistics.
 pub fn write_summary(result: &SaturationResult, path: &str) -> Result<()> {
-    let mut f = std::fs::File::create(path).with_context(|| format!("creating summary: {path}"))?;
+    let f = std::fs::File::create(path).with_context(|| format!("creating summary: {path}"))?;
+    let mut f = std::io::BufWriter::new(f);
 
     writeln!(
         f,
@@ -97,6 +100,7 @@ pub fn write_summary(result: &SaturationResult, path: &str) -> Result<()> {
     }
 
     info!("Wrote summary: {path}");
+    f.flush()?;
     Ok(())
 }
 

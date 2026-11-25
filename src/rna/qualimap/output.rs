@@ -307,8 +307,9 @@ fn compute_mean_coverage_histogram(
 fn write_coverage_profile(profile: &[f64; NUM_BINS], path: &Path) -> Result<()> {
     use std::fs::File;
 
-    let mut f = File::create(path)
+    let f = File::create(path)
         .with_context(|| format!("Failed to create coverage profile: {}", path.display()))?;
+    let mut f = std::io::BufWriter::new(f);
 
     writeln!(f, "#Transcript position\tTranscript coverage profile")?;
 
@@ -316,6 +317,7 @@ fn write_coverage_profile(profile: &[f64; NUM_BINS], path: &Path) -> Result<()> 
         writeln!(f, "{:.1}\t{}", i as f64, val)?;
     }
 
+    f.flush()?;
     Ok(())
 }
 
@@ -586,8 +588,8 @@ fn write_results_file(
 ) -> Result<()> {
     use std::fs::File;
 
-    let mut f =
-        File::create(path).with_context(|| format!("Failed to create {}", path.display()))?;
+    let f = File::create(path).with_context(|| format!("Failed to create {}", path.display()))?;
+    let mut f = std::io::BufWriter::new(f);
 
     // Header
     writeln!(f, "RNA-Seq QC report")?;
@@ -764,6 +766,7 @@ fn write_results_file(
         }
     }
 
+    f.flush()?;
     Ok(())
 }
 

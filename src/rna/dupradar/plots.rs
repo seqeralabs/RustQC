@@ -1288,13 +1288,15 @@ pub fn write_intercept_slope(
     path: &std::path::Path,
 ) -> Result<()> {
     use std::io::Write;
-    let mut f = std::fs::File::create(path)?;
+    let f = std::fs::File::create(path)?;
+    let mut f = std::io::BufWriter::new(f);
     write!(
         f,
         "{sample_name} - dupRadar Int (duprate at low read counts): {}\n\
          {sample_name} - dupRadar Sl (progression of the duplication rate): {}\n",
         fit.intercept, fit.slope
     )?;
+    f.flush()?;
     Ok(())
 }
 
@@ -1305,7 +1307,8 @@ pub fn write_mqc_intercept(
     path: &std::path::Path,
 ) -> Result<()> {
     use std::io::Write;
-    let mut f = std::fs::File::create(path)?;
+    let f = std::fs::File::create(path)?;
+    let mut f = std::io::BufWriter::new(f);
     writeln!(f, "# id: dupRadar")?;
     writeln!(f, "# plot_type: 'generalstats'")?;
     writeln!(f, "# pconfig:")?;
@@ -1321,13 +1324,15 @@ pub fn write_mqc_intercept(
     writeln!(f, "#         format: '{{:.2f}}'")?;
     writeln!(f, "Sample\tdupRadar_intercept")?;
     writeln!(f, "{}\t{}", sample_name, fit.intercept)?;
+    f.flush()?;
     Ok(())
 }
 
 /// Write a MultiQC-compatible line-graph curve file.
 pub fn write_mqc_curve(fit: &FitResult, dm: &DupMatrix, path: &std::path::Path) -> Result<()> {
     use std::io::Write;
-    let mut f = std::fs::File::create(path)?;
+    let f = std::fs::File::create(path)?;
+    let mut f = std::io::BufWriter::new(f);
     writeln!(f, "# id: 'dupradar'")?;
     writeln!(f, "# section_name: 'dupRadar'")?;
     writeln!(f, "# description: 'Duplication rate vs expression'")?;
@@ -1362,6 +1367,7 @@ pub fn write_mqc_curve(fit: &FitResult, dm: &DupMatrix, path: &std::path::Path) 
         let pct = fit.predict_rpk(rpk) * 100.0;
         writeln!(f, "{}\t{}", rpk, pct)?;
     }
+    f.flush()?;
     Ok(())
 }
 

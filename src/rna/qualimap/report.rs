@@ -167,12 +167,14 @@ pub fn write_html_report(data: &ReportData, output_dir: &Path) -> Result<()> {
 
     let html = render_report(data)?;
 
-    let mut f = std::fs::File::create(&path)
+    let f = std::fs::File::create(&path)
         .with_context(|| format!("Failed to create {}", path.display()))?;
+    let mut f = std::io::BufWriter::new(f);
     f.write_all(html.as_bytes())
         .with_context(|| format!("Failed to write {}", path.display()))?;
 
     debug!("Wrote HTML report: {}", path.display());
+    f.flush()?;
     Ok(())
 }
 

@@ -43,8 +43,9 @@ fn fmt_pct(numerator: u64, denominator: u64) -> String {
 pub fn write_flagstat(result: &BamStatResult, output_path: &Path) -> Result<()> {
     use std::io::Write;
 
-    let mut out = std::fs::File::create(output_path)
+    let out = std::fs::File::create(output_path)
         .with_context(|| format!("Failed to create flagstat file: {}", output_path.display()))?;
+    let mut out = std::io::BufWriter::new(out);
 
     // Total = primary + secondary + supplementary (all QC states)
     let total = result.total_records;
@@ -148,6 +149,7 @@ pub fn write_flagstat(result: &BamStatResult, output_path: &Path) -> Result<()> 
     )?;
 
     debug!("Wrote flagstat output to {}", output_path.display());
+    out.flush()?;
     Ok(())
 }
 

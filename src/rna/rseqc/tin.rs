@@ -665,8 +665,9 @@ fn fill_aligned_blocks(record: &bam::Record, buf: &mut Vec<(u64, u64)>) {
 ///
 /// Format: TSV with header geneID\tchrom\ttx_start\ttx_end\tTIN
 pub fn write_tin(results: &TinResults, output_path: &Path) -> Result<()> {
-    let mut f = std::fs::File::create(output_path)
+    let f = std::fs::File::create(output_path)
         .with_context(|| format!("Failed to create TIN output: {}", output_path.display()))?;
+    let mut f = std::io::BufWriter::new(f);
 
     writeln!(f, "geneID\tchrom\ttx_start\ttx_end\tTIN")?;
 
@@ -698,6 +699,7 @@ pub fn write_tin(results: &TinResults, output_path: &Path) -> Result<()> {
         }
     }
 
+    f.flush()?;
     Ok(())
 }
 
@@ -705,8 +707,9 @@ pub fn write_tin(results: &TinResults, output_path: &Path) -> Result<()> {
 ///
 /// Format: Bam_file\tTIN(mean)\tTIN(median)\tTIN(stdev)
 pub fn write_tin_summary(results: &TinResults, bam_name: &str, output_path: &Path) -> Result<()> {
-    let mut f = std::fs::File::create(output_path)
+    let f = std::fs::File::create(output_path)
         .with_context(|| format!("Failed to create TIN summary: {}", output_path.display()))?;
+    let mut f = std::io::BufWriter::new(f);
 
     let scores: Vec<f64> = results
         .transcripts
@@ -732,6 +735,7 @@ pub fn write_tin_summary(results: &TinResults, bam_name: &str, output_path: &Pat
     writeln!(f, "Bam_file\tTIN(mean)\tTIN(median)\tTIN(stdev)")?;
     writeln!(f, "{}\t{}\t{}\t{}", bam_name, mean, median, stdev)?;
 
+    f.flush()?;
     Ok(())
 }
 

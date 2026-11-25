@@ -55,8 +55,9 @@ fn fmt_sci(v: f64) -> String {
 /// * `result` - The computed BAM statistics
 /// * `output_path` - Path to write the stats file
 pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
-    let mut out = std::fs::File::create(output_path)
+    let out = std::fs::File::create(output_path)
         .with_context(|| format!("Failed to create stats file: {}", output_path.display()))?;
+    let mut out = std::io::BufWriter::new(out);
 
     // Header comment — MultiQC detects "This file was produced by samtools stats"
     writeln!(out, "# This file was produced by samtools stats and RustQC")?;
@@ -387,6 +388,7 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
     write_gc_depth(&mut out, &result.gcd_bins, result)?;
 
     debug!("Wrote samtools stats output to {}", output_path.display());
+    out.flush()?;
     Ok(())
 }
 

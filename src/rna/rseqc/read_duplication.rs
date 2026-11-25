@@ -40,14 +40,16 @@ pub struct ReadDuplicationResult {
 /// * `histogram` - The duplication histogram to write
 /// * `path` - Output file path
 fn write_histogram(histogram: &DupHistogram, path: &Path) -> Result<()> {
-    let mut file = std::fs::File::create(path)
+    let file = std::fs::File::create(path)
         .with_context(|| format!("Failed to create output file: {}", path.display()))?;
+    let mut file = std::io::BufWriter::new(file);
 
     writeln!(file, "Occurrence\tUniqReadNumber")?;
     for (occurrence, uniq_count) in histogram {
         writeln!(file, "{}\t{}", occurrence, uniq_count)?;
     }
 
+    file.flush()?;
     Ok(())
 }
 
@@ -111,7 +113,8 @@ fn write_r_script(
     path: &Path,
 ) -> Result<()> {
     use std::io::Write;
-    let mut f = std::fs::File::create(path)?;
+    let f = std::fs::File::create(path)?;
+    let mut f = std::io::BufWriter::new(f);
 
     writeln!(f, "pdf('{stem}.DupRate_plot.pdf')")?;
     writeln!(f, "par(mar=c(5,4,4,5),las=0)")?;
@@ -146,6 +149,7 @@ fn write_r_script(
     writeln!(f, "mtext(4, text = \"Reads %\", line = 2)")?;
     writeln!(f, "dev.off()")?;
 
+    f.flush()?;
     Ok(())
 }
 

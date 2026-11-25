@@ -297,8 +297,9 @@ pub fn build_histogram(
 
 /// Write the per-pair detail file.
 pub fn write_detail_file(result: &InnerDistanceResult, path: &str) -> Result<()> {
-    let mut file = std::fs::File::create(path)
+    let file = std::fs::File::create(path)
         .with_context(|| format!("Failed to create detail file: {}", path))?;
+    let mut file = std::io::BufWriter::new(file);
 
     for pair in &result.pairs {
         let dist_str = match pair.distance {
@@ -308,18 +309,21 @@ pub fn write_detail_file(result: &InnerDistanceResult, path: &str) -> Result<()>
         writeln!(file, "{}\t{}\t{}", pair.name, dist_str, pair.classification)?;
     }
 
+    file.flush()?;
     Ok(())
 }
 
 /// Write the frequency (histogram) file.
 pub fn write_freq_file(result: &InnerDistanceResult, path: &str) -> Result<()> {
-    let mut file = std::fs::File::create(path)
+    let file = std::fs::File::create(path)
         .with_context(|| format!("Failed to create frequency file: {}", path))?;
+    let mut file = std::io::BufWriter::new(file);
 
     for &(bin_start, bin_end, count) in &result.histogram {
         writeln!(file, "{}\t{}\t{}", bin_start, bin_end, count)?;
     }
 
+    file.flush()?;
     Ok(())
 }
 
@@ -330,8 +334,9 @@ pub fn write_r_script(
     path: &str,
     step: i64,
 ) -> Result<()> {
-    let mut file = std::fs::File::create(path)
+    let file = std::fs::File::create(path)
         .with_context(|| format!("Failed to create R script: {}", path))?;
+    let mut file = std::io::BufWriter::new(file);
 
     // Build bin center and count vectors
     let bin_centers: Vec<String> = result
@@ -374,13 +379,15 @@ pub fn write_r_script(
     writeln!(file, "lines(density(fragsize,bw={}),col='red')", 2 * step)?;
     writeln!(file, "dev.off()")?;
 
+    file.flush()?;
     Ok(())
 }
 
 /// Write the summary text file.
 pub fn write_summary(result: &InnerDistanceResult, path: &str) -> Result<()> {
-    let mut file = std::fs::File::create(path)
+    let file = std::fs::File::create(path)
         .with_context(|| format!("Failed to create summary file: {}", path))?;
+    let mut file = std::io::BufWriter::new(file);
 
     // Count classifications
     let mut same_chrom_no = 0u64;
@@ -432,6 +439,7 @@ pub fn write_summary(result: &InnerDistanceResult, path: &str) -> Result<()> {
         }
     }
 
+    file.flush()?;
     Ok(())
 }
 
@@ -441,8 +449,9 @@ pub fn write_summary(result: &InnerDistanceResult, path: &str) -> Result<()> {
 /// which reconstructs fragment sizes from histogram bins (bin center = start + step/2,
 /// repeated by count) and computes mean/median/sd via R's functions.
 pub fn write_mean_file(result: &InnerDistanceResult, sample_name: &str, path: &str) -> Result<()> {
-    let mut file = std::fs::File::create(path)
+    let file = std::fs::File::create(path)
         .with_context(|| format!("Failed to create mean file: {}", path))?;
+    let mut file = std::io::BufWriter::new(file);
 
     writeln!(file, "Name\tMean\tMedian\tsd")?;
 
@@ -493,6 +502,7 @@ pub fn write_mean_file(result: &InnerDistanceResult, sample_name: &str, path: &s
         }
     }
 
+    file.flush()?;
     Ok(())
 }
 
