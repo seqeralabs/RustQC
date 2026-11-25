@@ -1,0 +1,69 @@
+---
+title: Qualimap bamqc
+description: The bamqc outputs RustQC produces, how Qualimap's coverage differs from every other tool here, and which figures are not reproduced.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+<Aside type="note" title="About Qualimap">
+Qualimap examines alignment data to detect biases in sequencing and mapping,
+and reports them as tables and plots.
+
+[Documentation](http://qualimap.conesalab.org/) | Okonechnikov K, Conesa A, García-Alcalde F. *Bioinformatics*. 2016;32(2):292-294.
+</Aside>
+
+RustQC writes `qualimap/genome_results.txt`, the
+`raw_data_qualimapReport/` tables and an HTML summary.
+
+<Aside type="caution" title="Qualimap's coverage is not the others' coverage">
+Qualimap counts every primary mapped record with no duplicate, mapping quality
+or base quality filtering, counts deletions as covered, and does **not**
+correct mate overlaps. On the project's test data it reports a mean coverage of
+16.77 where mosdepth reports 6.20 and `CollectWgsMetrics` reports 3.53. All
+three are right about different questions. Do not compare them to each other.
+</Aside>
+
+## Two figures that surprise people
+
+**Mean mapping quality reads about 2.4, not about 60.** It is the mean of the
+per-window means, and a window with no reads contributes zero. On a targeted or
+low-coverage library, most windows are empty, so the figure is closer to the
+fraction of the genome covered than to the quality of the alignments. The
+per-position histogram, which only counts covered positions, is the one to read
+for that.
+
+**Base composition is reported in reference orientation.** Reverse-strand reads
+are reverse-complemented before counting, so the A and T columns are not the
+counts of A and T in the sequencer's output.
+
+## What matches Qualimap and what does not
+
+`genome_results.txt` matches on every line but four, and three of the raw
+tables match byte for byte. The residuals, each with its cause:
+
+| Figure | Difference |
+| --- | --- |
+| `mean mapping quality` | fourth decimal; 393 of 397 windows match exactly |
+| `std coverageData` | fourth decimal, same cause |
+| `homopolymer indels` | differs outright, see below |
+| coverage histogram and what derives from it | about five reference positions of 40001 sit one deeper |
+| `genome_fraction_coverage` | last two digits of the double, Qualimap accumulates per window |
+| `insert_size_histogram` | one extra row: Qualimap trims the largest insert from the plotted table while still counting it in the statistics |
+
+Qualimap classifies an indel as a homopolymer indel against a reference context
+RustQC does not reconstruct. It reports two polyC indels on the test data, and
+no rule derived from the read alone produces them, because the deleted bases
+are not in the read. RustQC uses a run-of-four rule instead, so this one figure
+will differ.
+
+Qualimap's GC content distribution and duplication rate histogram are not
+written at all. The first is computed over a 679-read subsample whose selection
+rule is not documented; the second uses a definition that does not match a
+read-start-position count. Emitting tables under those names with different
+numbers would be worse than leaving them out.
+
+## The HTML report
+
+RustQC writes its own summary page rather than a copy of Qualimap's, which
+ships a bundle of images, CSS and JavaScript. It carries the same numbers as
+`genome_results.txt`; the raw tables remain the machine-readable source.

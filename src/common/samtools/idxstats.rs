@@ -8,7 +8,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use log::debug;
 
-use super::bam_stat::BamStatResult;
+use crate::common::bam_stat::BamStatResult;
 
 // ============================================================================
 // Output formatting
