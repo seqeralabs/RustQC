@@ -13,8 +13,8 @@ RSeQC is a Python package providing a suite of quality control tools for RNA-Seq
 [Documentation](https://rseqc.sourceforge.net/) | [Source code](https://github.com/MonashBioinformaticsPlatform/RSeQC)
 </Aside>
 
-RustQC reimplements eight tools from the [RSeQC](https://rseqc.sourceforge.net/)
-package (including TIN). Each tool produces output files that match the format
+RustQC reimplements ten tools from the [RSeQC](https://rseqc.sourceforge.net/)
+package (including TIN, geneBody_coverage and read_GC). Each tool produces output files that match the format
 and content of the original Python implementation, plus **native PNG and SVG
 plots** generated directly -- no R scripts required.
 
@@ -608,6 +608,77 @@ show larger differences due to the coverage counting approach described above.
 RustQC produces gene-level TIN scores (one row per gene, using the longest
 transcript as representative), while RSeQC's `tin.py` produces transcript-level
 scores. Both formats are compatible with MultiQC.
+
+## geneBody_coverage
+
+Read coverage along the gene body, 5' → 3', in 100 percentile bins — the
+standard signal for RNA degradation and 3'-end bias.
+
+| File                                    | Description                                        |
+| --------------------------------------- | -------------------------------------------------- |
+| `{stem}.geneBodyCoverage.txt`           | Percentile header row + one row of coverage per sample |
+| `{stem}.geneBodyCoverage.r`             | R plotting script (as RSeQC writes)                |
+| `{stem}.geneBodyCoverage.curves.png/svg` | Coverage curve, rendered natively                  |
+
+```
+Percentile	1	2	3	...	100
+sample	4.0	10.0	15.0	...	1.0
+```
+
+Each transcript's exonic bases are reduced to 100 percentile positions using
+the same interpolation as RSeQC's `mystat.percentile_list`, coverage is counted
+at those positions, and reverse-strand transcripts are flipped so bin 1 is
+always the 5' end. Transcripts shorter than 100 bp are skipped, matching
+RSeQC's `--minimum_length` default. Reads are filtered on unmapped, QC-fail,
+secondary and duplicate flags.
+
+<Aside type="note" title="Reference transcripts">
+RSeQC profiles every entry of a BED12 reference — usually a housekeeping-gene
+set. RustQC has no separate BED input here and instead profiles one
+representative transcript per gene from the GTF (the one with the most exonic
+bases), the same choice its TIN analysis makes. Coverage values therefore match
+RSeQC exactly for a given transcript set, but the transcript set itself depends
+on the annotation you pass.
+</Aside>
+
+<Aside type="tip" title="Not the same as Qualimap gene body coverage">
+RustQC also produces Qualimap-style gene body coverage. Qualimap bins each
+transcript into fixed relative windows; RSeQC samples percentile *positions* and
+pools raw depth across transcripts. The two profiles are related but not
+interchangeable.
+</Aside>
+
+Disable with `--skip-gene-body-coverage` or `rna.gene_body_coverage.enabled: false`.
+
+## read_GC
+
+GC-content distribution of mapped reads — the standard check for GC bias from
+library preparation or sequencing.
+
+| File                    | Description                                     |
+| ----------------------- | ----------------------------------------------- |
+| `{stem}.GC.xls`         | `GC%` / `read_count` table                      |
+| `{stem}.GC_plot.r`      | R plotting script (as RSeQC writes)             |
+| `{stem}.GC_plot.png/svg` | GC distribution, rendered natively             |
+
+```
+GC%	read_count
+0.00	483
+```
+
+Filters match RSeQC's `readGC`: unmapped, QC-failed and below-MAPQ-cutoff reads
+are skipped, while secondary alignments and duplicates are counted (upstream
+does not filter them). GC percentages are formatted with two decimals, as
+upstream does.
+
+Rows are sorted ascending by GC percentage. RSeQC emits Python dictionary order,
+which depends on the order reads appear in the BAM and is therefore not
+reproducible under parallel processing.
+
+Reads stored without a sequence (`SEQ` = `*`) are skipped and reported as a
+warning; upstream divides by zero on those.
+
+Disable with `--skip-read-gc` or `rna.read_gc.enabled: false`.
 
 ## Compatibility with RSeQC
 

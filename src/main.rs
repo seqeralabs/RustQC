@@ -188,6 +188,12 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
     if args.skip_read_duplication {
         config.read_duplication.enabled = false;
     }
+    if args.skip_gene_body_coverage {
+        config.gene_body_coverage.enabled = false;
+    }
+    if args.skip_read_gc {
+        config.read_gc.enabled = false;
+    }
     if args.skip_preseq {
         config.preseq.enabled = false;
     }
@@ -471,6 +477,15 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         None
     };
 
+    let gene_body_index = if config.gene_body_coverage.enabled {
+        ui.detail("Building gene body coverage index...");
+        Some(rna::rseqc::gene_body_coverage::GeneBodyIndex::from_genes(
+            &genes,
+        ))
+    } else {
+        None
+    };
+
     let chrom_mapping = config.alignment_to_gtf_mapping();
     let chrom_prefix = config.chromosome_prefix().map(|s| s.to_owned());
 
@@ -570,6 +585,7 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
         tin_min_coverage: config.tin.min_coverage.unwrap_or(10),
         gtf_path: &args.gtf,
         sample_name_override: effective_sample_name,
+        gene_body_index: gene_body_index.as_ref(),
     };
 
     // Step 2: Process all alignment files (in parallel when multiple)
@@ -815,6 +831,8 @@ struct SharedParams<'a> {
     tin_min_coverage: u32,
     /// Path to GTF file (for Qualimap report output).
     gtf_path: &'a str,
+    /// Pre-built sampled positions for gene body coverage (from GTF).
+    gene_body_index: Option<&'a rna::rseqc::gene_body_coverage::GeneBodyIndex>,
 }
 
 // ============================================================================
@@ -988,6 +1006,9 @@ fn process_single_bam(
         junction_saturation_seed: config.junction_saturation.seed.unwrap_or(42),
         preseq_enabled: config.preseq.enabled,
         preseq_max_segment_length: config.preseq.max_segment_length,
+        gene_body_coverage_enabled: config.gene_body_coverage.enabled
+            && params.gene_body_index.is_some_and(|i| !i.is_empty()),
+        read_gc_enabled: config.read_gc.enabled,
     };
 
     let rseqc_annotations = RseqcAnnotations {
@@ -997,6 +1018,7 @@ fn process_single_bam(
         exon_bitset: params.exon_bitset,
         transcript_tree: params.transcript_tree,
         tin_index: params.tin_index,
+        gene_body_index: params.gene_body_index,
     };
 
     let any_rseqc_enabled = rseqc_config.bam_stat_enabled
@@ -1007,7 +1029,9 @@ fn process_single_bam(
         || rseqc_config.junction_saturation_enabled
         || rseqc_config.inner_distance_enabled
         || rseqc_config.preseq_enabled
-        || rseqc_config.tin_enabled;
+        || rseqc_config.tin_enabled
+        || rseqc_config.gene_body_coverage_enabled
+        || rseqc_config.read_gc_enabled;
 
     // === Build Qualimap exon index (if enabled) ===
     let qualimap_index = if params.config.qualimap.enabled {
@@ -1869,6 +1893,75 @@ fn write_rseqc_outputs(
                 ui.warn(&format!("preseq: skipped — {}", e));
             }
         }
+    }
+
+    // --- gene body coverage (5' -> 3') ---
+    if let (Some(accum), Some(index)) = (accums.gene_body, params.gene_body_index) {
+        let gbc_dir = if flat {
+            outdir.to_path_buf()
+        } else {
+            outdir.join("rseqc").join("gene_body_coverage")
+        };
+        std::fs::create_dir_all(&gbc_dir)?;
+        let result = accum.into_result(index);
+
+        let txt_path = gbc_dir.join(format!("{}.geneBodyCoverage.txt", sample_name));
+        rna::rseqc::gene_body_coverage::write_gene_body_coverage(&result, sample_name, &txt_path)?;
+
+        let prefix = gbc_dir.join(sample_name).display().to_string();
+        let r_path = gbc_dir.join(format!("{}.geneBodyCoverage.r", sample_name));
+        rna::rseqc::gene_body_coverage::write_gene_body_r_script(
+            &result,
+            sample_name,
+            &prefix,
+            &r_path,
+        )?;
+
+        let plot_path = gbc_dir.join(format!("{}.geneBodyCoverage.curves.png", sample_name));
+        rna::rseqc::plots::gene_body_coverage_plot(&result, sample_name, &plot_path)?;
+
+        let p = gbc_dir.display().to_string();
+        ui.output_item("gene_body_coverage", &format!("{p}/{sample_name}.*"));
+        ui.output_detail(&format!(
+            "{} transcripts profiled",
+            format_count(result.num_transcripts as u64)
+        ));
+        written.push(("gene_body_coverage".into(), p));
+    }
+
+    // --- read GC distribution ---
+    if let Some(accum) = accums.read_gc {
+        let gc_dir = if flat {
+            outdir.to_path_buf()
+        } else {
+            outdir.join("rseqc").join("read_gc")
+        };
+        std::fs::create_dir_all(&gc_dir)?;
+        let result = accum.into_result();
+
+        let xls_path = gc_dir.join(format!("{}.GC.xls", sample_name));
+        rna::rseqc::read_gc::write_gc_table(&result, &xls_path)?;
+
+        let prefix = gc_dir.join(sample_name).display().to_string();
+        let r_path = gc_dir.join(format!("{}.GC_plot.r", sample_name));
+        rna::rseqc::read_gc::write_gc_r_script(&result, &prefix, &r_path)?;
+
+        let plot_path = gc_dir.join(format!("{}.GC_plot.png", sample_name));
+        rna::rseqc::plots::read_gc_plot(&result, sample_name, &plot_path)?;
+
+        if result.missing_sequence > 0 {
+            ui.warn(&format!(
+                "read_GC: {} reads had no stored sequence and were skipped",
+                format_count(result.missing_sequence)
+            ));
+        }
+
+        let p = gc_dir.display().to_string();
+        ui.output_item("read_GC", &format!("{p}/{sample_name}.*"));
+        if let Some(mean) = result.mean_gc() {
+            ui.output_detail(&format!("mean GC {:.2}%", mean));
+        }
+        written.push(("read_GC".into(), p));
     }
 
     Ok(RseqcOutputs {

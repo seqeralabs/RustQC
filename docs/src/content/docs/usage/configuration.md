@@ -153,6 +153,8 @@ Run `rustqc rna --help` to see the associated environment variable for each flag
 | `RUSTQC_TIN_SEED` | `--tin-seed` |
 | `RUSTQC_SKIP_TIN` | `--skip-tin` |
 | `RUSTQC_SKIP_READ_DUPLICATION` | `--skip-read-duplication` |
+| `RUSTQC_SKIP_GENE_BODY_COVERAGE` | `--skip-gene-body-coverage` |
+| `RUSTQC_SKIP_READ_GC` | `--skip-read-gc` |
 | `RUSTQC_SKIP_PRESEQ` | `--skip-preseq` |
 | `RUSTQC_PRESEQ_SEED` | `--preseq-seed` |
 | `RUSTQC_PRESEQ_MAX_EXTRAP` | `--preseq-max-extrap` |
@@ -522,6 +524,32 @@ measures transcript integrity via Shannon entropy of read coverage uniformity.
 The `seed` can also be set via `--tin-seed`.
 
 > **CLI shortcut:** Use `--skip-tin` to disable without a config file.
+
+## gene_body_coverage
+
+```yaml
+rna:
+  gene_body_coverage:
+    enabled: true # Set to false to skip gene body coverage profiling
+```
+
+Requires annotation (`--gtf`). Profiles read coverage along the gene body from
+5' to 3' in 100 percentile bins, matching RSeQC's `geneBody_coverage.py`.
+
+> **CLI shortcut:** Use `--skip-gene-body-coverage` to disable without a config file.
+
+## read_gc
+
+```yaml
+rna:
+  read_gc:
+    enabled: true # Set to false to skip the read GC distribution
+```
+
+GC-content distribution of mapped reads, matching RSeQC's `read_GC.py`. Uses the
+`--mapq` cutoff.
+
+> **CLI shortcut:** Use `--skip-read-gc` to disable without a config file.
 
 ## qualimap
 

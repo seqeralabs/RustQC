@@ -1026,3 +1026,101 @@ fn test_dup_check_parallel_uses_global_duplicate_state() {
 
     let _ = fs::remove_dir_all(root);
 }
+
+// ============================================================================
+// Gene body coverage / read GC (RSeQC geneBody_coverage.py / read_GC.py)
+// ============================================================================
+
+/// Reference gene body coverage profile for `tests/data/test.bam`.
+///
+/// Produced by RSeQC 5.05 (`geneBody_coverage.py`) using a BED12 file built
+/// from `tests/data/test.gtf` with the same representative-transcript choice
+/// RustQC makes (the transcript with the most exonic bases per gene).
+const EXPECTED_GENE_BODY_COVERAGE: [u64; 100] = [
+    4, 10, 15, 15, 14, 17, 14, 13, 17, 16, //
+    15, 19, 20, 19, 24, 24, 32, 35, 35, 29, //
+    29, 30, 34, 35, 40, 35, 30, 29, 29, 30, //
+    32, 34, 33, 31, 29, 29, 31, 37, 38, 35, //
+    33, 37, 44, 49, 50, 52, 52, 48, 47, 53, //
+    53, 52, 49, 44, 43, 43, 45, 50, 48, 50, //
+    52, 56, 52, 48, 45, 43, 40, 38, 38, 37, //
+    38, 38, 34, 28, 35, 34, 35, 35, 32, 32, //
+    33, 28, 29, 27, 25, 19, 22, 20, 22, 21, //
+    25, 27, 26, 21, 21, 17, 16, 13, 10, 1, //
+];
+
+#[test]
+fn test_gene_body_coverage_matches_rseqc() {
+    let root = unique_test_dir("genebody");
+    let outdir = root.display().to_string();
+    let output = run_rustqc(&outdir);
+    assert!(
+        output.status.success(),
+        "rustqc failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let path = format!("{outdir}/rseqc/gene_body_coverage/test.geneBodyCoverage.txt");
+    let contents = fs::read_to_string(&path).expect("geneBodyCoverage.txt not written");
+    let mut lines = contents.lines();
+
+    let header = lines.next().expect("missing header line");
+    let expected_header: String = std::iter::once("Percentile".to_string())
+        .chain((1..=100).map(|i| i.to_string()))
+        .collect::<Vec<_>>()
+        .join("\t");
+    assert_eq!(header, expected_header, "header must match RSeQC format");
+
+    let data = lines.next().expect("missing sample line");
+    let mut fields = data.split('\t');
+    assert_eq!(
+        fields.next(),
+        Some("test"),
+        "first column is the sample name"
+    );
+
+    let values: Vec<f64> = fields
+        .map(|v| v.parse::<f64>().expect("coverage value must parse"))
+        .collect();
+    assert_eq!(values.len(), 100, "expected 100 percentile bins");
+
+    for (i, (&got, &want)) in values
+        .iter()
+        .zip(EXPECTED_GENE_BODY_COVERAGE.iter())
+        .enumerate()
+    {
+        assert_eq!(
+            got,
+            want as f64,
+            "bin {} differs from the RSeQC reference",
+            i + 1
+        );
+    }
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn test_read_gc_table_matches_rseqc() {
+    let root = unique_test_dir("readgc");
+    let outdir = root.display().to_string();
+    let output = run_rustqc(&outdir);
+    assert!(
+        output.status.success(),
+        "rustqc failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let path = format!("{outdir}/rseqc/read_gc/test.GC.xls");
+    let contents = fs::read_to_string(&path).expect("GC.xls not written");
+
+    // Every read in tests/data/test.bam is poly-A, so RSeQC 5.05 reports a
+    // single 0.00% bucket holding all 483 reads that pass its filters.
+    assert_eq!(
+        contents.trim(),
+        "GC%\tread_count\n0.00\t483",
+        "GC table must match the RSeQC reference"
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}

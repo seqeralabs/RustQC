@@ -50,6 +50,8 @@ pub struct RseqcAnnotations<'a> {
 
     /// TIN index for transcript integrity number calculation.
     pub tin_index: Option<&'a super::tin::TinIndex>,
+    /// Sampled percentile positions for gene body coverage.
+    pub gene_body_index: Option<&'a super::gene_body_coverage::GeneBodyIndex>,
 }
 
 /// Per-tool configuration parameters.
@@ -97,6 +99,10 @@ pub struct RseqcConfig {
     pub inner_distance_enabled: bool,
     /// Whether TIN analysis is enabled.
     pub tin_enabled: bool,
+    /// Whether gene body coverage profiling is enabled.
+    pub gene_body_coverage_enabled: bool,
+    /// Whether the read GC distribution is enabled.
+    pub read_gc_enabled: bool,
     /// Number of equally-spaced sampling positions per transcript for TIN.
     pub tin_sample_size: usize,
     /// Minimum number of read starts for a transcript to compute TIN.
@@ -2123,6 +2129,10 @@ pub struct RseqcAccumulators {
     pub tin: Option<TinAccum>,
     /// preseq library complexity accumulator (`None` when disabled).
     pub preseq: Option<PreseqAccum>,
+    /// gene body coverage accumulator (`None` when disabled).
+    pub gene_body: Option<super::gene_body_coverage::GeneBodyCoverageAccum>,
+    /// read GC distribution accumulator (`None` when disabled).
+    pub read_gc: Option<super::read_gc::ReadGcAccum>,
 }
 
 impl RseqcAccumulators {
@@ -2138,6 +2148,8 @@ impl RseqcAccumulators {
             inner_dist: None,
             tin: None,
             preseq: None,
+            gene_body: None,
+            read_gc: None,
         }
     }
 
@@ -2193,6 +2205,18 @@ impl RseqcAccumulators {
             },
             preseq: if config.preseq_enabled {
                 Some(PreseqAccum::new(config.preseq_max_segment_length))
+            } else {
+                None
+            },
+            gene_body: if config.gene_body_coverage_enabled {
+                annotations
+                    .and_then(|a| a.gene_body_index)
+                    .map(super::gene_body_coverage::GeneBodyCoverageAccum::new)
+            } else {
+                None
+            },
+            read_gc: if config.read_gc_enabled {
+                Some(super::read_gc::ReadGcAccum::new(config.mapq_cut))
             } else {
                 None
             },
@@ -2283,6 +2307,18 @@ impl RseqcAccumulators {
         if let Some(ref mut accum) = self.preseq {
             accum.process_read(record);
         }
+
+        // gene body coverage: needs sampled positions, uses uppercased chrom
+        if let (Some(ref mut accum), Some(index)) =
+            (&mut self.gene_body, annotations.gene_body_index)
+        {
+            accum.process_read(record, chrom_upper, index);
+        }
+
+        // read GC: sequence-only, applies its own MAPQ/flag filters
+        if let Some(ref mut accum) = self.read_gc {
+            accum.process_read(record);
+        }
     }
 
     /// Merge another set of accumulators into this one.
@@ -2312,6 +2348,12 @@ impl RseqcAccumulators {
             a.merge(b);
         }
         if let (Some(ref mut a), Some(b)) = (&mut self.preseq, other.preseq) {
+            a.merge(b);
+        }
+        if let (Some(ref mut a), Some(b)) = (&mut self.gene_body, other.gene_body) {
+            a.merge(b);
+        }
+        if let (Some(ref mut a), Some(b)) = (&mut self.read_gc, other.read_gc) {
             a.merge(b);
         }
     }

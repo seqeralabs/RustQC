@@ -10,10 +10,12 @@ use plotters::prelude::*;
 use plotters_svg::SVGBackend;
 use std::path::Path;
 
+use super::gene_body_coverage::GeneBodyCoverageResult;
 use super::inner_distance::InnerDistanceResult;
 use super::junction_annotation::JunctionResults;
 use super::junction_saturation::SaturationResult;
 use super::read_duplication::ReadDuplicationResult;
+use super::read_gc::ReadGcResult;
 
 // ============================================================================
 // Constants
@@ -1248,4 +1250,169 @@ mod tests {
             integral
         );
     }
+}
+
+// ============================================================================
+// Gene body coverage
+// ============================================================================
+
+/// Generate the gene body coverage curve as PNG and SVG.
+///
+/// # Arguments
+/// * `result` - The aggregated 100-bin coverage profile
+/// * `sample_name` - Sample name used as the plot caption
+/// * `output_path` - PNG output path (the SVG uses the same stem)
+pub fn gene_body_coverage_plot(
+    result: &GeneBodyCoverageResult,
+    sample_name: &str,
+    output_path: &Path,
+) -> Result<()> {
+    {
+        let root = BitMapBackend::new(output_path, (s(WIDTH), s(HEIGHT))).into_drawing_area();
+        render_gene_body_coverage(&root, result, sample_name, SCALE as f64)?;
+        root.present()
+            .context("Failed to write gene body coverage PNG")?;
+    }
+
+    let svg_path = output_path.with_extension("svg");
+    {
+        let root = SVGBackend::new(&svg_path, (WIDTH, HEIGHT)).into_drawing_area();
+        render_gene_body_coverage(&root, result, sample_name, 1.0)?;
+        root.present()
+            .context("Failed to write gene body coverage SVG")?;
+    }
+
+    debug!("Wrote gene body coverage plot: {}", output_path.display());
+    Ok(())
+}
+
+/// Render the 5' → 3' coverage curve.
+///
+/// Replicates the upstream RSeQC curve plot, which draws normalised coverage
+/// against the gene body percentile:
+/// ```r
+/// plot(x, sample, type='l', xlab="Gene body percentile (5'->3')", ylab="Coverage")
+/// ```
+fn render_gene_body_coverage<DB: DrawingBackend>(
+    root: &DrawingArea<DB, plotters::coord::Shift>,
+    result: &GeneBodyCoverageResult,
+    sample_name: &str,
+    pxs: f64,
+) -> Result<()>
+where
+    DB::ErrorType: 'static,
+{
+    let ps = |v: f64| (v * pxs) as u32;
+
+    root.fill(&WHITE)?;
+
+    let values = result.normalised();
+    if values.is_empty() {
+        return Ok(());
+    }
+
+    let mut chart = ChartBuilder::on(root)
+        .margin(ps(10.0))
+        .x_label_area_size(ps(35.0))
+        .y_label_area_size(ps(50.0))
+        .caption(sample_name, ("sans-serif", ps(14.0)))
+        .build_cartesian_2d(1.0_f64..100.0_f64, 0.0_f64..1.05_f64)?;
+
+    chart
+        .configure_mesh()
+        .disable_mesh()
+        .x_desc("Gene body percentile (5'->3')")
+        .y_desc("Coverage")
+        .axis_style(BLACK.stroke_width(ps(1.0).max(1)))
+        .label_style(("sans-serif", ps(11.0)))
+        .draw()?;
+
+    chart.draw_series(LineSeries::new(
+        values.iter().enumerate().map(|(i, &v)| ((i + 1) as f64, v)),
+        BLUE.stroke_width(ps(1.5).max(1)),
+    ))?;
+
+    Ok(())
+}
+
+// ============================================================================
+// Read GC content
+// ============================================================================
+
+/// Generate the read GC content distribution as PNG and SVG.
+///
+/// # Arguments
+/// * `result` - The GC distribution
+/// * `sample_name` - Sample name used as the plot caption
+/// * `output_path` - PNG output path (the SVG uses the same stem)
+pub fn read_gc_plot(result: &ReadGcResult, sample_name: &str, output_path: &Path) -> Result<()> {
+    {
+        let root = BitMapBackend::new(output_path, (s(WIDTH), s(HEIGHT))).into_drawing_area();
+        render_read_gc(&root, result, sample_name, SCALE as f64)?;
+        root.present().context("Failed to write read GC PNG")?;
+    }
+
+    let svg_path = output_path.with_extension("svg");
+    {
+        let root = SVGBackend::new(&svg_path, (WIDTH, HEIGHT)).into_drawing_area();
+        render_read_gc(&root, result, sample_name, 1.0)?;
+        root.present().context("Failed to write read GC SVG")?;
+    }
+
+    debug!("Wrote read GC plot: {}", output_path.display());
+    Ok(())
+}
+
+/// Render the GC distribution as reads-per-GC-percent, binned to 1% steps.
+///
+/// Upstream plots a density histogram over the per-read GC values; binning the
+/// sparse distribution to 1% steps gives the same shape without needing to
+/// materialise one value per read.
+fn render_read_gc<DB: DrawingBackend>(
+    root: &DrawingArea<DB, plotters::coord::Shift>,
+    result: &ReadGcResult,
+    sample_name: &str,
+    pxs: f64,
+) -> Result<()>
+where
+    DB::ErrorType: 'static,
+{
+    let ps = |v: f64| (v * pxs) as u32;
+
+    root.fill(&WHITE)?;
+
+    if result.distribution.is_empty() {
+        return Ok(());
+    }
+
+    // Bin to whole-percent buckets for plotting
+    let mut bins = [0u64; 101];
+    for &(pct, count) in &result.distribution {
+        let idx = (pct.round() as usize).min(100);
+        bins[idx] += count;
+    }
+    let y_max = bins.iter().copied().max().unwrap_or(1) as f64;
+
+    let mut chart = ChartBuilder::on(root)
+        .margin(ps(10.0))
+        .x_label_area_size(ps(35.0))
+        .y_label_area_size(ps(60.0))
+        .caption(sample_name, ("sans-serif", ps(14.0)))
+        .build_cartesian_2d(0.0_f64..100.0_f64, 0.0_f64..(y_max * 1.05))?;
+
+    chart
+        .configure_mesh()
+        .disable_mesh()
+        .x_desc("GC content (%)")
+        .y_desc("Number of reads")
+        .axis_style(BLACK.stroke_width(ps(1.0).max(1)))
+        .label_style(("sans-serif", ps(11.0)))
+        .draw()?;
+
+    chart.draw_series(LineSeries::new(
+        bins.iter().enumerate().map(|(i, &c)| (i as f64, c as f64)),
+        BLUE.stroke_width(ps(1.5).max(1)),
+    ))?;
+
+    Ok(())
 }

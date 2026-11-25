@@ -1,7 +1,7 @@
 //! RustQC — fast quality control tools for sequencing data.
 //!
 //! RustQC is primarily a CLI (`rustqc rna ...`) that runs a single-pass
-//! RNA-Seq QC pipeline (dupRadar, featureCounts, 8 RSeQC tools, Qualimap,
+//! RNA-Seq QC pipeline (dupRadar, featureCounts, 10 RSeQC tools, Qualimap,
 //! preseq, samtools-style outputs). The same analysis modules are also
 //! exposed as a library so they can be embedded into other Rust programs.
 //!
