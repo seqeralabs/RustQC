@@ -32,6 +32,13 @@ pub enum Commands {
     /// analyses in one pass. Requires a GTF annotation and duplicate-marked
     /// (not removed) alignments.
     Rna(RnaArgs),
+
+    /// DNA QC — single-pass analysis of BAM/SAM/CRAM files.
+    ///
+    /// Runs depth of coverage, samtools stats and library complexity
+    /// estimation in one pass. Needs no gene annotation. Pass `--targets`
+    /// to switch to targeted (exome or panel) mode.
+    Dna(DnaArgs),
 }
 
 /// Arguments for the `rna` subcommand.
@@ -369,6 +376,278 @@ pub struct RnaArgs {
     pub preseq_seg_len: Option<i64>,
 }
 
+/// Arguments for the `dna` subcommand.
+///
+/// Shared options keep the same long name, short flag and `RUSTQC_*`
+/// environment variable as their `rna` counterparts, so wrapper scripts and
+/// muscle memory carry over between the two pipelines. The differences are
+/// deliberate: there is no `--gtf` and no `--stranded`, and `--mapq` defaults
+/// to 0 rather than 30 because that is mosdepth's default.
+#[derive(Parser, Debug)]
+#[command(
+    next_line_help = false,
+    term_width = 120,
+    help_template = "\
+{about-with-newline}
+{usage-heading} {usage}
+
+{all-args}"
+)]
+pub struct DnaArgs {
+    // ── Input / Output ──────────────────────────────────────────────────
+    /// Duplicate-marked alignment file(s)
+    #[arg(value_name = "INPUT", num_args = 1.., required = true, help_heading = "Input / Output")]
+    pub input: Vec<String>,
+
+    /// Reference FASTA (required for CRAM and for GC bias)
+    #[arg(
+        short,
+        long,
+        value_name = "FASTA",
+        env = "RUSTQC_REFERENCE",
+        help_heading = "Input / Output"
+    )]
+    pub reference: Option<String>,
+
+    /// Target intervals BED; switches on targeted (exome or panel) mode
+    #[arg(
+        long,
+        value_name = "BED",
+        env = "RUSTQC_TARGETS",
+        help_heading = "Input / Output"
+    )]
+    pub targets: Option<String>,
+
+    /// Capture bait intervals BED [default: same as --targets]
+    #[arg(
+        long,
+        value_name = "BED",
+        env = "RUSTQC_BAITS",
+        requires = "targets",
+        help_heading = "Input / Output"
+    )]
+    pub baits: Option<String>,
+
+    /// Output directory [default: .]
+    #[arg(
+        short,
+        long,
+        default_value = ".",
+        hide_default_value = true,
+        env = "RUSTQC_OUTDIR",
+        help_heading = "Input / Output"
+    )]
+    pub outdir: String,
+
+    /// Override sample name for output filenames (default: derived from BAM filename)
+    #[arg(
+        long,
+        value_name = "NAME",
+        env = "RUSTQC_SAMPLE_NAME",
+        help_heading = "Input / Output"
+    )]
+    pub sample_name: Option<String>,
+
+    /// Write outputs to a flat directory (no subdirs)
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "RUSTQC_FLAT_OUTPUT",
+        help_heading = "Input / Output"
+    )]
+    pub flat_output: bool,
+
+    /// YAML configuration file (see also: RUSTQC_CONFIG env var)
+    #[arg(short, long, value_name = "CONFIG", help_heading = "Input / Output")]
+    pub config: Option<String>,
+
+    /// JSON summary path (use "-" for stdout)
+    #[arg(short = 'j', long = "json-summary", value_name = "PATH", num_args = 0..=1, default_missing_value = "", env = "RUSTQC_JSON_SUMMARY", help_heading = "Input / Output")]
+    pub json_summary: Option<String>,
+
+    // ── Library ─────────────────────────────────────────────────────────
+    /// Paired-end reads
+    #[arg(short, long, env = "RUSTQC_PAIRED", help_heading = "Library")]
+    pub paired: bool,
+
+    // ── General ─────────────────────────────────────────────────────────
+    /// Number of threads [default: 1]
+    #[arg(
+        short,
+        long,
+        default_value_t = 1,
+        hide_default_value = true,
+        env = "RUSTQC_THREADS",
+        help_heading = "General"
+    )]
+    pub threads: usize,
+
+    /// MAPQ cutoff; reads below it are ignored [default: 0]
+    #[arg(
+        short = 'Q',
+        long = "mapq",
+        default_value_t = 0,
+        hide_default_value = true,
+        env = "RUSTQC_MAPQ",
+        help_heading = "General"
+    )]
+    pub mapq_cut: u8,
+
+    /// Skip duplicate-marking check
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "RUSTQC_SKIP_DUP_CHECK",
+        help_heading = "General"
+    )]
+    pub skip_dup_check: bool,
+
+    /// Suppress output except warnings/errors
+    #[arg(
+        short = 'q',
+        long,
+        conflicts_with = "verbose",
+        env = "RUSTQC_QUIET",
+        help_heading = "General"
+    )]
+    pub quiet: bool,
+
+    /// Show additional detail
+    #[arg(
+        short = 'v',
+        long,
+        conflicts_with = "quiet",
+        env = "RUSTQC_VERBOSE",
+        help_heading = "General"
+    )]
+    pub verbose: bool,
+
+    // ── Tool parameters ─────────────────────────────────────────────────
+    /// Coverage thresholds to report [default: 1,5,10,15,20,30,50]
+    #[arg(
+        long = "depth-thresholds",
+        value_name = "N,...",
+        value_delimiter = ',',
+        default_values_t = vec![1u32, 5, 10, 15, 20, 30, 50],
+        hide_default_value = true,
+        env = "RUSTQC_DEPTH_THRESHOLDS",
+        help_heading = "Tool parameters"
+    )]
+    pub depth_thresholds: Vec<u32>,
+
+    /// Fixed-width window size for per-window depth
+    #[arg(
+        long = "window-size",
+        value_name = "N",
+        env = "RUSTQC_WINDOW_SIZE",
+        help_heading = "Tool parameters"
+    )]
+    pub window_size: Option<u32>,
+
+    /// Picard COVERAGE_CAP [default: 250]
+    #[arg(
+        long = "coverage-cap",
+        value_name = "N",
+        default_value_t = 250,
+        hide_default_value = true,
+        env = "RUSTQC_COVERAGE_CAP",
+        help_heading = "Tool parameters"
+    )]
+    pub coverage_cap: u32,
+
+    /// Picard MINIMUM_BASE_QUALITY [default: 20]
+    #[arg(
+        long = "min-base-quality",
+        value_name = "N",
+        default_value_t = 20,
+        hide_default_value = true,
+        env = "RUSTQC_MIN_BASE_QUALITY",
+        help_heading = "Tool parameters"
+    )]
+    pub min_base_quality: u8,
+
+    /// Skip the per-base depth output, by far the largest file
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "RUSTQC_SKIP_PER_BASE",
+        help_heading = "Tool parameters"
+    )]
+    pub skip_per_base: bool,
+
+    /// Skip GC bias metrics
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "RUSTQC_SKIP_GC_BIAS",
+        help_heading = "Tool parameters"
+    )]
+    pub skip_gc_bias: bool,
+
+    /// Cap on concurrently live per-contig depth arrays [default: derived from RAM]
+    #[arg(
+        long = "max-depth-workers",
+        value_name = "N",
+        env = "RUSTQC_MAX_DEPTH_WORKERS",
+        help_heading = "Tool parameters"
+    )]
+    pub max_depth_workers: Option<usize>,
+
+    /// Skip preseq library complexity analysis
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "RUSTQC_SKIP_PRESEQ",
+        help_heading = "Tool parameters"
+    )]
+    pub skip_preseq: bool,
+
+    /// preseq: random seed for bootstrap CIs
+    #[arg(
+        long = "preseq-seed",
+        value_name = "N",
+        env = "RUSTQC_PRESEQ_SEED",
+        help_heading = "Tool parameters"
+    )]
+    pub preseq_seed: Option<u64>,
+
+    /// preseq: max extrapolation depth
+    #[arg(
+        long = "preseq-max-extrap",
+        value_name = "N",
+        env = "RUSTQC_PRESEQ_MAX_EXTRAP",
+        help_heading = "Tool parameters"
+    )]
+    pub preseq_max_extrap: Option<f64>,
+
+    /// preseq: step size between points
+    #[arg(
+        long = "preseq-step-size",
+        value_name = "N",
+        env = "RUSTQC_PRESEQ_STEP_SIZE",
+        help_heading = "Tool parameters"
+    )]
+    pub preseq_step_size: Option<f64>,
+
+    /// preseq: bootstrap replicates for CIs
+    #[arg(
+        long = "preseq-n-bootstraps",
+        value_name = "N",
+        env = "RUSTQC_PRESEQ_N_BOOTSTRAPS",
+        help_heading = "Tool parameters"
+    )]
+    pub preseq_n_bootstraps: Option<u32>,
+
+    /// preseq: max segment length for PE merging
+    #[arg(
+        long = "preseq-seg-len",
+        value_name = "N",
+        env = "RUSTQC_PRESEQ_SEG_LEN",
+        help_heading = "Tool parameters"
+    )]
+    pub preseq_seg_len: Option<i64>,
+}
+
 /// Parse command-line arguments and return the Cli struct.
 ///
 /// Sets a `long_version` that includes the git commit, build timestamp,
@@ -413,7 +692,6 @@ mod tests {
                 assert_eq!(args.min_intron, None);
                 assert_eq!(args.inner_distance_step, None);
             }
-            #[allow(unreachable_patterns)]
             _ => panic!("Expected Rna subcommand"),
         }
     }
@@ -435,7 +713,6 @@ mod tests {
                 assert_eq!(args.input, vec!["a.bam", "b.bam", "c.bam"]);
                 assert_eq!(args.gtf, "genes.gtf");
             }
-            #[allow(unreachable_patterns)]
             _ => panic!("Expected Rna subcommand"),
         }
     }
@@ -470,7 +747,6 @@ mod tests {
                 assert_eq!(args.reference, Some("genome.fa".to_string()));
                 assert_eq!(args.mapq_cut, 20);
             }
-            #[allow(unreachable_patterns)]
             _ => panic!("Expected Rna subcommand"),
         }
     }
@@ -512,7 +788,6 @@ mod tests {
                 assert_eq!(args.inner_distance_upper_bound, Some(500));
                 assert_eq!(args.inner_distance_step, Some(10));
             }
-            #[allow(unreachable_patterns)]
             _ => panic!("Expected Rna subcommand"),
         }
     }
@@ -542,7 +817,6 @@ mod tests {
                 assert_eq!(args.preseq_n_bootstraps, Some(200));
                 assert_eq!(args.preseq_seg_len, Some(100_000_000));
             }
-            #[allow(unreachable_patterns)]
             _ => panic!("Expected Rna subcommand"),
         }
     }
@@ -568,7 +842,6 @@ mod tests {
                 assert_eq!(args.tin_seed, Some(2));
                 assert_eq!(args.junction_saturation_seed, Some(3));
             }
-            #[allow(unreachable_patterns)]
             _ => panic!("Expected Rna subcommand"),
         }
     }
@@ -587,8 +860,80 @@ mod tests {
             Commands::Rna(args) => {
                 assert!(args.skip_preseq);
             }
-            #[allow(unreachable_patterns)]
             _ => panic!("Expected Rna subcommand"),
         }
+    }
+
+    #[test]
+    fn test_dna_default_args() {
+        let cli = Cli::parse_from(["rustqc", "dna", "test.bam"]);
+        match cli.command {
+            Commands::Dna(args) => {
+                assert_eq!(args.input, vec!["test.bam"]);
+                assert_eq!(args.outdir, ".");
+                assert_eq!(args.threads, 1);
+                assert_eq!(args.mapq_cut, 0);
+                assert_eq!(args.coverage_cap, 250);
+                assert_eq!(args.min_base_quality, 20);
+                assert_eq!(args.depth_thresholds, vec![1, 5, 10, 15, 20, 30, 50]);
+                assert_eq!(args.window_size, None);
+                assert!(args.targets.is_none());
+                assert!(args.baits.is_none());
+                assert!(!args.skip_per_base);
+                assert!(!args.skip_gc_bias);
+            }
+            _ => panic!("Expected Dna subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_dna_no_gtf_required() {
+        assert!(Cli::try_parse_from(["rustqc", "dna", "test.bam"]).is_ok());
+    }
+
+    #[test]
+    fn test_dna_targeted_args() {
+        let cli = Cli::parse_from([
+            "rustqc",
+            "dna",
+            "a.bam",
+            "b.bam",
+            "--targets",
+            "t.bed",
+            "--baits",
+            "b.bed",
+            "--depth-thresholds",
+            "1,10,100",
+            "--window-size",
+            "500",
+            "--reference",
+            "genome.fa",
+            "-Q",
+            "20",
+            "--threads",
+            "4",
+        ]);
+        match cli.command {
+            Commands::Dna(args) => {
+                assert_eq!(args.input, vec!["a.bam", "b.bam"]);
+                assert_eq!(args.targets, Some("t.bed".to_string()));
+                assert_eq!(args.baits, Some("b.bed".to_string()));
+                assert_eq!(args.depth_thresholds, vec![1, 10, 100]);
+                assert_eq!(args.window_size, Some(500));
+                assert_eq!(args.reference, Some("genome.fa".to_string()));
+                assert_eq!(args.mapq_cut, 20);
+                assert_eq!(args.threads, 4);
+            }
+            _ => panic!("Expected Dna subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_dna_baits_without_targets_is_rejected() {
+        let result = Cli::try_parse_from(["rustqc", "dna", "test.bam", "--baits", "b.bed"]);
+        assert!(
+            result.is_err(),
+            "--baits without --targets must be rejected"
+        );
     }
 }
