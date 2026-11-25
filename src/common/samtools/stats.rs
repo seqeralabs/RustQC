@@ -10,7 +10,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use log::debug;
 
-use super::bam_stat::{BamStatResult, GcDepthBin};
+use crate::common::bam_stat::{BamStatResult, GcDepthBin};
 
 // ============================================================================
 // Output formatting

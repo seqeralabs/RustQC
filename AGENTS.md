@@ -62,10 +62,21 @@ src/
   config.rs         — YAML configuration loading (serde), nested tool configs
   io.rs             — Shared I/O utilities (gzip-transparent file reading)
   gtf.rs            — GTF annotation file parser (with configurable attribute extraction)
+  common/
+    mod.rs            — Re-exports the shared modules
+    bam_flags.rs      — BAM flag constants and aux-tag helpers
+    bam_stat.rs       — bam_stat.py reimplementation, result types
+    bam_stat_accum.rs — Read-level counter accumulator feeding bam_stat and samtools
+    cpp_rng.rs        — C++ RNG FFI shim for preseq bootstrap reproducibility
+    preseq.rs         — preseq lc_extrap library complexity extrapolation
+    samtools/
+      mod.rs          — Re-exports the samtools writers
+      stats.rs        — samtools stats full output (SN + all histogram sections)
+      flagstat.rs     — samtools flagstat-compatible output
+      idxstats.rs     — samtools idxstats-compatible output
   rna/
-    mod.rs          — Re-exports all submodules (dupradar, featurecounts, rseqc, bam_flags, cpp_rng, preseq, qualimap)
-    bam_flags.rs    — BAM flag constants
-    cpp_rng.rs      — C++ RNG FFI shim for preseq bootstrap reproducibility
+    mod.rs          — Re-exports the RNA submodules (dupradar, featurecounts, rseqc, qualimap)
+                      and re-exports the shared ones from `common` for compatibility
     dupradar/
       mod.rs        — Re-exports counting, dupmatrix, fitting, plots
       counting.rs   — BAM read counting engine (largest module)
@@ -75,7 +86,6 @@ src/
     featurecounts/
       mod.rs        — Re-exports output
       output.rs     — featureCounts-format output & biotype counting
-    preseq.rs       — preseq lc_extrap library complexity extrapolation
     qualimap/
       mod.rs        — Re-exports all Qualimap modules
       accumulator.rs — Gene body coverage accumulation logic
@@ -88,9 +98,6 @@ src/
       mod.rs                — Re-exports all RSeQC modules + common helpers
       accumulators.rs       — Shared RSeQC accumulator infrastructure (read dispatch)
       common.rs             — Shared junction/intron extraction, from_genes builders
-      bam_stat.rs           — bam_stat.py reimplementation
-      flagstat.rs           — samtools flagstat-compatible output
-      idxstats.rs           — samtools idxstats-compatible output
       infer_experiment.rs   — infer_experiment.py reimplementation
       inner_distance.rs     — inner_distance.py reimplementation
       junction_annotation.rs — junction_annotation.py reimplementation
@@ -98,7 +105,6 @@ src/
       plots.rs              — RSeQC plot generation (duplication, junctions, etc.)
       read_distribution.rs  — read_distribution.py reimplementation
       read_duplication.rs   — read_duplication.py reimplementation
-      stats.rs              — samtools stats full output (SN + all histogram sections)
       tin.rs                — TIN (Transcript Integrity Number) analysis
 tests/
   integration_test.rs  — 12 integration tests vs R dupRadar reference output
@@ -107,9 +113,12 @@ tests/
   create_test_data.R   — R script to regenerate test data + references
 ```
 
-Nested module structure — top-level modules (`cli`, `config`, `io`, `gtf`, `rna`) declared
-in `main.rs`, no `lib.rs`. The `rna` module contains sub-modules for each tool group.
-Inter-module access uses `crate::` paths (e.g., `use crate::rna::dupradar::counting::GeneCounts;`).
+Nested module structure. The library crate root is `src/lib.rs`, which declares
+`common`, `config`, `cpu`, `gtf`, `io`, `rna` and `summary`; the binary
+(`src/main.rs`) additionally declares `cli`, `citations` and `ui`.
+Inter-module access uses `crate::` paths (e.g., `use crate::common::bam_stat_accum::BamStatAccum;`).
+Assay-agnostic analyses belong in `common`; put new code under `rna` only if it
+needs a gene annotation or a library strand protocol.
 
 The CLI uses a single subcommand:
 

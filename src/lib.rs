@@ -23,9 +23,12 @@
 //! - [`config`] — configuration types that mirror the CLI's YAML config file.
 //! - [`summary`] — serializable types for the JSON run summary.
 //! - [`cpu`] — CPU feature detection and binary-target identification.
+//! - [`common`] — analyses shared by every pipeline: BAM flag helpers,
+//!   read-level statistics ([`common::bam_stat`], [`common::bam_stat_accum`]),
+//!   the samtools-compatible writers ([`common::samtools`]), and preseq
+//!   library complexity extrapolation ([`common::preseq`]).
 //! - [`rna`] — the RNA-Seq analysis modules:
-//!   - [`rna::dupradar`], [`rna::featurecounts`], [`rna::qualimap`],
-//!     [`rna::preseq`], [`rna::rseqc`].
+//!   - [`rna::dupradar`], [`rna::featurecounts`], [`rna::qualimap`], [`rna::rseqc`].
 //!
 //! [`Strandedness`] lives at the crate root because it is used across most
 //! analysis modules.
@@ -65,6 +68,7 @@
 use clap::ValueEnum;
 use serde::Deserialize;
 
+pub mod common;
 pub mod config;
 pub mod cpu;
 pub mod gtf;

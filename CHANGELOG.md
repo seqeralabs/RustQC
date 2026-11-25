@@ -1,5 +1,14 @@
 # RustQC Changelog
 
+## Unreleased
+
+### Changed
+
+- Internal: assay-agnostic analyses (BAM flag helpers, read-level statistics,
+  the samtools stats/flagstat/idxstats writers, preseq) moved from `rna` to a
+  new `common` module. The old `rustqc::rna::...` paths still resolve through
+  re-exports, so this is not a breaking change for library users.
+
 ## [Version 0.2.1](https://github.com/seqeralabs/RustQC/releases/tag/v0.2.1) - 2026-04-09
 
 ### Bug fixes
