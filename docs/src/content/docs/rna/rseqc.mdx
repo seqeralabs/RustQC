@@ -440,6 +440,8 @@ to run. RustQC uses an exact reimplementation of CPython's `random` module
 windows and floating-point index arithmetic. So with `--junction-saturation-seed N`,
 the R script is identical to that of `junction_saturation.py` run after
 `random.seed(N)`, at every sampling percentage, with any `--threads` value.
+The script's `pdf()` call names the PDF by sample name only, as RSeQC does when
+run with `-o <sample name>` in the output directory.
 
 `junction_saturation.py` has no seed option, but it can be seeded from a wrapper:
 
