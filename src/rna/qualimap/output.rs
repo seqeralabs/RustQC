@@ -358,9 +358,9 @@ pub fn write_qualimap_results(
             num_collisions
         );
         if num_collisions > 0 {
-            // Report the mean values that collided
-            let mut mean_counts: std::collections::HashMap<u64, Vec<usize>> =
-                std::collections::HashMap::new();
+            // Report the mean values that collided, in ascending mean order
+            // (positive f64 bit patterns sort like the values).
+            let mut mean_counts: BTreeMap<u64, Vec<usize>> = BTreeMap::new();
             for (idx, entry) in entries.iter().enumerate() {
                 if entry.mean_coverage > 0.0 {
                     mean_counts

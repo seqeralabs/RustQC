@@ -21,7 +21,7 @@ use indicatif::ProgressBar;
 use log::{debug, warn};
 use rayon::prelude::*;
 use rust_htslib::bam::{self, FetchDefinition, Read as BamRead};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 // ===================================================================
@@ -500,6 +500,72 @@ fn hash_qname(qname: &[u8]) -> u64 {
     crate::io::fnv1a(qname)
 }
 
+/// Paired-end mates waiting for their partner, keyed by [`MateBufferKey`].
+///
+/// A key normally holds one waiting mate. Unusual input (duplicated records,
+/// secondary alignments without an HI tag) can give several mates of the same
+/// direction (read1 or read2) one key. Those queue up in arrival order, and
+/// each read of the other direction pairs with the oldest one. This gives the
+/// same pairs whether all of a key's mates go through one buffer (the
+/// single-threaded path) or through two per-chromosome workers whose buffers
+/// are merged afterwards, so the counts don't depend on `--threads`. A read
+/// is never paired with a mate of its own direction, and none is dropped.
+#[derive(Debug, Default)]
+struct MateBuffer {
+    /// Oldest waiting mate per key.
+    first: HashMap<MateBufferKey, MateInfo>,
+    /// Further waiting mates per key (same direction as `first`), oldest first.
+    extra: HashMap<MateBufferKey, VecDeque<MateInfo>>,
+}
+
+impl MateBuffer {
+    /// Remove and return the oldest waiting mate under `key` that can pair
+    /// with a read of direction `is_read1`, if any.
+    fn take_mate(&mut self, key: &MateBufferKey, is_read1: bool) -> Option<MateInfo> {
+        if self.first.get(key)?.is_read1 == is_read1 {
+            return None;
+        }
+        let mate = self.first.remove(key)?;
+        if let Some(queue) = self.extra.get_mut(key) {
+            if let Some(next) = queue.pop_front() {
+                self.first.insert(*key, next);
+            }
+            if queue.is_empty() {
+                self.extra.remove(key);
+            }
+        }
+        Some(mate)
+    }
+
+    /// Add a mate that found no partner (call after `take_mate` returned None).
+    fn push(&mut self, key: MateBufferKey, info: MateInfo) {
+        match self.first.entry(key) {
+            std::collections::hash_map::Entry::Vacant(e) => {
+                e.insert(info);
+            }
+            std::collections::hash_map::Entry::Occupied(_) => {
+                self.extra.entry(key).or_default().push_back(info);
+            }
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.first.is_empty()
+    }
+
+    /// All waiting mates, each key's mates in arrival order.
+    fn into_entries(mut self) -> Vec<(MateBufferKey, MateInfo)> {
+        let mut out = Vec::with_capacity(self.first.len());
+        for (key, info) in self.first {
+            out.push((key, info));
+            if let Some(queue) = self.extra.remove(&key) {
+                out.extend(queue.into_iter().map(|m| (key, m)));
+            }
+        }
+        out
+    }
+}
+
 /// Accumulated results from processing a batch of chromosomes.
 /// Each parallel worker produces one of these, which are then merged.
 #[derive(Debug)]
@@ -507,7 +573,7 @@ struct ChromResult {
     /// Per-gene counts (flat vec indexed by GeneIdx)
     gene_counts: Vec<GeneCounts>,
     /// Unmatched mates left over from this chromosome batch
-    unmatched_mates: HashMap<MateBufferKey, MateInfo>,
+    unmatched_mates: MateBuffer,
     /// Total reads seen (all reads, including skipped)
     total_reads: u64,
     /// Total mapped reads (after filtering)
@@ -566,7 +632,7 @@ impl ChromResult {
     fn new(num_genes: usize, num_biotypes: usize) -> Self {
         ChromResult {
             gene_counts: vec![GeneCounts::default(); num_genes],
-            unmatched_mates: HashMap::new(),
+            unmatched_mates: MateBuffer::default(),
             total_reads: 0,
             total_mapped: 0,
             total_dup: 0,
@@ -595,6 +661,47 @@ impl ChromResult {
         }
     }
 
+    /// Count a paired-end fragment whose two mates have been matched:
+    /// the buffered `mate` and a read with the given gene hits and flags.
+    ///
+    /// featureCounts skips the whole fragment as a duplicate (`ignoreDup`)
+    /// or a multi-mapper (no `countMultiMappingReads`) if *either* end has
+    /// the 0x400 flag or NH > 1 (Rsubread `readSummary.c`,
+    /// `process_pairer_output`, loop over both ends). So the fragment flags
+    /// are the OR of the two mates. This is symmetric, so it does not matter
+    /// which mate was buffered.
+    fn count_pair(&mut self, mate: &MateInfo, gene_hits: &[GeneIdx], is_dup: bool, is_multi: bool) {
+        let frag_is_dup = mate.is_dup || is_dup;
+        let frag_is_multi = mate.is_multi || is_multi;
+
+        self.total_fragments += 1;
+        self.n_multi_dup += 1;
+        self.n_unique_dup += 1;
+        if !frag_is_dup {
+            self.n_multi_nodup += 1;
+            self.n_unique_nodup += 1;
+        }
+
+        // featureCounts union-with-both-end-preference voting: each gene
+        // gets +1 per mate that overlaps it (max 2).  Genes hit by both
+        // mates (score 2) beat genes hit by only one (score 1).  If
+        // multiple genes tie at the highest score the fragment is
+        // ambiguous.  This matches Rsubread::featureCounts behaviour.
+        let combined_genes = merge_gene_hits(&mate.gene_hits, gene_hits);
+        if combined_genes.is_empty() {
+            self.stat_no_features += 1;
+        } else if combined_genes.len() > 1 {
+            self.stat_ambiguous += 1;
+        } else if assign_fragment_to_gene(
+            &combined_genes,
+            &mut self.gene_counts,
+            frag_is_dup,
+            frag_is_multi,
+        ) {
+            self.stat_assigned += 1;
+        }
+    }
+
     /// Merge another ChromResult into this one (additive).
     fn merge(&mut self, other: ChromResult) {
         for (i, counts) in other.gene_counts.into_iter().enumerate() {
@@ -604,48 +711,18 @@ impl ChromResult {
             self.gene_counts[i].nodup_unique += counts.nodup_unique;
             self.gene_counts[i].fc_reads += counts.fc_reads;
         }
-        // Merge unmatched mates — pair any cross-chromosome mates immediately
-        // when both workers have buffered reads from the same pair (same key).
-        // Using HashMap::extend would silently overwrite one mate, losing it.
-        for (key, other_info) in other.unmatched_mates {
-            if let Some(self_info) = self.unmatched_mates.remove(&key) {
-                if self_info.is_read1 != other_info.is_read1 {
-                    // Genuine cross-worker pair: read1 ↔ read2
-                    self.total_fragments += 1;
-                    let frag_is_dup = self_info.is_dup;
-                    let frag_is_multi = self_info.is_multi;
-                    self.n_multi_dup += 1;
-                    self.n_unique_dup += 1;
-                    if !frag_is_dup {
-                        self.n_multi_nodup += 1;
-                        self.n_unique_nodup += 1;
-                    }
-                    let combined_genes =
-                        merge_gene_hits(&self_info.gene_hits, &other_info.gene_hits);
-                    if combined_genes.is_empty() {
-                        self.stat_no_features += 1;
-                    } else if combined_genes.len() > 1 {
-                        self.stat_ambiguous += 1;
-                    } else if assign_fragment_to_gene(
-                        &combined_genes,
-                        &mut self.gene_counts,
-                        frag_is_dup,
-                        frag_is_multi,
-                    ) {
-                        self.stat_assigned += 1;
-                    }
-                } else {
-                    // False match: same read direction (e.g. secondary alignment
-                    // of a singleton in different workers).  Put self_info back.
-                    self.unmatched_mates.insert(key, self_info);
-                    // other_info has same key — can't insert into HashMap without
-                    // overwriting.  It will be counted as a singleton at reconciliation
-                    // since the first entry remains in the map.
-                    // We lose this entry, but R featureCounts also handles secondary
-                    // duplicates this way (only one alignment per QNAME at same pos).
-                }
-            } else {
-                self.unmatched_mates.insert(key, other_info);
+        // Merge unmatched mates: a mate of a pair whose other mate was
+        // buffered by the other worker (mates on different chromosomes) is
+        // paired now, exactly as if both had gone through one buffer.
+        for (key, other_info) in other.unmatched_mates.into_entries() {
+            match self.unmatched_mates.take_mate(&key, other_info.is_read1) {
+                Some(self_info) => self.count_pair(
+                    &self_info,
+                    &other_info.gene_hits,
+                    other_info.is_dup,
+                    other_info.is_multi,
+                ),
+                None => self.unmatched_mates.push(key, other_info),
             }
         }
         self.total_reads += other.total_reads;
@@ -831,7 +908,7 @@ fn process_counting_record(
     aligned_blocks_buf: &mut Vec<(u64, u64)>,
     gene_hits: &mut Vec<GeneIdx>,
     biotype_hits_buf: &mut Vec<u16>,
-    mate_buffer: &mut HashMap<MateBufferKey, MateInfo>,
+    mate_buffer: &mut MateBuffer,
 ) {
     let flags = record.flags();
 
@@ -939,69 +1016,23 @@ fn process_counting_record(
         (qname_hash, mate_tid, mate_pos_val, own_tid, own_pos, hi_tag)
     };
 
-    // Check if the mate is already in the buffer.  We must verify the match
-    // is a genuine read1↔read2 pair, not a secondary alignment of the *same*
-    // read (which produces an identical key when the mate is unmapped, because
-    // both primary and secondary share qname_hash, position, and mate=-1/-1).
-    let matched = mate_buffer.remove(&buffer_key).and_then(|mate_info| {
-        if mate_info.is_read1 != is_read1 {
-            // Genuine pair: read1 matched read2 (or vice versa)
-            Some(mate_info)
-        } else {
-            // False match: same read direction (e.g. secondary alignment of a
-            // singleton).  Put the original entry back and treat this read as
-            // a new buffer insert.
-            mate_buffer.insert(buffer_key, mate_info);
-            None
+    // Pair with the oldest buffered mate of the other direction.  A read is
+    // never paired with one of its own direction: a secondary alignment of a
+    // singleton has the same key as its primary when there is no HI tag.
+    match mate_buffer.take_mate(&buffer_key, is_read1) {
+        Some(mate_info) => result.count_pair(&mate_info, gene_hits, is_dup, is_multi),
+        None => {
+            // Take ownership of gene_hits instead of cloning (it's cleared at loop start)
+            mate_buffer.push(
+                buffer_key,
+                MateInfo {
+                    gene_hits: std::mem::take(gene_hits),
+                    is_dup,
+                    is_multi,
+                    is_read1,
+                },
+            );
         }
-    });
-
-    if let Some(mate_info) = matched {
-        result.total_fragments += 1;
-
-        let frag_is_dup = if is_read1 { is_dup } else { mate_info.is_dup };
-        let frag_is_multi = if is_read1 {
-            is_multi
-        } else {
-            mate_info.is_multi
-        };
-        result.n_multi_dup += 1;
-        result.n_unique_dup += 1;
-        if !frag_is_dup {
-            result.n_multi_nodup += 1;
-            result.n_unique_nodup += 1;
-        }
-
-        // featureCounts union-with-both-end-preference voting: each gene
-        // gets +1 per mate that overlaps it (max 2).  Genes hit by both
-        // mates (score 2) beat genes hit by only one (score 1).  If
-        // multiple genes tie at the highest score the fragment is
-        // ambiguous.  This matches Rsubread::featureCounts behaviour.
-        let combined_genes: Vec<GeneIdx> = merge_gene_hits(&mate_info.gene_hits, gene_hits);
-
-        if combined_genes.is_empty() {
-            result.stat_no_features += 1;
-        } else if combined_genes.len() > 1 {
-            result.stat_ambiguous += 1;
-        } else if assign_fragment_to_gene(
-            &combined_genes,
-            &mut result.gene_counts,
-            frag_is_dup,
-            frag_is_multi,
-        ) {
-            result.stat_assigned += 1;
-        }
-    } else {
-        // Take ownership of gene_hits instead of cloning (it's cleared at loop start)
-        mate_buffer.insert(
-            buffer_key,
-            MateInfo {
-                gene_hits: std::mem::take(gene_hits),
-                is_dup,
-                is_multi,
-                is_read1,
-            },
-        );
     }
 }
 
@@ -1040,18 +1071,7 @@ fn process_chromosome_batch(
 
     // Pre-compute resolved chromosome names per TID (apply prefix/mapping once,
     // not on every read). Used by both featureCounts counting and RSeQC tools.
-    let tid_to_gtf_chrom: Vec<String> = tid_to_name
-        .iter()
-        .map(|bam_name| {
-            if let Some(mapped) = chrom_mapping.get(bam_name.as_str()) {
-                mapped.clone()
-            } else if let Some(prefix) = chrom_prefix {
-                format!("{}{}", prefix, bam_name)
-            } else {
-                bam_name.clone()
-            }
-        })
-        .collect();
+    let tid_to_gtf_chrom = gtf_chrom_names(tid_to_name, chrom_mapping, chrom_prefix);
     let tid_to_rseqc_chrom = &tid_to_gtf_chrom;
     let tid_to_rseqc_chrom_upper: Vec<String> =
         tid_to_gtf_chrom.iter().map(|s| s.to_uppercase()).collect();
@@ -1072,7 +1092,7 @@ fn process_chromosome_batch(
     let mut aligned_blocks_buf: Vec<(u64, u64)> = Vec::new();
     let mut gene_hits: Vec<GeneIdx> = Vec::new();
     let mut biotype_hits_buf: Vec<u16> = Vec::new();
-    let mut mate_buffer: HashMap<MateBufferKey, MateInfo> = HashMap::new();
+    let mut mate_buffer = MateBuffer::default();
     let mut record = bam::Record::new();
 
     for &tid in tids {
@@ -1153,10 +1173,35 @@ fn process_chromosome_batch(
     Ok((result, rseqc_accums))
 }
 
+/// Resolve each alignment chromosome (by tid) to its GTF name: an explicit
+/// `chromosome_mapping` entry first, else the configured prefix, else as is.
+fn gtf_chrom_names(
+    tid_to_name: &[String],
+    chrom_mapping: &HashMap<String, String>,
+    chrom_prefix: Option<&str>,
+) -> Vec<String> {
+    tid_to_name
+        .iter()
+        .map(|bam_name| {
+            if let Some(mapped) = chrom_mapping.get(bam_name.as_str()) {
+                mapped.clone()
+            } else if let Some(prefix) = chrom_prefix {
+                format!("{}{}", prefix, bam_name)
+            } else {
+                bam_name.clone()
+            }
+        })
+        .collect()
+}
+
 /// Partition chromosome indices across workers using greedy bin-packing
 /// (largest-first scheduling). Assigns each chromosome to the worker with the
 /// smallest current total length, producing a more balanced distribution than
 /// round-robin when chromosome sizes vary widely.
+///
+/// Each batch lists its chromosomes in ascending tid order (file order), so a
+/// worker meets them in the same order as a single pass over the file. The
+/// accumulators that keep only the first N items of the file rely on this.
 fn partition_chromosomes(lengths: &[u64], num_workers: usize) -> Vec<Vec<u32>> {
     let mut batches: Vec<Vec<u32>> = vec![Vec::new(); num_workers];
     let mut loads: Vec<u64> = vec![0; num_workers];
@@ -1175,6 +1220,9 @@ fn partition_chromosomes(lengths: &[u64], num_workers: usize) -> Vec<Vec<u32>> {
             .unwrap_or(0);
         batches[min_worker].push(tid);
         loads[min_worker] += lengths[tid as usize];
+    }
+    for batch in &mut batches {
+        batch.sort_unstable();
     }
 
     batches
@@ -1387,18 +1435,7 @@ pub fn count_reads(
 
         // Pre-compute resolved chromosome names for RSeQC tools
         // (apply chromosome prefix and mapping, same as parallel path)
-        let tid_to_rseqc_chrom: Vec<String> = tid_to_name
-            .iter()
-            .map(|bam_name| {
-                if let Some(mapped) = chrom_mapping.get(bam_name.as_str()) {
-                    mapped.clone()
-                } else if let Some(prefix) = chrom_prefix {
-                    format!("{}{}", prefix, bam_name)
-                } else {
-                    bam_name.clone()
-                }
-            })
-            .collect();
+        let tid_to_rseqc_chrom = gtf_chrom_names(&tid_to_name, chrom_mapping, chrom_prefix);
         let tid_to_rseqc_chrom_upper: Vec<String> = tid_to_rseqc_chrom
             .iter()
             .map(|s| s.to_uppercase())
@@ -1420,7 +1457,7 @@ pub fn count_reads(
         let mut aligned_blocks_buf: Vec<(u64, u64)> = Vec::new();
         let mut gene_hits: Vec<GeneIdx> = Vec::new();
         let mut biotype_hits_buf: Vec<u16> = Vec::new();
-        let mut mate_buffer: HashMap<MateBufferKey, MateInfo> = HashMap::new();
+        let mut mate_buffer = MateBuffer::default();
         let mut record = bam::Record::new();
 
         while let Some(read_result) = bam.read(&mut record) {
@@ -1504,6 +1541,8 @@ pub fn count_reads(
     // never visits reads in the unmapped segment (tid=-1) at the end of the
     // BAM file. We sweep them here so that bam_stat totals, fc_unmapped,
     // and RSeQC accumulators see every record.
+    // GTF names per tid, as the workers resolved them.
+    let gtf_chroms = gtf_chrom_names(&tid_to_name, chrom_mapping, chrom_prefix);
     if use_parallel {
         let mut bam = bam::IndexedReader::from_path(bam_path).with_context(|| {
             format!(
@@ -1540,8 +1579,8 @@ pub fn count_reads(
                     // Mapped read in the unmapped segment (placed at mate's position).
                     // Pass to process_read() for full Qualimap processing.
                     if let Some(qm_index) = qualimap_index {
-                        if (tid as usize) < tid_to_name.len() {
-                            qm.process_read(&record, &tid_to_name[tid as usize], qm_index);
+                        if (tid as usize) < gtf_chroms.len() {
+                            qm.process_read(&record, &gtf_chroms[tid as usize], qm_index);
                         }
                     }
                 } else if record.flags() & BAM_FUNMAP != 0 {
@@ -1569,69 +1608,12 @@ pub fn count_reads(
         }
     }
 
-    // --- Cross-chromosome mate reconciliation ---
+    // --- Remaining unmatched mates ---
     //
-    // In parallel mode, mates on different chromosomes end up in different
-    // workers' mate buffers. Reconcile them here: try to match each unmatched
-    // mate against the others. Any that still don't match are treated as
-    // singletons (same as the sequential path).
+    // Mates on different chromosomes were already paired while merging the
+    // workers' buffers, so what is left never found its partner.
     if paired && !merged.unmatched_mates.is_empty() {
-        // Drain all unmatched mates and try to pair them
-        let unmatched: Vec<(MateBufferKey, MateInfo)> = merged.unmatched_mates.drain().collect();
-        let mut still_unmatched: HashMap<MateBufferKey, MateInfo> = HashMap::new();
-
-        for (key, info) in unmatched {
-            if let Some(mate_info) = still_unmatched.remove(&key) {
-                if info.is_read1 == mate_info.is_read1 {
-                    // False match: same read direction (secondary alignment of a
-                    // singleton).  Put the first entry back, drop the second
-                    // (HashMap only holds one entry per key).
-                    still_unmatched.insert(key, mate_info);
-                    continue;
-                }
-                merged.total_fragments += 1;
-
-                // Use read1's dup/multi status for the fragment.
-                let frag_is_dup = if info.is_read1 {
-                    info.is_dup
-                } else {
-                    mate_info.is_dup
-                };
-                let frag_is_multi = if info.is_read1 {
-                    info.is_multi
-                } else {
-                    mate_info.is_multi
-                };
-
-                merged.n_multi_dup += 1;
-                merged.n_unique_dup += 1;
-                if !frag_is_dup {
-                    merged.n_multi_nodup += 1;
-                    merged.n_unique_nodup += 1;
-                }
-
-                // Combine gene hits with featureCounts scoring
-                let combined_genes: Vec<GeneIdx> =
-                    merge_gene_hits(&mate_info.gene_hits, &info.gene_hits);
-
-                if combined_genes.is_empty() {
-                    merged.stat_no_features += 1;
-                } else if combined_genes.len() > 1 {
-                    merged.stat_ambiguous += 1;
-                } else if assign_fragment_to_gene(
-                    &combined_genes,
-                    &mut merged.gene_counts,
-                    frag_is_dup,
-                    frag_is_multi,
-                ) {
-                    merged.stat_assigned += 1;
-                    // Coverage recording skipped — no aligned blocks available for
-                    // cross-chromosome mate reconciliation.
-                }
-            } else {
-                still_unmatched.insert(key, info);
-            }
-        }
+        let still_unmatched = std::mem::take(&mut merged.unmatched_mates).into_entries();
 
         // Handle remaining singletons (mates whose partner was never seen).
         // featureCounts defaults to requireBothEndsMapped=FALSE, meaning
@@ -1643,7 +1625,7 @@ pub fn count_reads(
         // These reads were already classified individually through
         // classify_read_fc() when first encountered, so we do NOT
         // increment fc_singleton here (that would double-count).
-        for (_key, mate_info) in still_unmatched.drain() {
+        for (_key, mate_info) in still_unmatched {
             merged.total_fragments += 1;
             // Include singletons in library size counts for RPKM calculation.
             // R dupRadar's analyzeDuprates() uses N = sum(stat[,2]) - Unmapped
@@ -1704,7 +1686,16 @@ pub fn count_reads(
         .count();
     if merged.total_mapped > 0 && genes_with_reads == 0 {
         let bam_chroms: Vec<&str> = tid_to_name.iter().take(5).map(|s| s.as_str()).collect();
-        let gtf_chroms: Vec<&str> = index.keys().take(5).map(|s| s.as_str()).collect();
+        // First 5 annotated chromosomes in GTF order (not the index's hash order).
+        let mut gtf_chroms: Vec<&str> = Vec::with_capacity(5);
+        for exon in genes.values().flat_map(|g| g.exons.iter()) {
+            if gtf_chroms.len() == 5 {
+                break;
+            }
+            if !gtf_chroms.contains(&exon.chrom.as_str()) {
+                gtf_chroms.push(exon.chrom.as_str());
+            }
+        }
         anyhow::bail!(
             "Chromosome name mismatch: no reads could be assigned to any gene.\n\
              \n\
@@ -2083,6 +2074,100 @@ mod tests {
                 load,
                 avg
             );
+        }
+    }
+
+    fn mate(gene: GeneIdx, is_read1: bool, is_dup: bool) -> MateInfo {
+        MateInfo {
+            gene_hits: vec![gene],
+            is_dup,
+            is_multi: false,
+            is_read1,
+        }
+    }
+
+    /// Feed one read through a mate buffer the way `process_counting_record` does.
+    fn feed(result: &mut ChromResult, key: MateBufferKey, info: MateInfo) {
+        match result.unmatched_mates.take_mate(&key, info.is_read1) {
+            Some(m) => result.count_pair(&m, &info.gene_hits, info.is_dup, info.is_multi),
+            None => result.unmatched_mates.push(key, info),
+        }
+    }
+
+    fn summary(r: &ChromResult) -> (u64, u64, u64, Vec<(u64, u64, u64, u64)>) {
+        let genes = r
+            .gene_counts
+            .iter()
+            .map(|g| (g.all_multi, g.nodup_multi, g.all_unique, g.nodup_unique))
+            .collect();
+        (r.total_fragments, r.stat_assigned, r.stat_ambiguous, genes)
+    }
+
+    #[test]
+    fn test_mate_buffer_same_pairs_single_pass_and_merged() {
+        // One key, mates on two chromosomes: two read1 records (chrom A, read
+        // first) and two read2 records (chrom B). FIFO pairing gives
+        // (r1a, r2a) and (r1b, r2b): both assigned to one gene.
+        let key: MateBufferKey = (42, 0, 100, 1, 200, -1);
+        let reads_a = || vec![mate(0, true, false), mate(1, true, false)];
+        let reads_b = || vec![mate(0, false, false), mate(1, false, false)];
+
+        let mut single = ChromResult::new(2, 0);
+        for info in reads_a().into_iter().chain(reads_b()) {
+            feed(&mut single, key, info);
+        }
+        assert!(single.unmatched_mates.is_empty());
+
+        for a_first in [true, false] {
+            let mut a = ChromResult::new(2, 0);
+            reads_a().into_iter().for_each(|i| feed(&mut a, key, i));
+            let mut b = ChromResult::new(2, 0);
+            reads_b().into_iter().for_each(|i| feed(&mut b, key, i));
+            let merged = if a_first {
+                a.merge(b);
+                a
+            } else {
+                b.merge(a);
+                b
+            };
+            assert!(merged.unmatched_mates.is_empty());
+            assert_eq!(summary(&merged), summary(&single));
+        }
+        assert_eq!(single.stat_assigned, 2);
+        assert_eq!(single.stat_ambiguous, 0);
+    }
+
+    #[test]
+    fn test_mate_buffer_fragment_is_duplicate_if_either_mate_is() {
+        let key: MateBufferKey = (7, 0, 10, 0, 50, -1);
+        for (r1_dup, r2_dup) in [(true, false), (false, true)] {
+            let mut r = ChromResult::new(1, 0);
+            feed(&mut r, key, mate(0, true, r1_dup));
+            feed(&mut r, key, mate(0, false, r2_dup));
+            assert_eq!(summary(&r).3, vec![(1, 0, 1, 0)], "r1_dup={r1_dup}");
+            assert_eq!(r.n_multi_nodup, 0);
+        }
+    }
+
+    #[test]
+    fn test_mate_buffer_never_pairs_same_direction() {
+        let key: MateBufferKey = (9, 0, 10, 0, 10, -1);
+        let mut r = ChromResult::new(1, 0);
+        feed(&mut r, key, mate(0, true, false));
+        feed(&mut r, key, mate(0, true, false));
+        assert_eq!(r.total_fragments, 0);
+        assert_eq!(r.unmatched_mates.into_entries().len(), 2);
+    }
+
+    #[test]
+    fn test_partition_chromosomes_batches_in_file_order() {
+        let lengths = vec![
+            250, 243, 198, 191, 182, 171, 159, 146, 138, 133, 135, 130, 57,
+        ];
+        for workers in 1..=6 {
+            for batch in partition_chromosomes(&lengths, workers) {
+                assert!(batch.windows(2).all(|w| w[0] < w[1]), "{batch:?}");
+            }
         }
     }
 
