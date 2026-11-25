@@ -254,7 +254,7 @@ To prepare a release:
 | `coitrees`             | Cache-oblivious interval trees        |
 | `rayon`                | Data parallelism                      |
 | `rand` / `rand_chacha` | Reproducible random sampling          |
-| `flate2`               | Gzip decompression (annotation files) |
+| `flate2`               | Gzip decompression (annotation files, `zlib-rs` backend) |
 
 ## Duplicate Marking Validation
 
