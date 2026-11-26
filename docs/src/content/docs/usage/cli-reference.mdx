@@ -229,11 +229,16 @@ tool runs by default as part of `rustqc rna` and can be disabled via the
 
 | Option                                         | Default | Description                                       |
 | ---------------------------------------------- | ------- | ------------------------------------------------- |
-| `--junction-saturation-seed <N>`               | `42`    | Random seed for reproducible sampling             |
+| `--junction-saturation-seed <N>`               | `42`    | Seed for the sampling shuffle (see below)         |
 | `--junction-saturation-min-coverage <N>`       | `1`     | Minimum reads for a junction to count as detected |
 | `--junction-saturation-percentile-floor <N>`   | `5`     | Sampling start percentage                         |
 | `--junction-saturation-percentile-ceiling <N>` | `100`   | Sampling end percentage                           |
 | `--junction-saturation-percentile-step <N>`    | `5`     | Sampling step percentage                          |
+
+The intermediate sampling points come from RustQC's own seeded RNG: they are
+reproducible for a given seed, but do not match RSeQC's random draws. The x-axis
+values and the 100% point match RSeQC. See
+[junction_saturation](/rna/rseqc/#junction_saturation).
 
 #### inner_distance
 

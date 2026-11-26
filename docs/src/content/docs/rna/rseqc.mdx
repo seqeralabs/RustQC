@@ -429,8 +429,21 @@ At 100% sampling depth:
 
 </details>
 
-Intermediate sampling percentages show minor stochastic variation from random
-subsampling, as expected.
+RustQC follows RSeQC's sampling: the percentages are
+`range(floor, ceiling, step)` followed by 100, and the window for each percentage
+uses RSeQC's floating-point index arithmetic, `int(N * (p / 100.0))`. The x-axis
+values are therefore identical to RSeQC's, and so is the 100% point whenever the
+windows cover all observations (as with the default parameters). The
+intermediate points depend on how the splice-junction observations are shuffled.
+RSeQC does not seed Python's `random`, so its intermediate points change from run
+to run. RustQC shuffles with its own seeded RNG (`--junction-saturation-seed`,
+default 42), so its intermediate points are reproducible and identical for any
+`--threads` value, but they do not match RSeQC's random draws.
+
+As in RSeQC, reads on chromosomes without any annotated transcript are ignored.
+The `pdf()` call in the R script names the PDF by sample name only, as RSeQC does
+when run with `-o <sample name>`, so the script does not depend on the output
+directory.
 
 ## inner_distance
 

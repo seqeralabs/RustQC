@@ -488,7 +488,7 @@ Requires annotation (`--gtf`). The `min_intron` can also be set via `--min-intro
 rna:
   junction_saturation:
     enabled: true
-    seed: 42 # Random seed for reproducible sampling (default: 42)
+    seed: 42 # Seed for the sampling shuffle; reproducible, but not RSeQC's draws (default: 42)
     min_coverage: 1 # Minimum read count to consider a junction (default: 1)
     percentile_floor: 5 # Sampling start percentage (default: 5)
     percentile_ceiling: 100 # Sampling end percentage (default: 100)
