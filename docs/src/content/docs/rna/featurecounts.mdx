@@ -122,15 +122,15 @@ are reported as `Unassigned_MultiMapping`, and reads overlapping several feature
 are reported as `Unassigned_Ambiguity`. Two flags change this, with the same
 meaning as in featureCounts:
 
-| Flag                               | Config key                             | featureCounts | Effect                                                                    |
-| ---------------------------------- | -------------------------------------- | ------------- | ------------------------------------------------------------------------- |
-| `-M`, `--count-multi-mapping`      | `featurecounts.count_multi_mapping`    | `-M`          | Count every reported alignment of multi-mapping reads                      |
-| `-O`, `--count-multi-overlapping`  | `featurecounts.count_multi_overlapping` | `-O`          | Assign a read to every feature (gene or biotype) it overlaps              |
+| Flag                        | Config key                              | featureCounts | Effect                                                                    |
+| --------------------------- | --------------------------------------- | ------------- | ------------------------------------------------------------------------- |
+| `--count-multi-mapping`     | `featurecounts.count_multi_mapping`     | `-M`          | Count every reported alignment of multi-mapping reads                      |
+| `--count-multi-overlapping` | `featurecounts.count_multi_overlapping` | `-O`          | Assign a read to every feature (gene or biotype) it overlaps              |
 
 Both apply to the gene-level counts and summary and to the biotype-level counts,
-summary and MultiQC files. dupRadar results are unchanged. Like featureCounts,
-`-O` reports a read as Assigned once in the summary but adds it to the count of
-every overlapping feature.
+summary and MultiQC files. dupRadar results are unchanged. Like featureCounts
+`-O`, `--count-multi-overlapping` reports a read as Assigned once in the
+summary but adds it to the count of every overlapping feature.
 
 On the small dataset (~52K reads), the gene and biotype summaries and every
 gene and biotype count match Subread featureCounts v2.1.1
@@ -155,12 +155,13 @@ gene and biotype count match Subread featureCounts v2.1.1
     acrocentric short arms and is essentially absent from the gene annotation.
     Reads from it are `Unassigned_NoFeatures`, or land on unannotated contigs.
   - rRNA comes from high-copy repeats, so most rRNA reads multi-map and are
-    dropped as `Unassigned_MultiMapping` unless `-M` is used.
+    dropped as `Unassigned_MultiMapping` unless `--count-multi-mapping` is used.
 
   For a reliable rRNA measure, use [split_bam](../rseqc/#split_bam) with an rRNA
   BED file. It counts alignments by position rather than gene assignment, so it
-  includes multi-mappers and regions the GTF does not annotate. `-M` / `-O`
-  only help for rRNA genes that the GTF does annotate.
+  includes multi-mappers and regions the GTF does not annotate.
+  `--count-multi-mapping` / `--count-multi-overlapping` only help for rRNA
+  genes that the GTF does annotate.
 </Aside>
 
 ## Biotype attribute detection

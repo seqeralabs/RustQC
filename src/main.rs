@@ -116,10 +116,10 @@ fn reconstruct_command_line(args: &cli::RnaArgs) -> String {
         parts.push("-p".to_string());
     }
     if args.count_multi_mapping {
-        parts.push("-M".to_string());
+        parts.push("--count-multi-mapping".to_string());
     }
     if args.count_multi_overlapping {
-        parts.push("-O".to_string());
+        parts.push("--count-multi-overlapping".to_string());
     }
     if args.threads != 1 {
         parts.push(format!("-t {}", args.threads));

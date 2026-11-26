@@ -122,14 +122,14 @@ set during parsing and exits with an error if none are found.
 Use this flag if you want to run on a file without duplicate marking for
 testing purposes.
 
-#### `-M, --count-multi-mapping`
+#### `--count-multi-mapping`
 
 Count multi-mapping reads (`NH` > 1) in the featureCounts gene and biotype
 outputs, like `featureCounts -M`: every reported alignment is counted instead
 of being reported as `Unassigned_MultiMapping`. dupRadar is not affected.
 Also settable as `featurecounts.count_multi_mapping` in the config file.
 
-#### `-O, --count-multi-overlapping`
+#### `--count-multi-overlapping`
 
 Assign reads that overlap several genes (or biotypes) to all of them, like
 `featureCounts -O`, instead of reporting them as `Unassigned_Ambiguity`.

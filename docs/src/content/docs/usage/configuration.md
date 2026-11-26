@@ -398,7 +398,7 @@ rna:
 ```
 
 `count_multi_mapping` and `count_multi_overlapping` are also enabled by the
-`-M` / `-O` CLI flags. See
+`--count-multi-mapping` / `--count-multi-overlapping` CLI flags. See
 [Multi-mapping and multi-overlapping reads](../rna/featurecounts/#multi-mapping-and-multi-overlapping-reads).
 
 ### `biotype_attribute`

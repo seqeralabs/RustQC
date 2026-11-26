@@ -157,7 +157,6 @@ pub struct RnaArgs {
 
     /// featureCounts: count multi-mapping reads (like featureCounts -M)
     #[arg(
-        short = 'M',
         long,
         default_value_t = false,
         env = "RUSTQC_COUNT_MULTI_MAPPING",
@@ -167,7 +166,6 @@ pub struct RnaArgs {
 
     /// featureCounts: count reads for every overlapping feature (like -O)
     #[arg(
-        short = 'O',
         long,
         default_value_t = false,
         env = "RUSTQC_COUNT_MULTI_OVERLAPPING",
