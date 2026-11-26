@@ -5,7 +5,8 @@
 //! RSeQC's `tin.py` tool.
 
 use rust_htslib::bam;
-use std::collections::{HashMap, HashSet};
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::hash::{BuildHasher, Hasher};
 use std::io::Write;
 use std::path::Path;
@@ -317,12 +318,356 @@ fn sample_exonic_positions(
 // TIN accumulator
 // ===================================================================
 
+/// Minimum base quality for a base to count towards pileup coverage.
+///
+/// tin.py calls `samfile.pileup()` with pysam's defaults, and `min_base_quality=13`
+/// makes `PileupColumn.pileups` skip bases below this quality.
+const PILEUP_MIN_BASE_QUALITY: u8 = 13;
+
+/// One sampled position covered by an aligned base of a read.
+#[derive(Debug, Clone, Copy)]
+struct CoveredBase {
+    /// Start of the range of entries in the chromosome's position list at this position
+    first: u32,
+    /// End (exclusive) of that range
+    last: u32,
+    /// Query offset of the read base aligned to this position
+    qpos: u32,
+}
+
+/// First mate of a properly paired read, kept until its mate arrives.
+///
+/// Mirrors htslib's pileup overlap hash (`overlap_push`): when the second mate
+/// arrives, `tweak_overlap_quality` rewrites the qualities of the bases where
+/// the mates overlap, so that only one of them passes the base-quality filter.
+#[derive(Debug)]
+struct PendingMate {
+    /// Unique id, so a stale heap entry cannot evict a newer mate with the same name
+    id: u64,
+    /// Alignment start (0-based)
+    pos: i64,
+    /// Raw BAM CIGAR
+    cigar: Vec<u32>,
+    /// 4-bit packed read sequence, as stored in the BAM
+    seq: Vec<u8>,
+    /// Base qualities as stored in the BAM (what the mate was counted with)
+    qual: Vec<u8>,
+    /// The mate's covered sampled positions (sorted by position)
+    bases: Vec<CoveredBase>,
+}
+
+/// One mate as seen by [`tweak_overlap_quality`].
+struct MateView<'a> {
+    /// Alignment start (0-based)
+    pos: i64,
+    /// Raw BAM CIGAR
+    cigar: &'a [u32],
+    /// 4-bit packed read sequence
+    seq: &'a [u8],
+    /// Base qualities, rewritten in place
+    qual: &'a mut [u8],
+}
+
+/// BAM CIGAR operation codes used by the htslib port below.
+const CIGAR_MATCH: u32 = 0;
+const CIGAR_INS: u32 = 1;
+const CIGAR_DEL: u32 = 2;
+const CIGAR_REF_SKIP: u32 = 3;
+const CIGAR_SOFT_CLIP: u32 = 4;
+const CIGAR_HARD_CLIP: u32 = 5;
+const CIGAR_PAD: u32 = 6;
+const CIGAR_EQUAL: u32 = 7;
+const CIGAR_DIFF: u32 = 8;
+
+/// Outcome of a CIGAR cursor step (htslib returns BAM_CMATCH, -1 or -2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Step {
+    /// Positioned on an aligned (M/=/X) base
+    Match,
+    /// End of the CIGAR, or the requested position is not covered
+    End,
+    /// Unexpected CIGAR operation
+    Error,
+}
+
+/// Position within a CIGAR, ported from htslib's `cigar_iref2iseq_set` /
+/// `cigar_iref2iseq_next` (htslib 1.24, as bundled with pysam 0.24).
+struct CigarCursor<'a> {
+    /// Raw BAM CIGAR operations
+    ops: &'a [u32],
+    /// Index of the current operation (htslib's `*cigar` pointer)
+    k: usize,
+    /// Offset within the current operation
+    icig: i64,
+    /// Query offset of the current base
+    iseq: i64,
+    /// Reference offset of the current base relative to the alignment start
+    iref: i64,
+}
+
+impl<'a> CigarCursor<'a> {
+    /// Position on the first aligned base at or after reference offset `target`
+    /// (`cigar_iref2iseq_set`).
+    fn set(ops: &'a [u32], target: i64) -> (Self, Step) {
+        let mut c = CigarCursor {
+            ops,
+            k: 0,
+            icig: 0,
+            iseq: 0,
+            iref: 0,
+        };
+        let mut pos = target;
+        if pos < 0 {
+            return (c, Step::End);
+        }
+        while let Some(&op) = c.ops.get(c.k) {
+            let ncig = (op >> 4) as i64;
+            match op & 0xf {
+                CIGAR_SOFT_CLIP | CIGAR_INS => {
+                    c.k += 1;
+                    c.iseq += ncig;
+                    c.icig = 0;
+                }
+                CIGAR_HARD_CLIP | CIGAR_PAD => {
+                    c.k += 1;
+                    c.icig = 0;
+                }
+                CIGAR_MATCH | CIGAR_EQUAL | CIGAR_DIFF => {
+                    pos -= ncig;
+                    if pos < 0 {
+                        c.icig = ncig + pos;
+                        c.iseq += c.icig;
+                        c.iref += c.icig;
+                        return (c, Step::Match);
+                    }
+                    c.k += 1;
+                    c.iseq += ncig;
+                    c.icig = 0;
+                    c.iref += ncig;
+                }
+                CIGAR_DEL | CIGAR_REF_SKIP => {
+                    pos = (pos - ncig).max(0);
+                    c.k += 1;
+                    c.icig = 0;
+                    c.iref += ncig;
+                }
+                _ => return (c, Step::Error),
+            }
+        }
+        c.iseq = -1;
+        (c, Step::End)
+    }
+
+    /// Step to the next aligned base (`cigar_iref2iseq_next`).
+    fn next(&mut self) -> Step {
+        while let Some(&op) = self.ops.get(self.k) {
+            let ncig = (op >> 4) as i64;
+            match op & 0xf {
+                CIGAR_MATCH | CIGAR_EQUAL | CIGAR_DIFF => {
+                    if self.icig >= ncig - 1 {
+                        self.icig = -1;
+                        self.k += 1;
+                        continue;
+                    }
+                    self.iseq += 1;
+                    self.icig += 1;
+                    self.iref += 1;
+                    return Step::Match;
+                }
+                CIGAR_DEL | CIGAR_REF_SKIP => {
+                    self.k += 1;
+                    self.iref += ncig;
+                    self.icig = -1;
+                }
+                CIGAR_INS | CIGAR_SOFT_CLIP => {
+                    self.k += 1;
+                    self.iseq += ncig;
+                    self.icig = -1;
+                }
+                CIGAR_HARD_CLIP | CIGAR_PAD => {
+                    self.k += 1;
+                    self.icig = -1;
+                }
+                _ => return Step::Error,
+            }
+        }
+        self.iseq = -1;
+        self.iref = -1;
+        Step::End
+    }
+
+    /// Whether the operation before the current one is a deletion
+    /// (htslib: `cigar > bam_get_cigar(b) && bam_cigar_op(cigar[-1]) == BAM_CDEL`).
+    fn after_deletion(&self) -> bool {
+        self.k > 0
+            && self
+                .ops
+                .get(self.k - 1)
+                .is_some_and(|op| op & 0xf == CIGAR_DEL)
+    }
+}
+
+/// htslib's `__ac_X31_hash_string` followed by `__ac_Wang_hash` (khash.h).
+fn htslib_name_hash(qname: &[u8]) -> u32 {
+    let mut h: u32 = 0;
+    if let Some((&first, rest)) = qname.split_first() {
+        h = first as i8 as u32;
+        if h != 0 {
+            for &c in rest {
+                if c == 0 {
+                    break;
+                }
+                h = (h << 5).wrapping_sub(h).wrapping_add(c as i8 as u32);
+            }
+        }
+    }
+    let mut key = h;
+    key = key.wrapping_add(!(key << 15));
+    key ^= key >> 10;
+    key = key.wrapping_add(key << 3);
+    key ^= key >> 6;
+    key = key.wrapping_add(!(key << 11));
+    key ^= key >> 16;
+    key
+}
+
+/// 4-bit base code at query offset `i` of a packed BAM sequence (`bam_seqi`).
+fn seqi(seq: &[u8], i: i64) -> u8 {
+    let byte = seq.get((i >> 1) as usize).copied().unwrap_or(0);
+    if i & 1 == 0 {
+        byte >> 4
+    } else {
+        byte & 0xf
+    }
+}
+
+/// `x * 0.8` truncated to a quality byte, as C's implicit double-to-uint8 conversion.
+fn scale_qual(q: u8) -> u8 {
+    (q as f64 * 0.8) as u8
+}
+
+/// Port of htslib 1.24's `tweak_overlap_quality`, which the pileup engine runs
+/// when the second mate of an overlapping pair arrives (pysam's default
+/// `ignore_overlaps=True`). Qualities are rewritten in place.
+///
+/// Where both mates align to the same reference base, one mate (chosen by a
+/// hash of the read name for matching bases, else the higher quality) keeps the
+/// summed or 0.8-scaled quality and the other gets 0. Inside a deletion of one
+/// mate the other mate's bases are scaled or zeroed. The walk skips positions
+/// after a reference skip (`N`), so those keep both bases, exactly as htslib.
+///
+/// # Arguments
+/// * `a` - The first (left) mate
+/// * `b` - The second mate
+/// * `qname` - The read name (selects which mate keeps matching bases)
+fn tweak_overlap_quality(a: &mut MateView, b: &mut MateView, qname: &[u8]) {
+    let mut iref = b.pos;
+    let (mut ac, mut a_ret) = CigarCursor::set(a.cigar, iref - a.pos);
+    if a_ret != Step::Match {
+        return;
+    }
+    let (mut bc, mut b_ret) = CigarCursor::set(b.cigar, iref - b.pos);
+    if b_ret != Step::Match {
+        return;
+    }
+
+    let (amul, bmul): (u8, u8) = if htslib_name_hash(qname) & 1 != 0 {
+        (1, 0)
+    } else {
+        (0, 1)
+    };
+    let a_len = a.qual.len() as i64;
+    let b_len = b.qual.len() as i64;
+    // Quality index guard: htslib only bounds-checks `iseq > l_qseq`
+    let idx = |i: i64, len: i64| -> Option<usize> { (i >= 0 && i < len).then_some(i as usize) };
+
+    loop {
+        while a_ret == Step::Match && ac.iref >= 0 && ac.iref < iref - a.pos {
+            a_ret = ac.next();
+        }
+        if a_ret != Step::Match {
+            return;
+        }
+        while b_ret == Step::Match && bc.iref >= 0 && bc.iref < iref - b.pos {
+            b_ret = bc.next();
+        }
+        if b_ret != Step::Match {
+            return;
+        }
+        iref = iref.max(ac.iref + a.pos).max(bc.iref + b.pos);
+        iref += 1;
+
+        if ac.iref + a.pos != bc.iref + b.pos {
+            if ac.iref + a.pos < bc.iref + b.pos && bc.after_deletion() {
+                // Deletion in b: catch a up, scaling or zeroing its qualities
+                loop {
+                    if let Some(i) = idx(ac.iseq, a_len) {
+                        a.qual[i] = if amul != 0 { scale_qual(a.qual[i]) } else { 0 };
+                    }
+                    if ac.next() != Step::Match {
+                        return;
+                    }
+                    if ac.iref + a.pos >= bc.iref + b.pos {
+                        break;
+                    }
+                }
+            } else if ac.after_deletion() {
+                // Deletion in a: catch b up
+                loop {
+                    if let Some(i) = idx(bc.iseq, b_len) {
+                        b.qual[i] = if bmul != 0 { scale_qual(b.qual[i]) } else { 0 };
+                    }
+                    if bc.next() != Step::Match {
+                        return;
+                    }
+                    if bc.iref + b.pos >= ac.iref + a.pos {
+                        break;
+                    }
+                }
+            } else {
+                // Anything else (e.g. reference skip) is not handled by htslib
+                continue;
+            }
+        }
+
+        if ac.iseq > a_len || bc.iseq > b_len {
+            return;
+        }
+        let (Some(ai), Some(bi)) = (idx(ac.iseq, a_len), idx(bc.iseq, b_len)) else {
+            return;
+        };
+        let (qa, qb) = (a.qual[ai], b.qual[bi]);
+        if seqi(a.seq, ac.iseq) == seqi(b.seq, bc.iseq) {
+            let sum = (qa as u32 + qb as u32).min(200) as u8;
+            a.qual[ai] = amul * sum;
+            b.qual[bi] = bmul * sum;
+        } else if qa > qb {
+            a.qual[ai] = scale_qual(qa);
+            b.qual[bi] = 0;
+        } else if qa < qb {
+            b.qual[bi] = scale_qual(qb);
+            a.qual[ai] = 0;
+        } else {
+            a.qual[ai] = if amul != 0 { scale_qual(qa) } else { 0 };
+            b.qual[bi] = if bmul != 0 { scale_qual(qb) } else { 0 };
+        }
+    }
+}
+
 /// Per-read accumulator for TIN computation.
 ///
 /// Tracks coverage at sampled positions and unique read start positions
 /// per transcript during the BAM pass. Unique start tracking matches
 /// RSeQC's `check_min_reads()`, which uses a `set()` of read start
 /// positions.
+///
+/// Coverage reproduces what tin.py's `genebody_coverage()` gets from
+/// `pysam.AlignmentFile.pileup()` with its default settings: reads with an
+/// unmapped, secondary, QC-fail or duplicate flag are skipped, and so are
+/// orphans (`ignore_orphans`: paired reads without the proper-pair flag);
+/// overlapping mates are counted once (`ignore_overlaps`); and bases below
+/// [`PILEUP_MIN_BASE_QUALITY`] are not counted. The pileup's `max_depth`
+/// (8000 reads) is not reproduced.
 ///
 /// To reduce memory pressure, each transcript's `unique_starts` set is
 /// capped at `min_cov + 1` entries. Once the threshold is exceeded the
@@ -340,6 +685,10 @@ pub struct TinAccum {
     /// Per-transcript flag: true once unique start count exceeded `min_cov`.
     /// Avoids further HashSet inserts for high-coverage transcripts.
     pub exceeded_threshold: Vec<bool>,
+    /// Per-transcript flag: true if any pileup read spans a sampled position
+    /// (aligned, deleted or skipped). pysam then yields a pileup column there,
+    /// so tin.py's coverage list is non-empty even when every count is zero.
+    has_column: Vec<bool>,
     /// Number of sampled slots per transcript.
     #[allow(dead_code)]
     pub n_samples: Vec<u32>,
@@ -352,7 +701,16 @@ pub struct TinAccum {
     /// Hash state used for unique_starts sets (deterministic when seeded).
     hash_state: TinHashState,
     /// Reusable scratch buffer for aligned blocks, avoids per-read allocation.
-    blocks_buf: Vec<(u64, u64)>,
+    blocks_buf: Vec<AlignedBlock>,
+    /// Reusable scratch buffer for the current read's covered sampled bases.
+    covered_buf: Vec<CoveredBase>,
+    /// First mates waiting for an overlapping second mate, keyed by read name.
+    pending: HashMap<Vec<u8>, PendingMate>,
+    /// Pending first mates ordered by reference end, for eviction once no
+    /// later read can overlap them.
+    pending_by_end: BinaryHeap<Reverse<(u64, u64, Vec<u8>)>>,
+    /// Next id for [`PendingMate::id`].
+    next_pending_id: u64,
     /// Last chromosome seen -- used to detect chromosome transitions and
     /// reset the cursors below.
     cursor_chrom: String,
@@ -360,9 +718,8 @@ pub struct TinAccum {
     /// is coordinate-sorted, each read's span_end is >= the previous read's,
     /// so we only need to search forward from here.
     cursor_span: usize,
-    /// Cursor into `chrom_positions` for the current chromosome. The leftmost
-    /// aligned-block start of each read is >= the previous read's, so we
-    /// search forward from here.
+    /// Cursor into `chrom_positions` for the current chromosome. Each read's
+    /// alignment start is >= the previous read's, so we search forward from here.
     cursor_pos: usize,
 }
 
@@ -393,11 +750,16 @@ impl TinAccum {
             coverage,
             unique_starts,
             exceeded_threshold: vec![false; n_transcripts],
+            has_column: vec![false; n_transcripts],
             n_samples,
             mapq_cut,
             min_cov,
             hash_state,
             blocks_buf: Vec::with_capacity(8),
+            covered_buf: Vec::new(),
+            pending: HashMap::new(),
+            pending_by_end: BinaryHeap::new(),
+            next_pending_id: 0,
             cursor_chrom: String::new(),
             cursor_span: 0,
             cursor_pos: 0,
@@ -411,8 +773,10 @@ impl TinAccum {
     ///
     /// Matches upstream RSeQC `tin.py` filtering:
     /// - `check_min_reads()`: skips qcfail, unmapped, secondary only
-    /// - `genebody_coverage()` pileup: skips is_del, qcfail, secondary, unmapped
-    ///   (pysam pileup default flag_filter also excludes BAM_FDUP)
+    /// - `genebody_coverage()` pileup: additionally skips duplicates and
+    ///   orphans, de-duplicates overlapping mates and skips bases with quality
+    ///   below 13 (pysam `pileup()` defaults); deleted and skipped (`N`) bases
+    ///   are not counted
     /// - Neither function filters by MAPQ or supplementary flags
     pub fn process_read(&mut self, record: &bam::Record, chrom_upper: &str, index: &TinIndex) {
         let flags = record.flags();
@@ -422,15 +786,15 @@ impl TinAccum {
             return;
         }
 
-        // Fill the reusable scratch buffer with aligned blocks from CIGAR,
-        // avoiding a per-read Vec allocation.
-        fill_aligned_blocks(record, &mut self.blocks_buf);
-        let blocks = &self.blocks_buf;
-        if blocks.is_empty() {
-            return;
+        // Reset cursors and drop pending mates on chromosome transition.
+        if chrom_upper != self.cursor_chrom {
+            self.cursor_chrom.clear();
+            self.cursor_chrom.push_str(chrom_upper);
+            self.cursor_span = 0;
+            self.cursor_pos = 0;
+            self.pending.clear();
+            self.pending_by_end.clear();
         }
-
-        let read_start = blocks[0].0;
 
         // Get chromosome positions for this chromosome
         let chrom_positions = match index.chrom_positions.get(chrom_upper) {
@@ -444,13 +808,8 @@ impl TinAccum {
             None => return,
         };
 
-        // Reset cursors on chromosome transition.
-        if chrom_upper != self.cursor_chrom {
-            self.cursor_chrom.clear();
-            self.cursor_chrom.push_str(chrom_upper);
-            self.cursor_span = 0;
-            self.cursor_pos = 0;
-        }
+        // Upstream uses `aligned_read.pos` (the leftmost reference position).
+        let read_start = record.pos().max(0) as u64;
 
         // Find overlapping transcripts via read start.
         // chrom_spans is sorted by tx_start.  We need all transcripts
@@ -481,44 +840,175 @@ impl TinAccum {
             }
         }
 
-        // Skip duplicate reads for coverage counting.
-        // Upstream tin.py uses pysam pileup() whose default flag_filter
-        // (BAM_FUNMAP|BAM_FSECONDARY|BAM_FQCFAIL|BAM_FDUP = 0x704) excludes
-        // duplicate-flagged reads from coverage columns. However, the upstream
-        // check_min_reads() uses fetch() which does NOT filter duplicates, so
-        // duplicates are allowed above for the unique_starts tracking.
-        if flags & 0x400 != 0 {
+        // Advance the position cursor to the first sampled position past the
+        // read start (1-based P is in the read's span iff P > read_start).
+        // Reads are coordinate-sorted, so this only moves forward.
+        let base = self.cursor_pos;
+        self.cursor_pos = base + chrom_positions[base..].partition_point(|p| p.0 <= read_start);
+
+        // Reads that pysam's pileup never sees (default `stepper="all"`
+        // flag_filter and `ignore_orphans=True`). check_min_reads() uses fetch()
+        // and does count them, so this comes after the unique-start tracking.
+        let is_paired = flags & 0x1 != 0;
+        if flags & 0x400 != 0 || (is_paired && flags & 0x2 == 0) {
             return;
         }
 
-        // For each aligned block, find sampled positions that fall within it.
-        // Sampled positions are 1-based; aligned blocks are 0-based half-open
-        // [block_start, block_end). A 1-based position P is covered iff
-        // P-1 >= block_start && P-1 < block_end, i.e., P > block_start && P <= block_end.
-        //
-        // Since reads are coordinate-sorted, block_start values are
-        // monotonically non-decreasing across reads.  We advance cursor_pos
-        // forward rather than binary-searching from scratch each time.
-        let mut first_block = true;
-        for &(block_start, block_end) in blocks.iter() {
-            // Advance cursor to first position > block_start.
-            // cursor_pos only moves forward across reads on the same chromosome.
-            let base = self.cursor_pos;
-            let pos_start = base + chrom_positions[base..].partition_point(|p| p.0 <= block_start);
+        // Forget first mates that end before this read starts: no read from
+        // here on can overlap them.
+        while let Some(Reverse((end, _, _))) = self.pending_by_end.peek() {
+            if *end > read_start {
+                break;
+            }
+            if let Some(Reverse((_, id, qname))) = self.pending_by_end.pop() {
+                if self.pending.get(&qname).is_some_and(|p| p.id == id) {
+                    self.pending.remove(&qname);
+                }
+            }
+        }
 
-            // Update cursor from the first aligned block (leftmost), since
-            // the next read's first block_start >= this read's first block_start.
-            if first_block {
-                self.cursor_pos = pos_start;
-                first_block = false;
+        let read_end = fill_aligned_blocks(record, &mut self.blocks_buf);
+        if read_end <= read_start {
+            return;
+        }
+
+        // Walk the sampled positions inside the read's reference span
+        // (read_start, read_end]. Every one gets a pileup column; those inside
+        // an aligned block are covered by one of the read's bases.
+        self.covered_buf.clear();
+        let mut in_span = false;
+        let mut block_idx = 0;
+        let mut i = self.cursor_pos;
+        while i < chrom_positions.len() && chrom_positions[i].0 <= read_end {
+            in_span = true;
+            let pos = chrom_positions[i].0;
+            let mut j = i;
+            while j < chrom_positions.len() && chrom_positions[j].0 == pos {
+                self.has_column[chrom_positions[j].1 as usize] = true;
+                j += 1;
             }
 
-            for &(pos, tx_idx, slot_idx) in &chrom_positions[pos_start..] {
-                if pos > block_end {
-                    break;
+            // Aligned blocks are sorted; skip blocks that end before pos.
+            let ref0 = pos - 1;
+            while block_idx < self.blocks_buf.len() && self.blocks_buf[block_idx].ref_end <= ref0 {
+                block_idx += 1;
+            }
+            if let Some(block) = self.blocks_buf.get(block_idx) {
+                if block.ref_start <= ref0 {
+                    self.covered_buf.push(CoveredBase {
+                        first: i as u32,
+                        last: j as u32,
+                        qpos: (block.query_start + (ref0 - block.ref_start)) as u32,
+                    });
                 }
-                // This sampled position is covered by this aligned block
-                self.coverage[tx_idx as usize][slot_idx as usize] += 1;
+            }
+            i = j;
+        }
+
+        // Without a sampled position in its span, neither this read nor an
+        // overlap adjustment with its mate can change any counted base.
+        if !in_span {
+            return;
+        }
+
+        // htslib `overlap_push`: only properly paired reads with a mapped mate on
+        // the same chromosome take part in overlap detection.
+        let mtid = record.mtid();
+        let mpos = record.mpos();
+        let overlap_candidate = flags & 0x8 == 0
+            && flags & 0x2 != 0
+            && !(mtid >= 0 && mtid != record.tid())
+            && !(record.insert_size().unsigned_abs() >= 2 * record.seq_len() as u64
+                && mpos >= read_end as i64);
+
+        let mate = if overlap_candidate && !self.pending.is_empty() {
+            self.pending.remove(record.qname())
+        } else {
+            None
+        };
+
+        let quals = record.qual();
+        match mate {
+            Some(first) => {
+                // Second mate: rewrite both mates' qualities as htslib does, then
+                // replace the first mate's own counts and count this read.
+                let mut a_qual = first.qual.clone();
+                let mut b_qual = quals.to_vec();
+                tweak_overlap_quality(
+                    &mut MateView {
+                        pos: first.pos,
+                        cigar: &first.cigar,
+                        seq: &first.seq,
+                        qual: &mut a_qual,
+                    },
+                    &mut MateView {
+                        pos: record.pos(),
+                        cigar: record.raw_cigar(),
+                        seq: record.seq().encoded,
+                        qual: &mut b_qual,
+                    },
+                    record.qname(),
+                );
+                let passes = |q: &[u8], b: &CoveredBase| {
+                    q.get(b.qpos as usize).copied().unwrap_or(0) >= PILEUP_MIN_BASE_QUALITY
+                };
+                for b in &first.bases {
+                    let (before, after) = (passes(&first.qual, b), passes(&a_qual, b));
+                    if before != after {
+                        for &(_, tx_idx, slot_idx) in
+                            &chrom_positions[b.first as usize..b.last as usize]
+                        {
+                            let c = &mut self.coverage[tx_idx as usize][slot_idx as usize];
+                            if after {
+                                *c += 1;
+                            } else {
+                                *c -= 1;
+                            }
+                        }
+                    }
+                }
+                for b in &self.covered_buf {
+                    if passes(&b_qual, b) {
+                        for &(_, tx_idx, slot_idx) in
+                            &chrom_positions[b.first as usize..b.last as usize]
+                        {
+                            self.coverage[tx_idx as usize][slot_idx as usize] += 1;
+                        }
+                    }
+                }
+            }
+            None => {
+                // Count this read's bases on their own.
+                for b in &self.covered_buf {
+                    if quals.get(b.qpos as usize).copied().unwrap_or(0) >= PILEUP_MIN_BASE_QUALITY {
+                        for &(_, tx_idx, slot_idx) in
+                            &chrom_positions[b.first as usize..b.last as usize]
+                        {
+                            self.coverage[tx_idx as usize][slot_idx as usize] += 1;
+                        }
+                    }
+                }
+
+                // First mate whose mate is still to arrive and can overlap it:
+                // keep what htslib needs to adjust both mates when it arrives.
+                if overlap_candidate && mpos >= record.pos() && mpos < read_end as i64 {
+                    let qname = record.qname().to_vec();
+                    let id = self.next_pending_id;
+                    self.next_pending_id += 1;
+                    self.pending_by_end
+                        .push(Reverse((read_end, id, qname.clone())));
+                    self.pending.insert(
+                        qname,
+                        PendingMate {
+                            id,
+                            pos: record.pos(),
+                            cigar: record.raw_cigar().to_vec(),
+                            seq: record.seq().encoded.to_vec(),
+                            qual: quals.to_vec(),
+                            bases: self.covered_buf.clone(),
+                        },
+                    );
+                }
             }
         }
     }
@@ -529,6 +1019,7 @@ impl TinAccum {
             for (j, count) in other_cov.into_iter().enumerate() {
                 self.coverage[i][j] += count;
             }
+            self.has_column[i] |= other.has_column[i];
             // If either side already exceeded the threshold, the merged
             // result also exceeds it -- no need to union the sets.
             if self.exceeded_threshold[i] || other.exceeded_threshold[i] {
@@ -572,7 +1063,13 @@ impl TinAccum {
             // Use total_position_count (which includes duplicates from upstream's
             // chose_bases list) as the denominator, matching upstream's l = len(pick_positions)
             let n_total = tx.total_position_count;
-            let tin = compute_tin(coverage, n_total);
+            let tin = if self.has_column[i] {
+                compute_tin(coverage, n_total)
+            } else {
+                // No pileup column at any sampled position: tin.py's coverage
+                // list is empty and tin_score() returns 0.
+                0.0
+            };
 
             transcripts.push(TinResult {
                 gene_id: tx.gene_id.clone(),
@@ -590,14 +1087,16 @@ impl TinAccum {
 
 /// Compute TIN score from coverage vector using Shannon entropy.
 ///
-/// Matches upstream RSeQC's `tin_score()`:
+/// Matches upstream RSeQC's `tin_score()` for a non-empty coverage list:
 ///   cvg_eff = [c for c in cvg if c > 0]
 ///   entropy = shannon_entropy(cvg_eff)
 ///   tin = 100 * exp(entropy) / l
 ///
 /// where `l` is the total number of sampled positions (including zeros),
 /// NOT just the nonzero count. A transcript with many uncovered positions
-/// gets a lower TIN because the denominator is larger.
+/// gets a lower TIN because the denominator is larger. When no position has
+/// coverage, the entropy is 0 and the TIN is `100 / l`, as upstream. (The
+/// caller handles the empty-list case, where upstream returns 0.)
 fn compute_tin(coverage: &[u32], n_total_positions: usize) -> f64 {
     if n_total_positions == 0 {
         return 0.0;
@@ -609,52 +1108,71 @@ fn compute_tin(coverage: &[u32], n_total_positions: usize) -> f64 {
         .map(|&c| c as f64)
         .collect();
 
-    if nonzero.is_empty() {
-        return 0.0;
-    }
-
     let total: f64 = nonzero.iter().sum();
-    if total == 0.0 {
-        return 0.0;
-    }
 
     // Shannon entropy over non-zero positions only (matching upstream)
-    let entropy: f64 = nonzero
-        .iter()
-        .map(|&c| {
-            let p = c / total;
-            -p * p.ln()
-        })
-        .sum();
+    let entropy: f64 = if total == 0.0 {
+        0.0
+    } else {
+        nonzero
+            .iter()
+            .map(|&c| {
+                let p = c / total;
+                -p * p.ln()
+            })
+            .sum()
+    };
 
     // Upstream: tin = 100 * exp(entropy) / l
     // where l = total number of sampled positions (not just nonzero)
     100.0 * entropy.exp() / n_total_positions as f64
 }
 
-/// Get aligned blocks from a BAM record's CIGAR string.
+/// An aligned (M/=/X) block of a read.
+#[derive(Debug, Clone, Copy)]
+struct AlignedBlock {
+    /// Reference start (0-based, inclusive)
+    ref_start: u64,
+    /// Reference end (0-based, exclusive)
+    ref_end: u64,
+    /// Query offset of the block's first base
+    query_start: u64,
+}
+
+/// Fill `buf` with the aligned blocks of a BAM record's CIGAR, reusing the
+/// existing Vec capacity to avoid per-read heap allocation.
 ///
-/// Returns sorted (start, end) pairs of aligned blocks (0-based half-open).
-/// Fill `buf` with aligned blocks from the CIGAR, reusing the existing
-/// Vec capacity to avoid per-read heap allocation.
-fn fill_aligned_blocks(record: &bam::Record, buf: &mut Vec<(u64, u64)>) {
+/// # Returns
+/// The reference end of the alignment (0-based, exclusive), including
+/// deletions and skipped regions.
+fn fill_aligned_blocks(record: &bam::Record, buf: &mut Vec<AlignedBlock>) -> u64 {
     use rust_htslib::bam::record::Cigar;
 
     buf.clear();
-    let mut pos = record.pos() as u64;
+    let mut pos = record.pos().max(0) as u64;
+    let mut qpos = 0u64;
 
     for op in record.cigar().iter() {
         match op {
             Cigar::Match(len) | Cigar::Equal(len) | Cigar::Diff(len) => {
-                buf.push((pos, pos + *len as u64));
+                buf.push(AlignedBlock {
+                    ref_start: pos,
+                    ref_end: pos + *len as u64,
+                    query_start: qpos,
+                });
                 pos += *len as u64;
+                qpos += *len as u64;
             }
             Cigar::Del(len) | Cigar::RefSkip(len) => {
                 pos += *len as u64;
             }
-            Cigar::Ins(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) | Cigar::Pad(_) => {}
+            Cigar::Ins(len) | Cigar::SoftClip(len) => {
+                qpos += *len as u64;
+            }
+            Cigar::HardClip(_) | Cigar::Pad(_) => {}
         }
     }
+    pos
 }
 
 // ===================================================================
@@ -829,11 +1347,171 @@ mod tests {
         );
     }
 
+    /// Pack an ACGT string into BAM 4-bit encoding.
+    fn pack_seq(seq: &str) -> Vec<u8> {
+        let code = |c: u8| match c {
+            b'A' => 1u8,
+            b'C' => 2,
+            b'G' => 4,
+            b'T' => 8,
+            _ => 15,
+        };
+        seq.as_bytes()
+            .chunks(2)
+            .map(|p| (code(p[0]) << 4) | p.get(1).map_or(0, |&c| code(c)))
+            .collect()
+    }
+
+    /// Raw BAM CIGAR operation.
+    fn cig(op: u32, len: u32) -> u32 {
+        (len << 4) | op
+    }
+
+    /// Run `tweak_overlap_quality` on two mates and return their new qualities.
+    #[allow(clippy::too_many_arguments)]
+    fn tweak(
+        a_pos: i64,
+        a_cigar: &[u32],
+        a_seq: &str,
+        a_q: u8,
+        b_pos: i64,
+        b_cigar: &[u32],
+        b_seq: &str,
+        b_q: u8,
+        qname: &[u8],
+    ) -> (Vec<u8>, Vec<u8>) {
+        let (a_packed, b_packed) = (pack_seq(a_seq), pack_seq(b_seq));
+        let mut a_qual = vec![a_q; a_seq.len()];
+        let mut b_qual = vec![b_q; b_seq.len()];
+        tweak_overlap_quality(
+            &mut MateView {
+                pos: a_pos,
+                cigar: a_cigar,
+                seq: &a_packed,
+                qual: &mut a_qual,
+            },
+            &mut MateView {
+                pos: b_pos,
+                cigar: b_cigar,
+                seq: &b_packed,
+                qual: &mut b_qual,
+            },
+            qname,
+        );
+        (a_qual, b_qual)
+    }
+
+    #[test]
+    fn test_htslib_name_hash_parity() {
+        // Which mate keeps the summed quality of matching overlapping bases, as
+        // observed with pysam 0.24.1 (htslib 1.24): odd hash = first mate.
+        for (name, first_keeps) in [
+            ("pair1", false),
+            ("pair2", true),
+            ("pair3", false),
+            ("pair4", false),
+            ("SRR5665260.26358182", true),
+            ("read/1", true),
+        ] {
+            assert_eq!(
+                htslib_name_hash(name.as_bytes()) & 1 == 1,
+                first_keeps,
+                "hash parity for {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_tweak_overlap_matching_and_mismatching_bases() {
+        let m10 = [cig(CIGAR_MATCH, 10)];
+        // Matching bases (Q10 + Q10): one mate gets 20, the other 0, at the 5
+        // overlapping positions; bases outside the overlap are untouched.
+        let (a, b) = tweak(
+            200,
+            &m10,
+            "CCCCCCCCCC",
+            10,
+            205,
+            &m10,
+            "CCCCCCCCCC",
+            10,
+            b"x",
+        );
+        for i in 0..5 {
+            assert_eq!(a[i], 10, "a outside overlap");
+            assert_eq!(b[5 + i], 10, "b outside overlap");
+            assert_eq!(a[5 + i].max(b[i]), 20);
+            assert_eq!(a[5 + i].min(b[i]), 0);
+        }
+        // Mismatching bases: the higher quality keeps 0.8 * q (truncated)
+        let (a, b) = tweak(
+            300,
+            &m10,
+            "GGGGGGGGGG",
+            17,
+            305,
+            &m10,
+            "TTTTTTTTTT",
+            16,
+            b"x",
+        );
+        assert_eq!((a[5], b[0]), (13, 0));
+        let (a, b) = tweak(
+            300,
+            &m10,
+            "GGGGGGGGGG",
+            16,
+            305,
+            &m10,
+            "TTTTTTTTTT",
+            16,
+            b"x",
+        );
+        assert_eq!(a[5].max(b[0]), 12);
+        assert_eq!(a[5].min(b[0]), 0);
+    }
+
+    #[test]
+    fn test_tweak_overlap_after_ref_skip_and_deletion() {
+        // First mate 5M100xN/D50M at 1000 (second block starts at 1105), second
+        // mate 20M at 1104. Observed with pysam 0.24.1: after N the first base of
+        // the block keeps both qualities; after D the walk catches up instead.
+        let a_seq = "A".repeat(55);
+        let b_seq = "A".repeat(20);
+        let b_cigar = [cig(CIGAR_MATCH, 20)];
+
+        let a_cigar = [
+            cig(CIGAR_MATCH, 5),
+            cig(CIGAR_REF_SKIP, 100),
+            cig(CIGAR_MATCH, 50),
+        ];
+        let (a, b) = tweak(1000, &a_cigar, &a_seq, 30, 1104, &b_cigar, &b_seq, 30, b"x");
+        // Ref 1105 = a[5], b[1]: untouched
+        assert_eq!((a[5], b[1]), (30, 30));
+        // Ref 1106 = a[6], b[2]: de-duplicated
+        assert_eq!(a[6].min(b[2]), 0);
+        assert_eq!(a[6].max(b[2]), 60);
+
+        let a_cigar = [
+            cig(CIGAR_MATCH, 5),
+            cig(CIGAR_DEL, 100),
+            cig(CIGAR_MATCH, 50),
+        ];
+        let (a, b) = tweak(1000, &a_cigar, &a_seq, 30, 1104, &b_cigar, &b_seq, 30, b"x");
+        // Ref 1104 is inside a's deletion: b's base is scaled or zeroed
+        assert!(b[0] == 24 || b[0] == 0, "b in deletion: {}", b[0]);
+        // Ref 1105 is de-duplicated
+        assert_eq!(a[5].min(b[1]), 0);
+        assert_eq!(a[5].max(b[1]), 60);
+    }
+
     #[test]
     fn test_compute_tin_all_zero() {
+        // tin.py: a non-empty coverage list with no positive value has entropy 0,
+        // so TIN = 100 * exp(0) / l = 100 / 5
         let cov = vec![0, 0, 0, 0, 0];
         let tin = compute_tin(&cov, cov.len());
-        assert_eq!(tin, 0.0);
+        assert!((tin - 20.0).abs() < 1e-12, "All-zero coverage TIN: {tin}");
     }
 
     #[test]

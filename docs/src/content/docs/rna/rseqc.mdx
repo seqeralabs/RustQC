@@ -487,7 +487,7 @@ The R plotting script (`inner_distance_plot.r`) matches upstream format exactly.
 TIN (Transcript Integrity Number) measures the uniformity of read coverage
 across a transcript. A TIN score of 100 means perfectly uniform coverage; lower
 scores indicate degradation or bias. TIN is computed using Shannon entropy of
-read-start coverage at sampled positions along each transcript's exonic regions.
+per-base read coverage at sampled positions along each transcript's exonic regions.
 
 RustQC reimplements [RSeQC's `tin.py`](https://rseqc.sourceforge.net/#tin-py),
 computing TIN scores automatically as part of `rustqc rna` in the same
@@ -504,23 +504,24 @@ TIN is particularly useful for:
 
 | File                 | Description                                                            |
 | -------------------- | ---------------------------------------------------------------------- |
-| `{stem}.tin.xls`     | Per-gene TIN scores (TSV: geneID, chrom, tx_start, tx_end, TIN)        |
+| `{stem}.tin.xls`     | Per-transcript TIN scores (TSV: geneID, chrom, tx_start, tx_end, TIN)  |
 | `{stem}.summary.txt` | Summary statistics: mean, median, and standard deviation of TIN scores |
 
 ### TIN scores file
 
-The `{stem}.tin.xls` file is a tab-separated file with one row per transcript (gene):
+The `{stem}.tin.xls` file is a tab-separated file with one row per transcript:
 
 | Column     | Description                         |
 | ---------- | ----------------------------------- |
-| `geneID`   | Gene identifier from the annotation |
+| `geneID`   | Transcript identifier (as `tin.py`) |
 | `chrom`    | Chromosome                          |
 | `tx_start` | Transcript start position           |
 | `tx_end`   | Transcript end position             |
 | `TIN`      | Transcript Integrity Number (0-100) |
 
-Transcripts below the minimum coverage threshold are excluded from the output.
-TIN values are formatted to 2 decimal places.
+Transcripts below the minimum coverage threshold are reported with a TIN of `0.0`
+and are left out of the summary statistics, as in `tin.py`. TIN values are written
+at full precision, like Python's `str(float)`.
 
 ### Summary file
 
@@ -550,7 +551,7 @@ than global degradation.
 
 TIN parameters (`sample_size`, `min_coverage`) can be set in the YAML config file.
 See the [Configuration](../usage/configuration/#tin) page for details.
-TIN uses the shared `--mapq` / `-q` flag for mapping quality filtering.
+Like `tin.py`, TIN does not filter reads by mapping quality.
 
 ### Performance
 
@@ -565,31 +566,39 @@ analyses combined in under 15 minutes.
 RustQC's TIN output uses the same file format and column names as RSeQC's
 `tin.py`. TIN scores are computed using the same Shannon entropy formula.
 
-<Aside type="caution" title="Per-transcript TIN differences from upstream tin.py">
-  TIN scores may differ from RSeQC's `tin.py`. Both tools sample identical
-  positions and apply identical flag filters, but they count per-position
-  coverage differently: upstream uses pysam's pileup engine (`bam_plp_auto`)
-  while RustQC uses CIGAR-derived aligned blocks via the BAM index. The htslib
-  pileup engine uses a different internal read traversal that can produce
-  different coverage counts at certain positions, leading to per-transcript TIN
-  differences. Summary-level statistics (mean, median, stdev) remain closely
-  aligned across all benchmarks. Per-transcript accuracy is an active area of
-  investigation.
-</Aside>
+`tin.py` counts coverage with pysam's `pileup()` and its default settings, and
+RustQC reproduces what that pileup counts at each sampled position:
+
+- Reads flagged unmapped, secondary, QC-fail or duplicate are not counted, and
+  neither are orphans (paired reads without the proper-pair flag).
+- Bases with a base quality below 13 are not counted.
+- Overlapping mates are counted once. RustQC replays htslib's overlap quality
+  adjustment (`tweak_overlap_quality`, htslib 1.24 as bundled with pysam 0.24),
+  including its quirks after deletions and reference skips.
+- Deleted and skipped (`N`) bases are not counted. A transcript that passes the
+  minimum read check but has no counted base gets `100 / l` when some read spans
+  a sampled position, and `0` otherwise, as in `tin.py`.
+
+The one pileup setting not reproduced is the `max_depth` cap of 8,000 reads per
+position, which only matters for extremely deep transcripts.
 
 <details>
 <summary>Small dataset - Identical</summary>
 
+All 8,443 per-transcript TIN values agree with `tin.py` (RSeQC 5.0.4, pysam
+0.24.1) to within 1e-13. Three values differ in the last printed digit because
+of `exp`/`log` rounding differences between platforms' maths libraries.
+
 | Metric      |   RSeQC |  RustQC |
 | ----------- | ------: | ------: |
-| TIN mean    | 52.7514 | 52.7514 |
-| TIN median  | 55.5830 | 55.5830 |
-| TIN std dev | 22.5333 | 22.5333 |
+| TIN mean    | 53.4665 | 53.4665 |
+| TIN median  | 56.1341 | 56.1341 |
+| TIN std dev | 22.8055 | 22.8055 |
 
 </details>
 
 <details>
-<summary>Large dataset - Both tools completed</summary>
+<summary>Large dataset - Both tools completed (measured before the pileup-parity fix)</summary>
 
 The upstream `tin.py` took **9h 45m** to complete on the large dataset.
 RustQC completes TIN analysis as part of its single-pass BAM processing
@@ -603,12 +612,8 @@ in under 15 minutes total (inclusive of all other analyses).
 
 </details>
 
-Summary-level TIN statistics are near-identical. Per-transcript TIN values
-show larger differences due to the coverage counting approach described above.
-
-RustQC produces gene-level TIN scores (one row per gene, using the longest
-transcript as representative), while RSeQC's `tin.py` produces transcript-level
-scores. Both formats are compatible with MultiQC.
+Like `tin.py`, RustQC reports one TIN score per transcript. Rows are written in
+GTF transcript order, while `tin.py` follows the order of its BED file.
 
 ## split_bam
 
