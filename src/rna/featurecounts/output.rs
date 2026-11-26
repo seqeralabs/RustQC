@@ -54,11 +54,21 @@ pub fn write_counts_file(
             continue;
         }
 
-        // Build semicolon-separated annotation fields from exons
+        // Build semicolon-separated annotation fields from exons. `parse_gtf` already
+        // stores them in featureCounts' listing order; featureCounts prints any strand
+        // other than '+'/'-' as '.'.
         let chrs: Vec<&str> = gene.exons.iter().map(|e| e.chrom.as_str()).collect();
         let starts: Vec<String> = gene.exons.iter().map(|e| e.start.to_string()).collect();
         let ends: Vec<String> = gene.exons.iter().map(|e| e.end.to_string()).collect();
-        let strands: Vec<String> = gene.exons.iter().map(|e| e.strand.to_string()).collect();
+        let strands: Vec<&str> = gene
+            .exons
+            .iter()
+            .map(|e| match e.strand {
+                '+' => "+",
+                '-' => "-",
+                _ => ".",
+            })
+            .collect();
 
         // Use per-read counts for featureCounts output (matches featureCounts -p behavior
         // where each read is counted independently, not as fragments)

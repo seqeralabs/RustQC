@@ -72,7 +72,10 @@ pub struct Gene {
     pub end: u64,
     /// Strand: '+', '-', or '.' (populated from GTF, used by downstream tools)
     pub strand: char,
-    /// All exons belonging to this gene (flattened across transcripts)
+    /// All exons belonging to this gene (flattened across transcripts, duplicates kept).
+    ///
+    /// [`parse_gtf`] stores them in the order Subread featureCounts lists them in
+    /// the `Chr`/`Start`/`End`/`Strand` columns of its counts file.
     pub exons: Vec<Exon>,
     /// Effective length: total non-overlapping exon bases
     pub effective_length: u64,
@@ -147,6 +150,130 @@ fn compute_non_overlapping_length(exons: &[Exon]) -> u64 {
     total_bases
 }
 
+/// Reference to one exon line of the GTF in a per-chromosome feature table.
+#[derive(Debug, Clone, Copy)]
+struct FeatureRef {
+    /// Exon start (1-based), the only sort key featureCounts uses
+    start: u64,
+    /// Index of the owning gene in the gene map
+    gene_idx: usize,
+    /// Index of the exon within the gene's `exons` vector (GTF order)
+    exon_idx: usize,
+}
+
+/// Sort features by start exactly as Subread's `merge_sort` + `feature_merge` do.
+///
+/// featureCounts (`sort_feature_info` in `readSummary.c`, `merge_sort_run` in
+/// `core.c`) sorts each chromosome's exon table by start only, using a top-down
+/// merge sort that falls back to selection sort for runs of 11 or fewer items and
+/// that takes the *right-hand* item on ties when merging. Neither step is stable,
+/// so exons that share a start come out in an order that depends on the whole
+/// chromosome's table. Reproducing the algorithm is the only way to match it.
+fn subread_merge_sort(items: &mut [FeatureRef]) {
+    let n = items.len();
+    if n > 11 {
+        let half = n / 2;
+        subread_merge_sort(&mut items[..half]);
+        subread_merge_sort(&mut items[half..]);
+        let (left, right) = items.split_at(half);
+        let mut merged = Vec::with_capacity(n);
+        let (mut i, mut j) = (0, 0);
+        while merged.len() < n {
+            // `ret_start[read_1] >= ret_start[read_2]` picks the right item on ties
+            if i >= left.len() || (j < right.len() && left[i].start >= right[j].start) {
+                merged.push(right[j]);
+                j += 1;
+            } else {
+                merged.push(left[i]);
+                i += 1;
+            }
+        }
+        items.copy_from_slice(&merged);
+    } else {
+        // basic_sort_run: selection sort that swaps the first strict minimum into place
+        for i in 0..n.saturating_sub(1) {
+            let mut min_j = i;
+            for j in (i + 1)..n {
+                if items[min_j].start > items[j].start {
+                    min_j = j;
+                }
+            }
+            if min_j != i {
+                items.swap(i, min_j);
+            }
+        }
+    }
+}
+
+/// Map a GTF strand character to the strand class featureCounts groups by.
+///
+/// featureCounts stores `-` as 1, `+` as 0 and anything else as -1 (printed `.`).
+fn featurecounts_strand_class(strand: char) -> i8 {
+    match strand {
+        '-' => 1,
+        '+' => 0,
+        _ => -1,
+    }
+}
+
+/// Compute, for each gene, the order in which featureCounts lists its exons.
+///
+/// featureCounts (`fc_write_final_gene_results`) walks its sorted exon table:
+/// chromosomes in order of first appearance in the GTF, and within each
+/// chromosome the exons sorted by [`subread_merge_sort`]. It collects each gene's
+/// exons in that order, then prints them grouped by (chromosome, strand) in the
+/// order each group first appears. Exons are neither merged nor deduplicated.
+///
+/// # Arguments
+/// * `chrom_tables` - Per-chromosome exon tables in GTF line order, with
+///   chromosomes in order of first appearance
+/// * `genes` - The parsed genes, whose `exons` are still in GTF line order
+///
+/// # Returns
+/// One permutation per gene (indices into that gene's `exons`).
+fn featurecounts_exon_order(
+    chrom_tables: IndexMap<String, Vec<FeatureRef>>,
+    genes: &IndexMap<String, Gene>,
+) -> Vec<Vec<usize>> {
+    let mut sorted_per_gene: Vec<Vec<usize>> = genes
+        .values()
+        .map(|g| Vec::with_capacity(g.exons.len()))
+        .collect();
+    for (_, mut table) in chrom_tables {
+        subread_merge_sort(&mut table);
+        for f in table {
+            sorted_per_gene[f.gene_idx].push(f.exon_idx);
+        }
+    }
+
+    sorted_per_gene
+        .into_iter()
+        .zip(genes.values())
+        .map(|(sorted, gene)| {
+            let mut order = Vec::with_capacity(sorted.len());
+            let mut taken = vec![false; sorted.len()];
+            for i in 0..sorted.len() {
+                if taken[i] {
+                    continue;
+                }
+                let first = &gene.exons[sorted[i]];
+                let class = featurecounts_strand_class(first.strand);
+                for j in i..sorted.len() {
+                    let e = &gene.exons[sorted[j]];
+                    if !taken[j]
+                        && e.chrom == first.chrom
+                        && featurecounts_strand_class(e.strand) == class
+                    {
+                        taken[j] = true;
+                        order.push(sorted[j]);
+                    }
+                }
+            }
+            order
+        })
+        .collect()
+}
+
 /// Intermediate accumulator for building a transcript from parsed GTF features.
 struct TranscriptBuilder {
     /// Transcript identifier
@@ -189,6 +316,9 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
     // Accumulate transcript-level data: (gene_id, transcript_id) -> TranscriptBuilder
     // Use IndexMap to preserve insertion order within each gene
     let mut tx_builders: IndexMap<(String, String), TranscriptBuilder> = IndexMap::new();
+
+    // Per-chromosome exon tables, mirroring featureCounts' feature table
+    let mut chrom_tables: IndexMap<String, Vec<FeatureRef>> = IndexMap::new();
 
     for line in reader.lines() {
         let line = line.context("Failed to read line from GTF file")?;
@@ -273,6 +403,19 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
                         transcripts: Vec::new(), // populated later
                     }
                 });
+
+            // Record the exon in its chromosome's feature table (GTF line order)
+            // so the featureCounts listing order can be reproduced after parsing.
+            if let Some((gene_idx, _, gene)) = genes.get_full(&gene_id) {
+                chrom_tables
+                    .entry(chrom.clone())
+                    .or_default()
+                    .push(FeatureRef {
+                        start,
+                        gene_idx,
+                        exon_idx: gene.exons.len() - 1,
+                    });
+            }
         }
 
         // Accumulate transcript-level data for both exon and CDS features.
@@ -410,6 +553,13 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
         }
     }
 
+    // Put each gene's exons in featureCounts listing order
+    let orders = featurecounts_exon_order(chrom_tables, &genes);
+    for (gene, order) in genes.values_mut().zip(orders) {
+        let gtf_order = std::mem::take(&mut gene.exons);
+        gene.exons = order.into_iter().map(|i| gtf_order[i].clone()).collect();
+    }
+
     // Compute effective lengths for all genes
     for gene in genes.values_mut() {
         gene.effective_length = compute_non_overlapping_length(&gene.exons);
@@ -536,6 +686,87 @@ mod tests {
         f.write_all(content.as_bytes()).unwrap();
         f.flush().unwrap();
         (path, f)
+    }
+
+    #[test]
+    fn test_parse_gtf_exons_in_featurecounts_order() {
+        // 15 exons on chr1 (so the merge step of Subread's sort runs, not only the
+        // selection sort), tied starts, interleaved genes, a gene on two
+        // chromosomes and a gene with exons on both strands. The expected order
+        // is the Chr/Start/End/Strand listing of Subread featureCounts 2.1.1 run
+        // on exactly this GTF.
+        let rows = [
+            ("chr1", 500, 600, '-', "G1", "T1"),
+            ("chr1", 300, 400, '-', "G1", "T1"),
+            ("chr1", 100, 200, '-', "G1", "T1"),
+            ("chr1", 150, 160, '+', "G2", "T3"),
+            ("chr1", 500, 650, '-', "G1", "T2"),
+            ("chr1", 300, 400, '-', "G1", "T2"),
+            ("chr1", 100, 250, '-', "G1", "T2"),
+            ("chr2", 50, 80, '-', "G1", "T4"),
+            ("chr1", 150, 170, '+', "G2", "T3"),
+            ("chr1", 700, 800, '+', "G1", "T5"),
+            ("chr1", 900, 950, '-', "G1", "T6"),
+            ("chr1", 150, 180, '+', "G2", "T4b"),
+            ("chr2", 10, 20, '-', "G1", "T4"),
+            ("chr1", 150, 190, '+', "G2", "T5b"),
+            ("chr1", 100, 120, '+', "G2", "T6b"),
+        ];
+        let content: String = rows
+            .iter()
+            .map(|(c, s, e, st, g, t)| {
+                format!(
+                    "{c}\ttest\texon\t{s}\t{e}\t.\t{st}\t.\tgene_id \"{g}\"; transcript_id \"{t}\";\n"
+                )
+            })
+            .collect();
+        let (path, _f) = write_temp_gtf(&content);
+        let genes = parse_gtf(path.to_str().unwrap(), &[]).unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        let listing = |id: &str| -> Vec<(String, u64, u64, char)> {
+            genes[id]
+                .exons
+                .iter()
+                .map(|e| (e.chrom.clone(), e.start, e.end, e.strand))
+                .collect()
+        };
+        let expect = |v: &[(&str, u64, u64, char)]| -> Vec<(String, u64, u64, char)> {
+            v.iter()
+                .map(|&(c, s, e, st)| (c.to_string(), s, e, st))
+                .collect()
+        };
+
+        assert_eq!(
+            listing("G1"),
+            expect(&[
+                ("chr1", 100, 250, '-'),
+                ("chr1", 100, 200, '-'),
+                ("chr1", 300, 400, '-'),
+                ("chr1", 300, 400, '-'),
+                ("chr1", 500, 650, '-'),
+                ("chr1", 500, 600, '-'),
+                ("chr1", 900, 950, '-'),
+                ("chr1", 700, 800, '+'),
+                ("chr2", 10, 20, '-'),
+                ("chr2", 50, 80, '-'),
+            ]),
+            "G1 exons should follow featureCounts' (chr, strand)-grouped sorted order"
+        );
+        assert_eq!(
+            listing("G2"),
+            expect(&[
+                ("chr1", 100, 120, '+'),
+                ("chr1", 150, 180, '+'),
+                ("chr1", 150, 190, '+'),
+                ("chr1", 150, 170, '+'),
+                ("chr1", 150, 160, '+'),
+            ]),
+            "G2 tied starts should follow Subread's unstable merge sort"
+        );
+        // Reordering must not change the effective length (featureCounts: 597, 62)
+        assert_eq!(genes["G1"].effective_length, 597);
+        assert_eq!(genes["G2"].effective_length, 62);
     }
 
     #[test]
