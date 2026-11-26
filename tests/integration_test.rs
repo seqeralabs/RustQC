@@ -14,24 +14,11 @@ use rust_htslib::bam::header::HeaderRecord;
 
 /// Helper: get the path to the rustqc binary.
 ///
-/// Uses the `CARGO_BIN_EXE_rustqc` env var when available (set by cargo test),
-/// otherwise falls back to building and using `target/debug/rustqc`.
+/// Cargo sets `CARGO_BIN_EXE_rustqc` at compile time for integration tests, so
+/// the path is always available. (At run time the variable is only set by newer
+/// Cargo versions, which made these tests fail on the MSRV toolchain.)
 fn rustqc_binary() -> String {
-    // cargo test sets this for integration tests automatically
-    if let Ok(path) = std::env::var("CARGO_BIN_EXE_rustqc") {
-        return path;
-    }
-
-    // Fallback: build and use debug binary
-    let status = Command::new("cargo")
-        .args(["build"])
-        .status()
-        .expect("Failed to run cargo build");
-    assert!(status.success(), "cargo build failed");
-
-    let path = Path::new("target/debug/rustqc");
-    assert!(path.exists(), "Binary not found at {:?}", path);
-    path.to_str().unwrap().to_string()
+    env!("CARGO_BIN_EXE_rustqc").to_string()
 }
 
 /// Helper: run rustqc rna on test data and return the output directory
