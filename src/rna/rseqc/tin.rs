@@ -6,7 +6,7 @@
 
 use rust_htslib::bam;
 use std::cmp::Reverse;
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet};
 use std::hash::{BuildHasher, Hasher};
 use std::io::Write;
 use std::path::Path;
@@ -16,7 +16,7 @@ use indexmap::IndexMap;
 use log::debug;
 use rand::Rng;
 
-use crate::gtf::Gene;
+use crate::gtf::{Gene, Transcript};
 
 // ===================================================================
 // Deterministic hash state for reproducible TIN
@@ -144,45 +144,68 @@ impl TinIndex {
     ///
     /// Emits every transcript from every gene, matching RSeQC's
     /// per-transcript behaviour.
+    ///
+    /// tin.py writes one row per BED line, in BED order. nf-core/rnaseq
+    /// (3.25.0 and later) builds that BED with the `eautils/gtf2bed` module,
+    /// which sorts transcripts by chromosome name (string comparison), then by
+    /// the start of each transcript's *first exon line* in the GTF (for
+    /// minus-strand transcripts that is usually the highest exon, not the
+    /// lowest), then by transcript ID (string comparison). The transcripts are
+    /// indexed in that order so the output rows follow it. (Older pipelines
+    /// used a `gtf2bed` that broke ties by Perl hash order, which is random.)
+    ///
+    /// `gtf2bed` skips exons without a `transcript_id` (and, being Perl, an
+    /// ID or chromosome named `0`), so tin.py has no row for them; neither
+    /// does RustQC.
     pub fn from_genes(genes: &IndexMap<String, Gene>, sample_size: usize) -> Self {
         let mut index = TinIndex::default();
 
-        for gene in genes.values() {
-            for tx in &gene.transcripts {
-                let exon_regions: Vec<(u64, u64)> = tx
-                    .exons
-                    .iter()
-                    .map(|&(s, e)| (s.saturating_sub(1), e)) // GTF 1-based to 0-based half-open
-                    .collect();
-                let exon_length: u64 = exon_regions.iter().map(|(s, e)| e - s).sum();
+        let mut bed_order: Vec<(&Gene, &Transcript)> = genes
+            .values()
+            .flat_map(|gene| gene.transcripts.iter().map(move |tx| (gene, tx)))
+            .filter(|(_, tx)| in_gtf2bed(tx))
+            .collect();
+        bed_order.sort_by(|(_, a), (_, b)| {
+            a.chrom
+                .cmp(&b.chrom)
+                .then(a.first_exon_start.cmp(&b.first_exon_start))
+                .then(a.transcript_id.cmp(&b.transcript_id))
+        });
 
-                if exon_length == 0 {
-                    continue;
-                }
+        for (gene, tx) in bed_order {
+            let exon_regions: Vec<(u64, u64)> = tx
+                .exons
+                .iter()
+                .map(|&(s, e)| (s.saturating_sub(1), e)) // GTF 1-based to 0-based half-open
+                .collect();
+            let exon_length: u64 = exon_regions.iter().map(|(s, e)| e - s).sum();
 
-                let chrom = gene.chrom.clone();
-                let chrom_upper = chrom.to_uppercase();
-                let tx_start = exon_regions.first().map(|r| r.0).unwrap_or(0);
-                let tx_end = exon_regions.last().map(|r| r.1).unwrap_or(0);
-
-                let (sampled, total_count) =
-                    sample_exonic_positions(&exon_regions, sample_size, tx_start, tx_end);
-                if sampled.is_empty() {
-                    continue;
-                }
-
-                index.add_transcript(TranscriptSampling {
-                    gene_id: tx.transcript_id.clone(),
-                    chrom,
-                    chrom_upper,
-                    tx_start,
-                    tx_end,
-                    exon_regions,
-                    exon_length,
-                    sampled_positions: sampled,
-                    total_position_count: total_count,
-                });
+            if exon_length == 0 {
+                continue;
             }
+
+            let chrom = gene.chrom.clone();
+            let chrom_upper = chrom.to_uppercase();
+            let tx_start = exon_regions.first().map(|r| r.0).unwrap_or(0);
+            let tx_end = exon_regions.last().map(|r| r.1).unwrap_or(0);
+
+            let (sampled, total_count) =
+                sample_exonic_positions(&exon_regions, sample_size, tx_start, tx_end);
+            if sampled.is_empty() {
+                continue;
+            }
+
+            index.add_transcript(TranscriptSampling {
+                gene_id: tx.transcript_id.clone(),
+                chrom,
+                chrom_upper,
+                tx_start,
+                tx_end,
+                exon_regions,
+                exon_length,
+                sampled_positions: sampled,
+                total_position_count: total_count,
+            });
         }
 
         index.build();
@@ -227,6 +250,14 @@ impl TinIndex {
             self.chrom_positions.len()
         );
     }
+}
+
+/// Whether nf-core's `gtf2bed` writes a BED row for this transcript: its
+/// `next unless $id && $f[0]` skips features without a `transcript_id`
+/// attribute, and Perl also treats an empty string or `"0"` as false.
+fn in_gtf2bed(tx: &Transcript) -> bool {
+    let truthy = |s: &str| !s.is_empty() && s != "0";
+    tx.has_transcript_id && truthy(&tx.transcript_id) && truthy(&tx.chrom)
 }
 
 /// Sample positions within exonic regions, matching upstream RSeQC `tin.py`'s
@@ -335,25 +366,251 @@ struct CoveredBase {
     qpos: u32,
 }
 
-/// First mate of a properly paired read, kept until its mate arrives.
+/// pysam's default `max_depth` for `pileup()`, which it passes to htslib's
+/// `bam_mplp_set_maxcnt`.
+const PILEUP_MAX_DEPTH: usize = 8000;
+
+/// What one transcript's pileup does with a read (htslib `bam_plp_push`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Push {
+    /// The read is outside the transcript's region, so `fetch()` never returns it
+    Absent,
+    /// Dropped by the depth cap (`max_depth`)
+    Dropped,
+    /// Not buffered: no reference length, and the pileup is already at its position
+    Silent,
+    /// Buffered and piled up
+    Kept,
+}
+
+/// A properly paired pileup read, as htslib's overlap hash sees it.
 ///
-/// Mirrors htslib's pileup overlap hash (`overlap_push`): when the second mate
-/// arrives, `tweak_overlap_quality` rewrites the qualities of the bases where
-/// the mates overlap, so that only one of them passes the base-quality filter.
+/// The hash (`overlap_push` / `overlap_remove`) is keyed by read name, so
+/// supplementary copies and their mates compete for one slot. Each tin.py
+/// transcript gets its own pileup over its own region, so the slot's history
+/// is replayed per transcript from the records of one name (see
+/// [`overlap_partner`]).
 #[derive(Debug)]
-struct PendingMate {
-    /// Unique id, so a stale heap entry cannot evict a newer mate with the same name
-    id: u64,
+struct MateRec {
     /// Alignment start (0-based)
-    pos: i64,
+    pos: u64,
+    /// Reference end: start plus the CIGAR's reference length (may equal `pos`)
+    end: u64,
+    /// End as `fetch()` sees it (at least `pos + 1`); the read is in a
+    /// transcript's pileup iff this is above the transcript start
+    fetch_end: u64,
+    /// Pileup position when the read was pushed: reads ending before it had
+    /// already left the buffer (and the hash)
+    frontier: u64,
+    /// Passes `overlap_push`'s checks (mate mapped on the same chromosome, not
+    /// a "wild" CIGAR); others never look up or enter the hash
+    candidate: bool,
+    /// Stored in the hash when no entry exists (its mate is still to come)
+    insertable: bool,
+    /// For a read without reference length: transcripts starting below this
+    /// value already have a read at this position, so they do not buffer it
+    silent_below: u64,
+    /// Depth-capped transcripts whose pileup dropped this read (sorted)
+    dropped_in: Vec<u32>,
+    /// What a tweak needs, kept only for reads that may be stored in the hash
+    /// and span a sampled position
+    data: Option<Box<MateData>>,
+}
+
+/// Alignment of a stored mate, for [`tweak_overlap_quality`].
+#[derive(Debug)]
+struct MateData {
     /// Raw BAM CIGAR
     cigar: Vec<u32>,
     /// 4-bit packed read sequence, as stored in the BAM
     seq: Vec<u8>,
-    /// Base qualities as stored in the BAM (what the mate was counted with)
+    /// Base qualities as stored in the BAM (what the read was counted with)
     qual: Vec<u8>,
-    /// The mate's covered sampled positions (sorted by position)
+    /// The read's covered sampled positions
     bases: Vec<CoveredBase>,
+}
+
+impl MateRec {
+    /// How the pileup of a transcript starting at `tx_start` handles this read.
+    /// `tx` names the transcript when its own depth-cap drops must be honoured.
+    fn push_in(&self, tx_start: u64, tx: Option<u32>) -> Push {
+        if self.fetch_end <= tx_start {
+            Push::Absent
+        } else if tx.is_some_and(|t| self.dropped_in.binary_search(&t).is_ok()) {
+            Push::Dropped
+        } else if tx_start < self.silent_below {
+            Push::Silent
+        } else {
+            Push::Kept
+        }
+    }
+}
+
+/// Records of one read name whose hash slot may still be in use.
+#[derive(Debug, Default)]
+struct MateGroup {
+    /// Records in BAM order
+    recs: Vec<MateRec>,
+    /// Largest `end` of the records: once the pileup has moved past it, every
+    /// record has left the buffer and the slot is empty in every transcript
+    max_end: u64,
+}
+
+/// Replay htslib's overlap hash for one read name in the pileup of the
+/// transcript starting at `tx_start`, and return the earlier record that the
+/// last record of `recs` is paired with (`tweak_overlap_quality(a, b)`), if any.
+///
+/// The pileup only sees reads overlapping the transcript. A record leaves the
+/// buffer, and empties the slot (`overlap_remove` is by name), once the pileup
+/// has moved past its end; a later record is pushed after that iff its
+/// frontier is beyond that end. A record dropped by the depth cap also empties
+/// the slot.
+fn overlap_partner(
+    recs: &[MateRec],
+    tx_start: u64,
+    tx: Option<u32>,
+    gone: &mut Vec<bool>,
+) -> Option<usize> {
+    let last = recs.len().checked_sub(1)?;
+    gone.clear();
+    gone.resize(recs.len(), false);
+    let mut slot: Option<usize> = None;
+    for (i, x) in recs.iter().enumerate() {
+        for (h, r) in recs[..i].iter().enumerate() {
+            if !gone[h] && r.end < x.frontier && r.push_in(tx_start, tx) == Push::Kept {
+                gone[h] = true;
+                slot = None;
+            }
+        }
+        match x.push_in(tx_start, tx) {
+            Push::Kept if x.candidate => {
+                if let Some(a) = slot {
+                    if i == last {
+                        return Some(a);
+                    }
+                    slot = None;
+                } else if x.insertable {
+                    slot = Some(i);
+                }
+            }
+            Push::Dropped => slot = None,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Which earlier record the newest record of a group is paired with, for
+/// every transcript that can contain both.
+struct Pairing {
+    /// Transcript-start thresholds where the outcome may change (sorted)
+    thresholds: Vec<u64>,
+    /// Partner for transcripts starting in `[thresholds[j-1], thresholds[j])`
+    by_class: Vec<Option<usize>>,
+    /// Partner for depth-capped transcripts that dropped one of the records
+    overrides: Vec<(u32, Option<usize>)>,
+}
+
+impl Pairing {
+    fn new(recs: &[MateRec], gone: &mut Vec<bool>) -> Self {
+        let mut thresholds: Vec<u64> = recs
+            .iter()
+            .flat_map(|r| [r.fetch_end, r.silent_below])
+            .filter(|&v| v > 0)
+            .collect();
+        thresholds.sort_unstable();
+        thresholds.dedup();
+        let by_class = (0..=thresholds.len())
+            .map(|j| {
+                let tx_start = if j == 0 { 0 } else { thresholds[j - 1] };
+                overlap_partner(recs, tx_start, None, gone)
+            })
+            .collect();
+        let mut capped: Vec<u32> = recs
+            .iter()
+            .flat_map(|r| r.dropped_in.iter().copied())
+            .collect();
+        capped.sort_unstable();
+        capped.dedup();
+        let overrides = capped.into_iter().map(|t| (t, None)).collect();
+        Pairing {
+            thresholds,
+            by_class,
+            overrides,
+        }
+    }
+
+    /// Fill in the partners of the depth-capped transcripts.
+    fn resolve_overrides(&mut self, recs: &[MateRec], index: &TinIndex, gone: &mut Vec<bool>) {
+        for (t, partner) in &mut self.overrides {
+            let tx_start = index.transcripts[*t as usize].tx_start;
+            *partner = overlap_partner(recs, tx_start, Some(*t), gone);
+        }
+    }
+
+    /// Partner of the newest record in the pileup of transcript `tx`.
+    fn partner(&self, tx: u32, tx_start: u64) -> Option<usize> {
+        if let Ok(k) = self.overrides.binary_search_by_key(&tx, |o| o.0) {
+            return self.overrides[k].1;
+        }
+        self.by_class[self.thresholds.partition_point(|&v| v <= tx_start)]
+    }
+
+    /// Distinct partners over all transcripts.
+    fn partners(&self) -> Vec<usize> {
+        let mut out: Vec<usize> = self
+            .by_class
+            .iter()
+            .chain(self.overrides.iter().map(|o| &o.1))
+            .flatten()
+            .copied()
+            .collect();
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
+}
+
+/// Pileup state of one transcript whose depth may reach `max_depth`.
+///
+/// htslib drops a read when the pileup is already at its start position and
+/// holds more than `max_depth` reads (`bam_plp_push`: `mp->cnt > maxcnt`,
+/// where the count includes one spare node). Which reads that drops depends on
+/// the transcript's own region, so such transcripts track their buffer here.
+#[derive(Debug)]
+struct CappedPileup {
+    /// Transcript end (reads starting here or later are not fetched)
+    tx_end: u64,
+    /// Position of the last read pushed, if the pileup is at it
+    last_pos: Option<u64>,
+    /// Ends of the buffered reads
+    ends: BinaryHeap<Reverse<u64>>,
+    /// Largest end of a dropped read (the pileup differs while it would still be buffered)
+    dropped_until: Option<u64>,
+}
+
+impl CappedPileup {
+    /// `bam_plp_push` for a read of this transcript's region.
+    fn push(&mut self, pos: u64, end: u64) -> Push {
+        if self.last_pos != Some(pos) {
+            // First read at this position: never dropped. Reads ending before
+            // it leave the buffer once the pileup moves here.
+            self.last_pos = Some(pos);
+            while self.ends.peek().is_some_and(|e| e.0 < pos) {
+                self.ends.pop();
+            }
+            self.ends.push(Reverse(end));
+            Push::Kept
+        } else if self.ends.len() + 1 > PILEUP_MAX_DEPTH {
+            self.dropped_until = Some(self.dropped_until.map_or(end, |d| d.max(end)));
+            Push::Dropped
+        } else if end > pos {
+            self.ends.push(Reverse(end));
+            Push::Kept
+        } else {
+            Push::Silent
+        }
+    }
 }
 
 /// One mate as seen by [`tweak_overlap_quality`].
@@ -662,12 +919,16 @@ fn tweak_overlap_quality(a: &mut MateView, b: &mut MateView, qname: &[u8]) {
 /// positions.
 ///
 /// Coverage reproduces what tin.py's `genebody_coverage()` gets from
-/// `pysam.AlignmentFile.pileup()` with its default settings: reads with an
-/// unmapped, secondary, QC-fail or duplicate flag are skipped, and so are
-/// orphans (`ignore_orphans`: paired reads without the proper-pair flag);
-/// overlapping mates are counted once (`ignore_overlaps`); and bases below
-/// [`PILEUP_MIN_BASE_QUALITY`] are not counted. The pileup's `max_depth`
-/// (8000 reads) is not reproduced.
+/// `pysam.AlignmentFile.pileup(chrom, tx_start, tx_end, truncate=True)` with
+/// its default settings, one pileup per transcript: reads with an unmapped,
+/// secondary, QC-fail or duplicate flag are skipped, and so are orphans
+/// (`ignore_orphans`: paired reads without the proper-pair flag); overlapping
+/// mates are counted once (`ignore_overlaps`, htslib's overlap hash keyed by
+/// read name); bases below [`PILEUP_MIN_BASE_QUALITY`] are not counted; and
+/// where more than `max_depth` reads pile up, htslib drops reads
+/// ([`PILEUP_MAX_DEPTH`]). The last two depend on which reads the
+/// transcript's region holds, so they are tracked per transcript where they
+/// can differ, still in one pass over the BAM.
 ///
 /// To reduce memory pressure, each transcript's `unique_starts` set is
 /// capped at `min_cov + 1` entries. Once the threshold is exceeded the
@@ -704,23 +965,34 @@ pub struct TinAccum {
     blocks_buf: Vec<AlignedBlock>,
     /// Reusable scratch buffer for the current read's covered sampled bases.
     covered_buf: Vec<CoveredBase>,
-    /// First mates waiting for an overlapping second mate, keyed by read name.
-    pending: HashMap<Vec<u8>, PendingMate>,
-    /// Pending first mates ordered by reference end, for eviction once no
-    /// later read can overlap them.
-    pending_by_end: BinaryHeap<Reverse<(u64, u64, Vec<u8>)>>,
-    /// Next id for [`PendingMate::id`].
-    next_pending_id: u64,
+    /// Reusable scratch buffer for [`overlap_partner`].
+    gone_buf: Vec<bool>,
     /// Last chromosome seen -- used to detect chromosome transitions and
-    /// reset the cursors below.
+    /// reset the per-chromosome state below.
     cursor_chrom: String,
-    /// Cursor into `chrom_spans` for the current chromosome. Since the BAM
-    /// is coordinate-sorted, each read's span_end is >= the previous read's,
-    /// so we only need to search forward from here.
+    /// Cursor into `chrom_spans` for the current chromosome: spans before it
+    /// start at or before the last read start.
     cursor_span: usize,
+    /// Transcripts whose span contains the last read start: (tx_end, tx_idx).
+    active: Vec<(u64, u32)>,
     /// Cursor into `chrom_positions` for the current chromosome. Each read's
     /// alignment start is >= the previous read's, so we search forward from here.
     cursor_pos: usize,
+    /// Start of the last pileup read (the position the pileups are at).
+    plp_pos: Option<u64>,
+    /// Largest fetch end of the pileup reads at `plp_pos` so far.
+    plp_pos_reach: u64,
+    /// Every pileup read that may still be buffered by some transcript's
+    /// pileup: (end, fetch end, silent_below). An upper bound on any
+    /// transcript's buffer, and the source for [`CappedPileup`]s.
+    plp_buf: BinaryHeap<Reverse<(u64, u64, u64)>>,
+    /// Transcripts whose pileup may hit the depth cap, by index.
+    capped: BTreeMap<u32, CappedPileup>,
+    /// Properly paired pileup reads whose hash slot may be in use, by name.
+    mates: HashMap<Vec<u8>, MateGroup>,
+    /// (max_end, name) of `mates` entries, to forget a group once the pileup
+    /// has moved past it.
+    mates_by_end: BinaryHeap<Reverse<(u64, Vec<u8>)>>,
 }
 
 impl TinAccum {
@@ -757,12 +1029,17 @@ impl TinAccum {
             hash_state,
             blocks_buf: Vec::with_capacity(8),
             covered_buf: Vec::new(),
-            pending: HashMap::new(),
-            pending_by_end: BinaryHeap::new(),
-            next_pending_id: 0,
+            gone_buf: Vec::new(),
             cursor_chrom: String::new(),
             cursor_span: 0,
+            active: Vec::new(),
             cursor_pos: 0,
+            plp_pos: None,
+            plp_pos_reach: 0,
+            plp_buf: BinaryHeap::new(),
+            capped: BTreeMap::new(),
+            mates: HashMap::new(),
+            mates_by_end: BinaryHeap::new(),
         }
     }
 
@@ -774,9 +1051,9 @@ impl TinAccum {
     /// Matches upstream RSeQC `tin.py` filtering:
     /// - `check_min_reads()`: skips qcfail, unmapped, secondary only
     /// - `genebody_coverage()` pileup: additionally skips duplicates and
-    ///   orphans, de-duplicates overlapping mates and skips bases with quality
-    ///   below 13 (pysam `pileup()` defaults); deleted and skipped (`N`) bases
-    ///   are not counted
+    ///   orphans, de-duplicates overlapping mates, skips bases with quality
+    ///   below 13 and caps the depth (pysam `pileup()` defaults); deleted and
+    ///   skipped (`N`) bases are not counted
     /// - Neither function filters by MAPQ or supplementary flags
     pub fn process_read(&mut self, record: &bam::Record, chrom_upper: &str, index: &TinIndex) {
         let flags = record.flags();
@@ -786,14 +1063,19 @@ impl TinAccum {
             return;
         }
 
-        // Reset cursors and drop pending mates on chromosome transition.
+        // Reset the per-chromosome state on chromosome transition.
         if chrom_upper != self.cursor_chrom {
             self.cursor_chrom.clear();
             self.cursor_chrom.push_str(chrom_upper);
             self.cursor_span = 0;
+            self.active.clear();
             self.cursor_pos = 0;
-            self.pending.clear();
-            self.pending_by_end.clear();
+            self.plp_pos = None;
+            self.plp_pos_reach = 0;
+            self.plp_buf.clear();
+            self.capped.clear();
+            self.mates.clear();
+            self.mates_by_end.clear();
         }
 
         // Get chromosome positions for this chromosome
@@ -811,31 +1093,27 @@ impl TinAccum {
         // Upstream uses `aligned_read.pos` (the leftmost reference position).
         let read_start = record.pos().max(0) as u64;
 
-        // Find overlapping transcripts via read start.
-        // chrom_spans is sorted by tx_start.  We need all transcripts
-        // where tx_start <= read_start < tx_end.
-        //
-        // Since reads are coordinate-sorted, read_start is monotonically
-        // non-decreasing.  The partition_point (first span where
-        // tx_start > read_start) can only move forward, so we search
-        // from cursor_span instead of 0.
+        // Transcripts whose span contains the read start (tx_start <=
+        // read_start < tx_end). Reads are coordinate-sorted, so spans only
+        // enter (in tx_start order) and leave.
         let span_end = self.cursor_span
             + chrom_spans[self.cursor_span..].partition_point(|s| s.0 <= read_start);
+        for &(_, tx_end, tx_idx) in &chrom_spans[self.cursor_span..span_end] {
+            self.active.push((tx_end, tx_idx));
+        }
         self.cursor_span = span_end;
+        self.active.retain(|&(tx_end, _)| tx_end > read_start);
 
-        for &(_tx_start, tx_end, tx_idx) in &chrom_spans[..span_end] {
-            // _tx_start <= read_start is guaranteed by the partition_point
-            if read_start < tx_end {
-                let idx = tx_idx as usize;
-                // Skip HashSet insert if this transcript already exceeded the
-                // min_cov threshold -- we only need the pass/fail decision.
-                if !self.exceeded_threshold[idx] {
-                    self.unique_starts[idx].insert(read_start);
-                    if self.unique_starts[idx].len() > self.min_cov as usize {
-                        self.exceeded_threshold[idx] = true;
-                        // Free the HashSet memory; the flag is sufficient.
-                        self.unique_starts[idx] = HashSet::with_hasher(self.hash_state.clone());
-                    }
+        for &(_, tx_idx) in &self.active {
+            let idx = tx_idx as usize;
+            // Skip HashSet insert if this transcript already exceeded the
+            // min_cov threshold -- we only need the pass/fail decision.
+            if !self.exceeded_threshold[idx] {
+                self.unique_starts[idx].insert(read_start);
+                if self.unique_starts[idx].len() > self.min_cov as usize {
+                    self.exceeded_threshold[idx] = true;
+                    // Free the HashSet memory; the flag is sufficient.
+                    self.unique_starts[idx] = HashSet::with_hasher(self.hash_state.clone());
                 }
             }
         }
@@ -846,7 +1124,7 @@ impl TinAccum {
         let base = self.cursor_pos;
         self.cursor_pos = base + chrom_positions[base..].partition_point(|p| p.0 <= read_start);
 
-        // Reads that pysam's pileup never sees (default `stepper="all"`
+        // Reads that pysam's pileup never sees (default `stepper="samtools"`
         // flag_filter and `ignore_orphans=True`). check_min_reads() uses fetch()
         // and does count them, so this comes after the unique-start tracking.
         let is_paired = flags & 0x1 != 0;
@@ -854,27 +1132,91 @@ impl TinAccum {
             return;
         }
 
-        // Forget first mates that end before this read starts: no read from
-        // here on can overlap them.
-        while let Some(Reverse((end, _, _))) = self.pending_by_end.peek() {
-            if *end > read_start {
-                break;
+        // Reference end as htslib's pileup computes it (raw CIGAR reference
+        // length, may be 0), and as fetch() does (at least one base).
+        let read_end = fill_aligned_blocks(record, &mut self.blocks_buf);
+        let fetch_end = read_end.max(read_start + 1);
+
+        // --- Pileup position: what every transcript's pileup has done before
+        // this read is pushed.
+        let first_at_pos = self.plp_pos != Some(read_start);
+        let frontier = if first_at_pos {
+            self.plp_pos.unwrap_or(0)
+        } else {
+            read_start
+        };
+        if first_at_pos {
+            self.plp_pos = Some(read_start);
+            self.plp_pos_reach = 0;
+            while self.plp_buf.peek().is_some_and(|r| r.0 .0 < read_start) {
+                self.plp_buf.pop();
             }
-            if let Some(Reverse((_, id, qname))) = self.pending_by_end.pop() {
-                if self.pending.get(&qname).is_some_and(|p| p.id == id) {
-                    self.pending.remove(&qname);
+            let hot = self.plp_buf.len() + 1 > PILEUP_MAX_DEPTH;
+            self.capped.retain(|_, c| {
+                c.tx_end > read_start && (hot || c.dropped_until.is_some_and(|d| d >= read_start))
+            });
+        }
+        while self.mates_by_end.peek().is_some_and(|e| e.0 .0 < frontier) {
+            if let Some(Reverse((end, qname))) = self.mates_by_end.pop() {
+                if self.mates.get(&qname).is_some_and(|g| g.max_end == end) {
+                    self.mates.remove(&qname);
                 }
             }
         }
 
-        let read_end = fill_aligned_blocks(record, &mut self.blocks_buf);
-        if read_end <= read_start {
-            return;
+        // --- Depth cap. A transcript's pileup holds a subset of `plp_buf`, so
+        // no pileup can drop this read unless `plp_buf` is over the cap. Those
+        // that could start tracking their own buffer here.
+        if !first_at_pos && self.plp_buf.len() + 1 > PILEUP_MAX_DEPTH {
+            let lo = chrom_spans.partition_point(|s| s.0 <= read_start);
+            let hi = lo + chrom_spans[lo..].partition_point(|s| s.0 < fetch_end);
+            let fresh: Vec<(u64, u64, u32)> = self
+                .active
+                .iter()
+                .map(|&(tx_end, tx)| (index.transcripts[tx as usize].tx_start, tx_end, tx))
+                .chain(chrom_spans[lo..hi].iter().copied())
+                .filter(|&(_, _, tx)| !self.capped.contains_key(&tx))
+                .collect();
+            for (tx_start, tx_end, tx) in fresh {
+                let ends = self
+                    .plp_buf
+                    .iter()
+                    .filter(|r| r.0 .1 > tx_start && tx_start >= r.0 .2)
+                    .map(|r| Reverse(r.0 .0))
+                    .collect();
+                let last_pos = (self.plp_pos_reach > tx_start).then_some(read_start);
+                self.capped.insert(
+                    tx,
+                    CappedPileup {
+                        tx_end,
+                        last_pos,
+                        ends,
+                        dropped_until: None,
+                    },
+                );
+            }
         }
+        let mut dropped_in: Vec<u32> = Vec::new();
+        for (&tx, c) in self.capped.iter_mut() {
+            if index.transcripts[tx as usize].tx_start < fetch_end
+                && c.push(read_start, read_end) == Push::Dropped
+            {
+                dropped_in.push(tx);
+            }
+        }
+        let silent_below = if read_end == read_start {
+            self.plp_pos_reach
+        } else {
+            0
+        };
+        self.plp_buf
+            .push(Reverse((read_end, fetch_end, silent_below)));
+        self.plp_pos_reach = self.plp_pos_reach.max(fetch_end);
 
-        // Walk the sampled positions inside the read's reference span
-        // (read_start, read_end]. Every one gets a pileup column; those inside
-        // an aligned block are covered by one of the read's bases.
+        // --- Coverage. Walk the sampled positions inside the read's reference
+        // span (read_start, read_end]. Every one gets a pileup column; those
+        // inside an aligned block are covered by one of the read's bases.
+        let kept_in = |tx: u32| dropped_in.is_empty() || dropped_in.binary_search(&tx).is_err();
         self.covered_buf.clear();
         let mut in_span = false;
         let mut block_idx = 0;
@@ -884,7 +1226,9 @@ impl TinAccum {
             let pos = chrom_positions[i].0;
             let mut j = i;
             while j < chrom_positions.len() && chrom_positions[j].0 == pos {
-                self.has_column[chrom_positions[j].1 as usize] = true;
+                if kept_in(chrom_positions[j].1) {
+                    self.has_column[chrom_positions[j].1 as usize] = true;
+                }
                 j += 1;
             }
 
@@ -905,38 +1249,71 @@ impl TinAccum {
             i = j;
         }
 
-        // Without a sampled position in its span, neither this read nor an
-        // overlap adjustment with its mate can change any counted base.
-        if !in_span {
-            return;
+        // Count this read's bases with its own qualities; overlap tweaks
+        // below correct them.
+        let quals = record.qual();
+        for b in &self.covered_buf {
+            if quals.get(b.qpos as usize).copied().unwrap_or(0) >= PILEUP_MIN_BASE_QUALITY {
+                for &(_, tx_idx, slot_idx) in &chrom_positions[b.first as usize..b.last as usize] {
+                    if kept_in(tx_idx) {
+                        self.coverage[tx_idx as usize][slot_idx as usize] += 1;
+                    }
+                }
+            }
         }
 
-        // htslib `overlap_push`: only properly paired reads with a mapped mate on
-        // the same chromosome take part in overlap detection.
+        // --- Overlapping mates (`ignore_overlaps=True`). Only properly
+        // paired reads enter htslib's overlap hash.
+        if flags & 0x2 == 0 {
+            return;
+        }
         let mtid = record.mtid();
         let mpos = record.mpos();
-        let overlap_candidate = flags & 0x8 == 0
-            && flags & 0x2 != 0
-            && !(mtid >= 0 && mtid != record.tid())
-            && !(record.insert_size().unsigned_abs() >= 2 * record.seq_len() as u64
-                && mpos >= read_end as i64);
-
-        let mate = if overlap_candidate && !self.pending.is_empty() {
-            self.pending.remove(record.qname())
-        } else {
-            None
+        let rec = MateRec {
+            pos: read_start,
+            end: read_end,
+            fetch_end,
+            frontier,
+            candidate: flags & 0x8 == 0
+                && !(mtid >= 0 && mtid != record.tid())
+                && !(record.insert_size().unsigned_abs() >= 2 * record.seq_len() as u64
+                    && mpos >= read_end as i64),
+            insertable: mpos >= record.pos() || (is_paired && mpos == -1),
+            silent_below,
+            dropped_in,
+            data: None,
         };
+        let qname = record.qname();
+        if !self.mates.contains_key(qname) {
+            self.mates.insert(qname.to_vec(), MateGroup::default());
+        }
+        let Some(group) = self.mates.get_mut(qname) else {
+            return;
+        };
+        let could_pair = rec.candidate && group.recs.iter().any(|r| r.candidate && r.insertable);
+        let store = rec.candidate && rec.insertable && in_span;
+        if rec.end > group.max_end || group.recs.is_empty() {
+            group.max_end = group.max_end.max(rec.end);
+            self.mates_by_end
+                .push(Reverse((group.max_end, qname.to_vec())));
+        }
+        group.recs.push(rec);
 
-        let quals = record.qual();
-        match mate {
-            Some(first) => {
-                // Second mate: rewrite both mates' qualities as htslib does, then
-                // replace the first mate's own counts and count this read.
+        if could_pair && in_span {
+            let recs = &group.recs;
+            let mut pairing = Pairing::new(recs, &mut self.gone_buf);
+            pairing.resolve_overrides(recs, index, &mut self.gone_buf);
+            for a in pairing.partners() {
+                let Some(first) = recs[a].data.as_deref() else {
+                    continue;
+                };
+                // Rewrite both reads' qualities as htslib does, then move each
+                // affected base's count in the transcripts where they pair.
                 let mut a_qual = first.qual.clone();
                 let mut b_qual = quals.to_vec();
                 tweak_overlap_quality(
                     &mut MateView {
-                        pos: first.pos,
+                        pos: recs[a].pos as i64,
                         cigar: &first.cigar,
                         seq: &first.seq,
                         qual: &mut a_qual,
@@ -947,19 +1324,29 @@ impl TinAccum {
                         seq: record.seq().encoded,
                         qual: &mut b_qual,
                     },
-                    record.qname(),
+                    qname,
                 );
                 let passes = |q: &[u8], b: &CoveredBase| {
                     q.get(b.qpos as usize).copied().unwrap_or(0) >= PILEUP_MIN_BASE_QUALITY
                 };
-                for b in &first.bases {
-                    let (before, after) = (passes(&first.qual, b), passes(&a_qual, b));
-                    if before != after {
+                for (bases, before, after) in [
+                    (&first.bases, &first.qual[..], &a_qual[..]),
+                    (&self.covered_buf, quals, &b_qual[..]),
+                ] {
+                    for b in bases {
+                        let (was, now) = (passes(before, b), passes(after, b));
+                        if was == now {
+                            continue;
+                        }
                         for &(_, tx_idx, slot_idx) in
                             &chrom_positions[b.first as usize..b.last as usize]
                         {
+                            let tx_start = index.transcripts[tx_idx as usize].tx_start;
+                            if pairing.partner(tx_idx, tx_start) != Some(a) {
+                                continue;
+                            }
                             let c = &mut self.coverage[tx_idx as usize][slot_idx as usize];
-                            if after {
+                            if now {
                                 *c += 1;
                             } else {
                                 *c -= 1;
@@ -967,52 +1354,21 @@ impl TinAccum {
                         }
                     }
                 }
-                for b in &self.covered_buf {
-                    if passes(&b_qual, b) {
-                        for &(_, tx_idx, slot_idx) in
-                            &chrom_positions[b.first as usize..b.last as usize]
-                        {
-                            self.coverage[tx_idx as usize][slot_idx as usize] += 1;
-                        }
-                    }
-                }
             }
-            None => {
-                // Count this read's bases on their own.
-                for b in &self.covered_buf {
-                    if quals.get(b.qpos as usize).copied().unwrap_or(0) >= PILEUP_MIN_BASE_QUALITY {
-                        for &(_, tx_idx, slot_idx) in
-                            &chrom_positions[b.first as usize..b.last as usize]
-                        {
-                            self.coverage[tx_idx as usize][slot_idx as usize] += 1;
-                        }
-                    }
-                }
+        }
 
-                // First mate whose mate is still to arrive and can overlap it:
-                // keep what htslib needs to adjust both mates when it arrives.
-                if overlap_candidate && mpos >= record.pos() && mpos < read_end as i64 {
-                    let qname = record.qname().to_vec();
-                    let id = self.next_pending_id;
-                    self.next_pending_id += 1;
-                    self.pending_by_end
-                        .push(Reverse((read_end, id, qname.clone())));
-                    self.pending.insert(
-                        qname,
-                        PendingMate {
-                            id,
-                            pos: record.pos(),
-                            cigar: record.raw_cigar().to_vec(),
-                            seq: record.seq().encoded.to_vec(),
-                            qual: quals.to_vec(),
-                            bases: self.covered_buf.clone(),
-                        },
-                    );
-                }
+        // Keep what a later read of this name needs to tweak this one.
+        if store {
+            if let Some(last) = group.recs.last_mut() {
+                last.data = Some(Box::new(MateData {
+                    cigar: record.raw_cigar().to_vec(),
+                    seq: record.seq().encoded.to_vec(),
+                    qual: quals.to_vec(),
+                    bases: self.covered_buf.clone(),
+                }));
             }
         }
     }
-
     /// Merge another accumulator into this one.
     pub fn merge(&mut self, other: TinAccum) {
         for (i, other_cov) in other.coverage.into_iter().enumerate() {
@@ -1179,6 +1535,19 @@ fn fill_aligned_blocks(record: &bam::Record, buf: &mut Vec<AlignedBlock>) -> u64
 // Output writers
 // ===================================================================
 
+/// Format a finite TIN value as Python formats a float.
+fn format_tin_float(value: f64) -> String {
+    let mut text = format!("{value:?}");
+    // Python pads a single-digit negative exponent, for example 1e-05.
+    if text
+        .split_once("e-")
+        .is_some_and(|(_, exponent)| exponent.len() == 1)
+    {
+        text.insert(text.len() - 1, '0');
+    }
+    text
+}
+
 /// Write per-transcript TIN scores in RSeQC format.
 ///
 /// Format: TSV with header geneID\tchrom\ttx_start\ttx_end\tTIN
@@ -1211,7 +1580,11 @@ pub fn write_tin(results: &TinResults, output_path: &Path) -> Result<()> {
             writeln!(
                 f,
                 "{}\t{}\t{}\t{}\t{}",
-                r.gene_id, r.chrom, r.tx_start, r.tx_end, r.tin
+                r.gene_id,
+                r.chrom,
+                r.tx_start,
+                r.tx_end,
+                format_tin_float(r.tin)
             )?;
         }
     }
@@ -1219,10 +1592,48 @@ pub fn write_tin(results: &TinResults, output_path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Sum `values` the way NumPy's `add.reduce` does for a contiguous float64
+/// array (`pairwise_sum` in NumPy's `loops_utils.h.src`).
+///
+/// tin.py reports `numpy.mean` and `numpy.std` of its TIN list, so the
+/// summary must use the same summation order to print the same digits:
+/// blocks of up to 128 values are summed with eight interleaved accumulators,
+/// and longer runs are split in two (at a multiple of 8) and summed recursively.
+fn numpy_pairwise_sum(values: &[f64]) -> f64 {
+    /// NumPy's `PW_BLOCKSIZE`.
+    const BLOCK: usize = 128;
+    let n = values.len();
+    if n < 8 {
+        values.iter().fold(-0.0, |acc, &v| acc + v)
+    } else if n <= BLOCK {
+        let mut r = [0.0f64; 8];
+        r.copy_from_slice(&values[..8]);
+        let unrolled_end = n - n % 8;
+        for chunk in values[8..unrolled_end].chunks_exact(8) {
+            for (acc, &v) in r.iter_mut().zip(chunk) {
+                *acc += v;
+            }
+        }
+        let mut res = ((r[0] + r[1]) + (r[2] + r[3])) + ((r[4] + r[5]) + (r[6] + r[7]));
+        for &v in &values[unrolled_end..] {
+            res += v;
+        }
+        res
+    } else {
+        let mut n2 = n / 2;
+        n2 -= n2 % 8;
+        numpy_pairwise_sum(&values[..n2]) + numpy_pairwise_sum(&values[n2..])
+    }
+}
+
 /// Write TIN summary statistics.
 ///
 /// Format: Bam_file\tTIN(mean)\tTIN(median)\tTIN(stdev)
-pub fn write_tin_summary(results: &TinResults, bam_name: &str, output_path: &Path) -> Result<()> {
+///
+/// Matches tin.py: the BAM is reported by its file name, and the mean and
+/// (population) standard deviation are NumPy's, over the TINs of the
+/// transcripts that passed the read check, in output row order.
+pub fn write_tin_summary(results: &TinResults, bam_path: &str, output_path: &Path) -> Result<()> {
     let mut f = std::fs::File::create(output_path)
         .with_context(|| format!("Failed to create TIN summary: {}", output_path.display()))?;
 
@@ -1233,22 +1644,36 @@ pub fn write_tin_summary(results: &TinResults, bam_name: &str, output_path: &Pat
         .map(|r| r.tin)
         .collect();
 
-    let (mean, median, stdev) = if scores.is_empty() {
-        (0.0, 0.0, 0.0)
-    } else {
-        let n = scores.len() as f64;
-        let mean = scores.iter().sum::<f64>() / n;
-
-        let median = crate::io::median(&scores);
-
-        let variance = scores.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n;
-        let stdev = variance.sqrt();
-
-        (mean, median, stdev)
-    };
+    // tin.py prints os.path.basename() of the BAM path.
+    let bam_name = Path::new(bam_path).file_name().map_or_else(
+        || bam_path.to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    );
 
     writeln!(f, "Bam_file\tTIN(mean)\tTIN(median)\tTIN(stdev)")?;
-    writeln!(f, "{}\t{}\t{}\t{}", bam_name, mean, median, stdev)?;
+    // NumPy reports nan when no transcript passed the read check.
+    if scores.is_empty() {
+        writeln!(f, "{bam_name}\tnan\tnan\tnan")?;
+        return Ok(());
+    }
+
+    let n = scores.len() as f64;
+    // numpy.mean: add.reduce (initial 0.0) divided by the count.
+    let mean = (0.0 + numpy_pairwise_sum(&scores)) / n;
+    let median = crate::io::median(&scores);
+
+    // numpy.std: sqrt of the mean squared deviation from numpy.mean.
+    let squared: Vec<f64> = scores.iter().map(|x| (x - mean) * (x - mean)).collect();
+    let stdev = ((0.0 + numpy_pairwise_sum(&squared)) / n).sqrt();
+
+    writeln!(
+        f,
+        "{}\t{}\t{}\t{}",
+        bam_name,
+        format_tin_float(mean),
+        format_tin_float(median),
+        format_tin_float(stdev)
+    )?;
 
     Ok(())
 }
@@ -1260,6 +1685,122 @@ pub fn write_tin_summary(results: &TinResults, bam_name: &str, output_path: &Pat
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn gene_with(gene_id: &str, chrom: &str, txs: Vec<(&str, Vec<(u64, u64)>, u64)>) -> Gene {
+        let transcripts: Vec<Transcript> = txs
+            .into_iter()
+            .map(|(id, exons, first_exon_start)| Transcript {
+                transcript_id: id.to_string(),
+                has_transcript_id: true,
+                chrom: chrom.to_string(),
+                start: exons[0].0,
+                end: exons[exons.len() - 1].1,
+                strand: '-',
+                exons,
+                first_exon_start,
+                cds_start: None,
+                cds_end: None,
+            })
+            .collect();
+        Gene {
+            gene_id: gene_id.to_string(),
+            chrom: chrom.to_string(),
+            start: transcripts.iter().map(|t| t.start).min().unwrap(),
+            end: transcripts.iter().map(|t| t.end).max().unwrap(),
+            strand: '-',
+            exons: Vec::new(),
+            effective_length: 0,
+            attributes: HashMap::new(),
+            transcripts,
+        }
+    }
+
+    #[test]
+    fn test_tin_summary_with_no_passing_transcripts() {
+        let results = TinResults {
+            transcripts: vec![TinResult {
+                gene_id: "tx".to_owned(),
+                chrom: "chr1".to_owned(),
+                tx_start: 0,
+                tx_end: 100,
+                tin: 0.0,
+                passed_threshold: false,
+            }],
+        };
+        let file =
+            std::env::temp_dir().join(format!("rustqc-tin-summary-{}.txt", std::process::id()));
+        write_tin_summary(&results, "staged/test.bam", &file).unwrap();
+        let summary = std::fs::read_to_string(&file).unwrap();
+        std::fs::remove_file(file).unwrap();
+        assert_eq!(
+            summary,
+            "Bam_file\tTIN(mean)\tTIN(median)\tTIN(stdev)\ntest.bam\tnan\tnan\tnan\n"
+        );
+    }
+
+    #[test]
+    fn test_tin_float_formatting() {
+        assert_eq!(format_tin_float(20.0), "20.0");
+        assert_eq!(format_tin_float(0.0), "0.0");
+        assert_eq!(format_tin_float(1e-5), "1e-05");
+    }
+
+    #[test]
+    fn test_numpy_pairwise_sum() {
+        // Short inputs are summed left to right.
+        assert_eq!(numpy_pairwise_sum(&[]), -0.0);
+        assert_eq!(numpy_pairwise_sum(&[1.0, 2.0, 3.0]), 6.0);
+        // The pairwise order shows in the last bits. Reference values are
+        // numpy.add.reduce (NumPy 2.5.5) of 1/k.
+        let v: Vec<f64> = (1..=300).map(|k| 1.0 / k as f64).collect();
+        assert_eq!(numpy_pairwise_sum(&v[..20]), 3.597739657143682);
+        assert_eq!(numpy_pairwise_sum(&v), 6.282663880299504);
+        assert_eq!(v.iter().sum::<f64>(), 6.282663880299502);
+    }
+
+    #[test]
+    fn test_index_follows_gtf2bed_order() {
+        // gtf2bed sorts by chromosome name, then by the first exon line's
+        // start, then by transcript ID.
+        let mut genes = IndexMap::new();
+        genes.insert(
+            "G1".to_string(),
+            gene_with(
+                "G1",
+                "chr2",
+                vec![
+                    ("Z", vec![(100, 200), (900, 1000)], 900),
+                    ("B", vec![(300, 400)], 300),
+                ],
+            ),
+        );
+        genes.insert(
+            "G2".to_string(),
+            gene_with(
+                "G2",
+                "chr10",
+                vec![
+                    ("C", vec![(5000, 5100)], 5000),
+                    ("D", vec![(500, 600)], 500),
+                ],
+            ),
+        );
+        genes.insert(
+            "G3".to_string(),
+            gene_with("G3", "chr2", vec![("E", vec![(900, 950)], 900)]),
+        );
+        // No transcript_id: gtf2bed writes no BED row, so tin.py has no row.
+        let mut no_tx = gene_with("G4", "chr2", vec![("G4__no_tx", vec![(50, 60)], 50)]);
+        no_tx.transcripts[0].has_transcript_id = false;
+        genes.insert("G4".to_string(), no_tx);
+        let index = TinIndex::from_genes(&genes, 100);
+        let order: Vec<&str> = index
+            .transcripts
+            .iter()
+            .map(|t| t.gene_id.as_str())
+            .collect();
+        assert_eq!(order, vec!["D", "C", "B", "E", "Z"]);
+    }
 
     #[test]
     fn test_sample_exonic_positions() {

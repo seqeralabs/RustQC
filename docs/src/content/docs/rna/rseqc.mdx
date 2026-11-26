@@ -523,16 +523,25 @@ Transcripts below the minimum coverage threshold are reported with a TIN of `0.0
 and are left out of the summary statistics, as in `tin.py`. TIN values are written
 at full precision, like Python's `str(float)`.
 
+Rows follow the BED order produced by nf-core/rnaseq's `eautils/gtf2bed` module.
+The converter sorts by chromosome name, the start of each transcript's first
+exon line in the GTF, then transcript ID. Exons without a transcript ID are omitted.
+Older versions of the converter break ties in Perl hash order, which varies between runs.
+
 ### Summary file
 
 The `{stem}.summary.txt` file is a single-row tab-separated summary:
 
-| Column        | Description                     |
-| ------------- | ------------------------------- |
-| `Bam_file`    | Path to the input BAM file      |
-| `TIN(mean)`   | Mean TIN across all transcripts |
-| `TIN(median)` | Median TIN                      |
-| `TIN(stdev)`  | Standard deviation of TIN       |
+| Column        | Description                                 |
+| ------------- | ------------------------------------------- |
+| `Bam_file`    | File name of the input BAM                  |
+| `TIN(mean)`   | Mean TIN across all transcripts             |
+| `TIN(median)` | Median TIN                                  |
+| `TIN(stdev)`  | Standard deviation (population) of TIN      |
+
+The statistics are computed as NumPy computes them in `tin.py` (pairwise
+summation), over the transcripts that passed the coverage threshold. If none
+pass, the summary reports `nan` for all three statistics.
 
 ### Interpreting TIN scores
 
