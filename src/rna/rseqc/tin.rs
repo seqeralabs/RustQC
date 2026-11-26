@@ -1609,7 +1609,8 @@ fn numpy_pairwise_sum(values: &[f64]) -> f64 {
         let mut r = [0.0f64; 8];
         r.copy_from_slice(&values[..8]);
         let unrolled_end = n - n % 8;
-        for chunk in values[8..unrolled_end].chunks_exact(8) {
+        let (chunks, _) = values[8..unrolled_end].as_chunks::<8>();
+        for chunk in chunks {
             for (acc, &v) in r.iter_mut().zip(chunk) {
                 *acc += v;
             }
