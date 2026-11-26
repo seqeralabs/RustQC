@@ -523,6 +523,15 @@ Transcripts below the minimum coverage threshold are reported with a TIN of `0.0
 and are left out of the summary statistics, as in `tin.py`. TIN values are written
 at full precision, like Python's `str(float)`.
 
+`tin.py` takes its logarithms and exponentials from the C library, and the last digit of
+some of them depends on the machine: glibc runs a different build of `log` and `exp` on
+CPUs with FMA than on CPUs without it, and macOS uses another library again. RustQC
+carries its own port of glibc's FMA build of `log` and `exp`, so its TIN values are the
+same on every platform. They are the values `tin.py` prints on any x86-64 CPU with
+FMA and AVX2 (Intel Haswell and AMD Zen or newer) and on aarch64. On an older x86-64 CPU,
+`tin.py` runs glibc's generic build and can differ from this in the last digit for a
+small share of the transcripts (about one in a thousand).
+
 Rows follow the BED order produced by nf-core/rnaseq's `eautils/gtf2bed` module.
 The converter sorts by chromosome name, the start of each transcript's first
 exon line in the GTF, then transcript ID. Exons without a transcript ID are omitted.

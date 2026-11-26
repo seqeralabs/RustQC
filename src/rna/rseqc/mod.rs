@@ -5,6 +5,8 @@
 
 pub mod accumulators;
 pub mod common;
+mod glibc_math;
+mod glibc_math_tables;
 pub mod plots;
 
 pub mod bam_stat;

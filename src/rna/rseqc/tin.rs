@@ -16,6 +16,7 @@ use indexmap::IndexMap;
 use log::debug;
 use rand::Rng;
 
+use super::glibc_math;
 use crate::gtf::{Gene, Transcript};
 
 // ===================================================================
@@ -1466,7 +1467,8 @@ fn compute_tin(coverage: &[u32], n_total_positions: usize) -> f64 {
 
     let total: f64 = nonzero.iter().sum();
 
-    // Shannon entropy over non-zero positions only (matching upstream)
+    // Shannon entropy over non-zero positions only (matching upstream's
+    // `shannon_entropy`): the terms are added left to right, in position order.
     let entropy: f64 = if total == 0.0 {
         0.0
     } else {
@@ -1474,14 +1476,14 @@ fn compute_tin(coverage: &[u32], n_total_positions: usize) -> f64 {
             .iter()
             .map(|&c| {
                 let p = c / total;
-                -p * p.ln()
+                -p * glibc_math::log(p)
             })
             .sum()
     };
 
     // Upstream: tin = 100 * exp(entropy) / l
     // where l = total number of sampled positions (not just nonzero)
-    100.0 * entropy.exp() / n_total_positions as f64
+    100.0 * glibc_math::exp(entropy) / n_total_positions as f64
 }
 
 /// An aligned (M/=/X) block of a read.
@@ -1852,6 +1854,32 @@ mod tests {
         assert_eq!(total_count, 5); // 3 + 2 boundary duplicates
         assert_eq!(positions[0], 101);
         assert_eq!(positions[2], 103);
+    }
+
+    // Coverage vectors for which glibc's generic (non-FMA) build of log/exp gives a
+    // TIN one ulp away from its FMA build, with the TIN (bits) that tin.py prints on
+    // a CPU with FMA (glibc 2.39, Python 3.12).
+    const TIN_PY_TINS: &[(&str, u64)] = &[
+        (
+            "3 2 5 40 1 8 1 0 0 3 200 13 2 8 13 200 1 0 5 0 2 200 1 3 13 8 13 200 5 1 3 5 200 200 0 3 13 5 3 13 0 2 2 2 8 2 2 40 200 13 3 5 8 3 40 13 5 0 8 1 2 2 13 0 0 0 13 2 200 8 13 1 8 13 5 200 8 40 3 40 0 0 5 1 1 40 8 3 13 0 5 200 13 13 40 0 1 13 13 1",
+            0x403a1a3c59ec9a81,
+        ),
+        (
+            "3 1 1 8 0 0 8 2 5 0 0 2 3 3 8 40 8 13 13 0 1 0 1 40 0 2 3 13 40 1 40 3 5 5 5 0 40 2 0 200 3 0 200 2 3 2 1 1 1 40 40 5 8 0 5 2 8 40 0 8 8 3 13 8 0 0 8 5 40 1 5 40 40 13 1 3 0 0 13 13 40 13 1 0 0 200 3 2 3 3 8 8 2 0 40 13 2 0 1 1",
+            0x403b67ba9234a965,
+        ),
+        (
+            "1 0 13 2 200 0 40 3 0 1 0 200 2 40 2 8 2 5 8 5 0 40 8 5 40 5 200 3 13 1 5 3 40 3 8 40 200 5 1 8 0 5 2 0 0 0 40 5 13 200 40 5 0 0 3 13 3 200 0 5 13 13 5 5 0 40 0 3 0 200 3 1 2 40 13 8 0 2 40 13 200 0 2 13 40 3 2 1 13 5 200 8 0 200 13 1 1 1 8 8",
+            0x403b6ed5fcbf1c13,
+        ),
+    ];
+
+    #[test]
+    fn test_compute_tin_matches_tin_py() {
+        for &(cov, want) in TIN_PY_TINS {
+            let cov: Vec<u32> = cov.split(' ').map(|v| v.parse().unwrap()).collect();
+            assert_eq!(compute_tin(&cov, cov.len()).to_bits(), want);
+        }
     }
 
     #[test]
