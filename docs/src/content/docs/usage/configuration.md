@@ -365,7 +365,7 @@ rna:
     density_scatter_plot: true # Density scatter plot (PNG + SVG)
     boxplot: true # Duplication rate boxplot (PNG + SVG)
     expression_histogram: true # Expression histogram (PNG + SVG)
-    multiqc_intercept: true # MultiQC intercept/slope file
+    multiqc_intercept: true # MultiQC intercept file
     multiqc_curve: true # MultiQC fitted curve file
 ```
 

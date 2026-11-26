@@ -8,7 +8,7 @@
 //! All plots are output as both high-resolution PNG and SVG files,
 //! styled to visually match the original R dupRadar package output.
 
-use crate::rna::dupradar::dupmatrix::DupMatrix;
+use crate::rna::dupradar::dupmatrix::{format_float, DupMatrix};
 use crate::rna::dupradar::fitting::FitResult;
 use anyhow::Result;
 use plotters::prelude::*;
@@ -1298,71 +1298,108 @@ pub fn write_intercept_slope(
     Ok(())
 }
 
-/// Write a MultiQC-compatible general-stats intercept file.
+/// MultiQC header of `_dup_intercept_mqc.txt`, as in the nf-core dupradar
+/// module's template (`templates/dupradar.r`).
+const MQC_INTERCEPT_HEADER: &str = "#id: DupInt
+#plot_type: 'generalstats'
+#pconfig:
+#    dupRadar_intercept:
+#        title: 'dupInt'
+#        namespace: 'DupRadar'
+#        description: 'Intercept value from DupRadar'
+#        max: 100
+#        min: 0
+#        scale: 'RdYlGn-rev'
+Sample dupRadar_intercept
+";
+
+/// MultiQC header of `_duprateExpDensCurve_mqc.txt`, as in the nf-core
+/// dupradar module's template.
+const MQC_CURVE_HEADER: &str = "#id: dupradar
+#plot_type: 'linegraph'
+#section_name: 'DupRadar'
+#section_href: 'bioconductor.org/packages/release/bioc/html/dupRadar.html'
+#description: \"provides duplication rate quality control for RNA-Seq datasets. Highly expressed genes can be expected to have a lot of duplicate reads, but high numbers of duplicates at low read counts can indicate low library complexity with technical duplication.
+#    This plot shows the general linear models - a summary of the gene duplication distributions. \"
+#pconfig:
+#    title: 'DupRadar General Linear Model'
+#    xlog: True
+#    xlab: 'expression (reads/kbp)'
+#    ylab: '% duplicate reads'
+#    ymax: 100
+#    ymin: 0
+#    tt_label: '<b>{point.x:.1f} reads/kbp</b>: {point.y:,.2f}% duplicates'
+#    x_lines:
+#        - color: 'green'
+#          dash: 'LongDash'
+#          label:
+#                text: '0.5 RPKM'
+#          value: 0.5
+#          width: 1
+#        - color: 'red'
+#          dash: 'LongDash'
+#          label:
+#                text: '1 read/bp'
+#          value: 1000
+#          width: 1
+";
+
+/// Write the MultiQC general-stats intercept file in the layout of the
+/// nf-core dupradar module: its header, then `<sample> <intercept>`.
 pub fn write_mqc_intercept(
     fit: &FitResult,
     sample_name: &str,
     path: &std::path::Path,
 ) -> Result<()> {
-    use std::io::Write;
-    let mut f = std::fs::File::create(path)?;
-    writeln!(f, "# id: dupRadar")?;
-    writeln!(f, "# plot_type: 'generalstats'")?;
-    writeln!(f, "# pconfig:")?;
-    writeln!(f, "#     dupRadar_intercept:")?;
-    writeln!(f, "#         title: 'dupRadar int'")?;
-    writeln!(f, "#         namespace: 'dupRadar'")?;
-    writeln!(
-        f,
-        "#         description: 'dupRadar duplication rate at low read counts'"
-    )?;
-    writeln!(f, "#         max: 100")?;
-    writeln!(f, "#         min: 0")?;
-    writeln!(f, "#         format: '{{:.2f}}'")?;
-    writeln!(f, "Sample\tdupRadar_intercept")?;
-    writeln!(f, "{}\t{}", sample_name, fit.intercept)?;
+    std::fs::write(path, mqc_intercept_text(fit, sample_name))?;
     Ok(())
 }
 
-/// Write a MultiQC-compatible line-graph curve file.
+/// The intercept file contents.
+fn mqc_intercept_text(fit: &FitResult, sample_name: &str) -> String {
+    format!(
+        "{MQC_INTERCEPT_HEADER}{} {}\n",
+        mqc_sample_name(sample_name),
+        format_float(fit.intercept)
+    )
+}
+
+/// The template strips the `Aligned.sortedByCoord.out.markDups` suffix that
+/// STAR-based pipelines leave on the sample name.
+fn mqc_sample_name(sample_name: &str) -> String {
+    sample_name.replace("Aligned.sortedByCoord.out.markDups", "")
+}
+
+/// Write the MultiQC line-graph curve file in the layout of the nf-core
+/// dupradar module.
 pub fn write_mqc_curve(fit: &FitResult, dm: &DupMatrix, path: &std::path::Path) -> Result<()> {
-    use std::io::Write;
-    let mut f = std::fs::File::create(path)?;
-    writeln!(f, "# id: 'dupradar'")?;
-    writeln!(f, "# section_name: 'dupRadar'")?;
-    writeln!(f, "# description: 'Duplication rate vs expression'")?;
-    writeln!(f, "# plot_type: 'linegraph'")?;
-    writeln!(f, "# pconfig:")?;
-    writeln!(f, "#     title: 'dupRadar General Linear Model'")?;
-    writeln!(f, "#     xlab: 'Expression (reads/kbp)'")?;
-    writeln!(f, "#     ylab: 'Duplication rate (%)'")?;
-    writeln!(f, "#     ymin: 0")?;
-    writeln!(f, "#     ymax: 100")?;
-    writeln!(f, "#     xlog: True")?;
-
-    let rpks: Vec<f64> = dm
-        .rows
-        .iter()
-        .filter(|r| r.rpk > 0.0)
-        .map(|r| r.rpk)
-        .collect();
-    if rpks.is_empty() {
-        return Ok(());
-    }
-
-    let mn = rpks.iter().copied().fold(f64::INFINITY, f64::min);
-    let mx = rpks.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    let lmin = mn.log10();
-    let lmax = mx.log10();
-    let n = 100;
-
-    for i in 0..=n {
-        let lr = lmin + (lmax - lmin) * (i as f64) / (n as f64);
-        let rpk = 10.0_f64.powf(lr);
-        let pct = fit.predict_rpk(rpk) * 100.0;
-        writeln!(f, "{}\t{}", rpk, pct)?;
-    }
+    let rpk: Vec<f64> = dm.rows.iter().map(|r| r.rpk).collect();
+    std::fs::write(path, mqc_curve_text(fit, &rpk))?;
     Ok(())
+}
+
+/// The curve file contents: the header, then one `<RPK> <duplication %>` row
+/// per 10 expressed genes (RPK > 0) sorted by RPK, starting with the least
+/// expressed, with the fitted duplication rate in percent. Numbers are
+/// written with 15 significant digits, separated by a space.
+///
+/// The template stops with an error when every gene has reads; this writes
+/// the header without data rows in that case.
+fn mqc_curve_text(fit: &FitResult, rpk: &[f64]) -> String {
+    let mut out = String::from(MQC_CURVE_HEADER);
+    let mut log_rpk: Vec<f64> = rpk.iter().map(|&r| r.log10()).collect();
+    log_rpk.sort_by(f64::total_cmp);
+    let expressed: Vec<f64> = log_rpk.into_iter().filter(|x| x.is_finite()).collect();
+    if expressed.len() == rpk.len() {
+        return out;
+    }
+    for &x in expressed.iter().step_by(10) {
+        out.push_str(&format_float(10f64.powf(x)));
+        out.push(' ');
+        out.push_str(&format_float(100.0 * fit.predict(x)));
+        out.push('\n');
+    }
+    out
 }
 
 // ============================================================================
@@ -1382,6 +1419,65 @@ mod tests {
                                                      // Mid-point should be green
         let c_mid = density_color(0.5);
         assert_eq!((c_mid.0, c_mid.1, c_mid.2), (0, 255, 0)); // green
+    }
+
+    #[test]
+    fn test_mqc_intercept_text_matches_nfcore_template() {
+        let fit = FitResult {
+            beta0: 0.0,
+            beta1: 0.0,
+            intercept: 0.0331294701668489,
+            slope: 1.55223856783934,
+        };
+        let text = mqc_intercept_text(&fit, "test");
+        assert!(text.starts_with("#id: DupInt\n#plot_type: 'generalstats'\n"));
+        assert!(text.ends_with(
+            "#        scale: 'RdYlGn-rev'\nSample dupRadar_intercept\ntest 0.0331294701668489\n"
+        ));
+        assert_eq!(text.lines().count(), 12);
+    }
+
+    #[test]
+    fn test_mqc_sample_name_strips_star_suffix() {
+        assert_eq!(mqc_sample_name("test"), "test");
+        assert_eq!(
+            mqc_sample_name("WT_REP1Aligned.sortedByCoord.out.markDups"),
+            "WT_REP1"
+        );
+    }
+
+    #[test]
+    fn test_mqc_curve_text_every_tenth_expressed_gene() {
+        let fit = FitResult {
+            beta0: -3.0,
+            beta1: 1.0,
+            intercept: (-3.0f64).exp(),
+            slope: 1.0f64.exp(),
+        };
+        // 3 genes without reads, 25 expressed genes in reverse order.
+        let mut rpk = vec![0.0; 3];
+        rpk.extend((1..=25).rev().map(|i| i as f64 * 10.0));
+        let text = mqc_curve_text(&fit, &rpk);
+        let rows: Vec<&str> = text.lines().filter(|l| !l.starts_with('#')).collect();
+        // Sorted expressed genes 10, 20, ..., 250: rows for the 1st, 11th and 21st.
+        assert_eq!(rows.len(), 3);
+        assert!(rows[0].starts_with("10 "), "{}", rows[0]);
+        assert!(rows[1].starts_with("110 "), "{}", rows[1]);
+        assert!(rows[2].starts_with("210 "), "{}", rows[2]);
+        let y: f64 = rows[0].split(' ').nth(1).unwrap().parse().unwrap();
+        assert!((y - 100.0 / (1.0 + (2.0f64).exp())).abs() < 1e-12, "{y}");
+        assert!(text.starts_with(MQC_CURVE_HEADER));
+    }
+
+    #[test]
+    fn test_mqc_curve_text_without_unexpressed_genes_has_no_rows() {
+        let fit = FitResult {
+            beta0: -3.0,
+            beta1: 1.0,
+            intercept: (-3.0f64).exp(),
+            slope: 1.0f64.exp(),
+        };
+        assert_eq!(mqc_curve_text(&fit, &[1.0, 2.0, 3.0]), MQC_CURVE_HEADER);
     }
 
     #[test]

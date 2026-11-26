@@ -521,30 +521,25 @@ fn test_mqc_intercept_format() {
     let output = run_rustqc(outdir);
     assert!(output.status.success());
 
-    // Check MultiQC intercept file format
+    // Same layout as the nf-core dupradar module's file: a YAML header in `#`
+    // lines, then space-separated "Sample dupRadar_intercept" and value lines.
     let content =
         fs::read_to_string(format!("{}/dupradar/test_dup_intercept_mqc.txt", outdir)).unwrap();
-    // Skip YAML comment lines (starting with #)
+    assert!(content.starts_with("#id: DupInt\n#plot_type: 'generalstats'\n"));
     let data_lines: Vec<&str> = content.lines().filter(|l| !l.starts_with('#')).collect();
-    assert!(data_lines.len() >= 2, "MultiQC intercept file too short");
-
-    // First data line should be a header with "Sample" and "dupRadar_intercept"
-    assert!(
-        data_lines[0].contains("Sample"),
-        "Missing 'Sample' in MQC header"
-    );
-    assert!(
-        data_lines[0].contains("dupRadar_intercept"),
-        "Missing 'dupRadar_intercept' in MQC header"
-    );
-
-    // Second data line should have sample name and numeric value
-    let parts: Vec<&str> = data_lines[1].split('\t').collect();
+    assert_eq!(data_lines.len(), 2, "MultiQC intercept file: {content}");
+    assert_eq!(data_lines[0], "Sample dupRadar_intercept");
+    let parts: Vec<&str> = data_lines[1].split(' ').collect();
     assert_eq!(parts.len(), 2, "MQC data line should have 2 columns");
-    let _intercept: f64 = parts[1]
-        .trim()
-        .parse()
-        .expect("MQC intercept should be numeric");
+    assert_eq!(parts[0], "test");
+    let intercept: f64 = parts[1].parse().expect("MQC intercept should be numeric");
+
+    // The same intercept as in the R fixture.
+    let (r_intercept, _) = parse_intercept_slope("tests/expected/intercept_slope.txt");
+    assert!(
+        approx_eq(r_intercept, intercept, 1e-6),
+        "MQC intercept {intercept} vs R {r_intercept}"
+    );
 
     // Cleanup
     let _ = fs::remove_dir_all(outdir);
@@ -559,34 +554,41 @@ fn test_mqc_curve_format() {
     let output = run_rustqc(outdir);
     assert!(output.status.success());
 
-    // Check MultiQC curve file format
+    // Same layout as the nf-core dupradar module's file: a YAML header in `#`
+    // lines, then "RPK duplication-percent" rows (space-separated, no header).
     let content = fs::read_to_string(format!(
         "{}/dupradar/test_duprateExpDensCurve_mqc.txt",
         outdir
     ))
     .unwrap();
-    // Skip YAML comment lines (starting with #)
+    assert!(content.starts_with("#id: dupradar\n#plot_type: 'linegraph'\n"));
     let data_lines: Vec<&str> = content.lines().filter(|l| !l.starts_with('#')).collect();
-    // Header + at least some data points (101 evenly spaced + header = 102)
-    assert!(
-        data_lines.len() >= 3,
-        "MultiQC curve file too short: {} lines",
-        data_lines.len()
-    );
-
-    // Should have a header line with 2 columns
-    let header_parts: Vec<&str> = data_lines[0].split('\t').collect();
-    assert_eq!(header_parts.len(), 2, "Curve header should have 2 columns");
-
-    // Data lines should have numeric values
-    for line in &data_lines[1..] {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let parts: Vec<&str> = line.split('\t').collect();
-        assert_eq!(parts.len(), 2, "Curve data should have 2 columns");
-        let _x: f64 = parts[0].parse().expect("X should be numeric");
-        let _y: f64 = parts[1].parse().expect("Y should be numeric");
+    // One row per 10 expressed genes (RPK > 0), starting with the least expressed.
+    let matrix = fs::read_to_string(format!("{}/dupradar/test_dupMatrix.txt", outdir)).unwrap();
+    let rpk_col = matrix
+        .lines()
+        .next()
+        .unwrap()
+        .split('\t')
+        .position(|h| h == "RPK")
+        .unwrap();
+    let expressed = matrix
+        .lines()
+        .skip(1)
+        .filter(|l| l.split('\t').nth(rpk_col).unwrap() != "0")
+        .count();
+    assert!(expressed > 0);
+    assert_eq!(data_lines.len(), expressed.div_ceil(10), "{content}");
+    let mut prev_x = 0.0;
+    for line in &data_lines {
+        let parts: Vec<&str> = line.split(' ').collect();
+        assert_eq!(parts.len(), 2, "Curve data should have 2 columns: {line}");
+        let x: f64 = parts[0].parse().expect("X should be numeric");
+        let y: f64 = parts[1].parse().expect("Y should be numeric");
+        // Rows are genes sorted by expression; y is a percentage.
+        assert!(x > 0.0 && x >= prev_x, "{line}");
+        assert!((0.0..=100.0).contains(&y), "{line}");
+        prev_x = x;
     }
 
     // Cleanup
