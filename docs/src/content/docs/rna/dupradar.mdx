@@ -171,10 +171,10 @@ See the [Interpreting plots](#interpreting-plots) section below for how to read 
 
 ### MultiQC files
 
-- `<sample>_dup_intercept_mqc.txt` -- Intercept and slope values in MultiQC general statistics format.
-- `<sample>_duprateExpDensCurve_mqc.txt` -- Fitted duplication rate curve data points for MultiQC line plot visualization.
+- `<sample>_dup_intercept_mqc.txt` -- The intercept in MultiQC general statistics format (`dupInt` column).
+- `<sample>_duprateExpDensCurve_mqc.txt` -- The fitted duplication rate (%) at every 10th expressed gene, sorted by RPK, for the MultiQC line plot.
 
-These files integrate with [MultiQC](https://multiqc.info/) for inclusion in multi-sample QC reports.
+Both files use the same layout as the ones the nf-core dupradar module (as used by nf-core/rnaseq) writes: the same YAML header, so MultiQC reports them in the same sections, space-separated values with up to 15 significant digits, and the same rows. The numbers can differ from R's in the last digits, because they come from RustQC's own fit. These files integrate with [MultiQC](https://multiqc.info/) for inclusion in multi-sample QC reports.
 
 ## Interpreting plots
 
