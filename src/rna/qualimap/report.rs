@@ -9,6 +9,8 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
+use super::format::{format_decimal, format_long, format_percentage, percentage_of};
+use super::output::{NUM_PRIME_BASES, NUM_TRANSCRIPTS_FOR_BIAS};
 use crate::Strandedness;
 use log::debug;
 
@@ -125,6 +127,8 @@ pub struct ReportData<'a> {
     pub secondary_alignments: u64,
     /// Non-unique alignments.
     pub alignment_not_unique: u64,
+    /// Mapped reads on a sequence with no annotated exon.
+    pub seq_not_found: u64,
     /// Reads aligned to genes (exonic).
     pub exonic_reads: u64,
     /// Ambiguous reads.
@@ -292,26 +296,26 @@ fn write_input_section(html: &mut String, data: &ReportData) {
     let rows = [
         ("Analysis date: ", date_str),
         ("BAM file: ", data.bam_path.to_string()),
-        ("Counting algorithm:", " uniquely-mapped-reads".to_string()),
+        ("Counting algorithm:", "uniquely-mapped-reads".to_string()),
         ("GTF file: ", data.gtf_path.to_string()),
         (
             "Number of bases for 5'-3' bias computation:",
-            " 100".to_string(),
+            format_long(NUM_PRIME_BASES as u64),
         ),
         (
             "Number of transcripts for 5'-3' bias computation:",
-            " 1,000".to_string(),
+            format_long(NUM_TRANSCRIPTS_FOR_BIAS as u64),
         ),
         (
             "Paired-end sequencing:",
             if data.paired {
-                " yes".to_string()
+                "yes".to_string()
             } else {
-                " no".to_string()
+                "no".to_string()
             },
         ),
         ("Protocol: ", protocol.to_string()),
-        ("Sorting performed:", " no".to_string()),
+        ("Sorting performed:", "no".to_string()),
     ];
 
     for (label, value) in &rows {
@@ -327,183 +331,115 @@ fn write_summary_section(html: &mut String, data: &ReportData) {
     html.push_str("<div class=\"section\">\n");
     html.push_str("<h2>Summary<a class=\"headerlink\" name=\"summary\">&nbsp;</a></h2>\n");
 
-    // --- Reads alignment ---
-    html.push_str("<div class=\"summary\">\n<div class=\"table-summary\">\n");
-    html.push_str("<h3>Reads alignment</h3>\n");
-    html.push_str("<table class=\"summary hovertable\">\n");
-
+    // --- Reads alignment (RNASeqQCAnalysis.prepareHtmlSummary) ---
+    let mut alignment: Vec<(&str, String)> = Vec::new();
     if data.paired {
-        // Qualimap uses a SINGLE row: "Number of mapped reads (left/right):" / "N / M"
-        table_row(
-            html,
+        alignment.push((
             "Number of mapped reads (left/right):",
-            &format!(
+            format!(
                 "{} / {}",
-                format_with_commas(data.left_proper),
-                format_with_commas(data.right_proper)
+                format_long(data.left_proper),
+                format_long(data.right_proper)
             ),
-        );
-        table_row(
-            html,
+        ));
+        alignment.push((
             "Number of aligned pairs (without duplicates):",
-            &format_with_commas(data.both_proper / 2),
-        );
+            format_long(data.both_proper / 2),
+        ));
+    } else {
+        alignment.push((
+            "Number of mapped reads:",
+            format_long(data.primary_alignments),
+        ));
     }
-
-    table_row(
-        html,
-        "Total number of alignments:",
-        &format_with_commas(data.primary_alignments + data.secondary_alignments),
-    );
-    table_row(
-        html,
-        "Number of secondary alignments:",
-        &format_with_commas(data.secondary_alignments),
-    );
-    table_row(
-        html,
-        "Number of non-unique alignments:",
-        &format_with_commas(data.alignment_not_unique),
-    );
-    table_row(
-        html,
-        "Aligned to genes:",
-        &format_with_commas(data.exonic_reads),
-    );
-    table_row(
-        html,
-        "Ambiguous alignments:",
-        &format_with_commas(data.ambiguous_reads),
-    );
-    table_row(
-        html,
-        "No feature assigned:",
-        &format_with_commas(data.no_feature),
-    );
-    table_row(html, "Not aligned:", &format_with_commas(data.not_aligned));
-
-    // SSP estimation (if unstranded)
+    alignment.extend([
+        (
+            "Total number of alignments:",
+            format_long(data.primary_alignments + data.secondary_alignments),
+        ),
+        (
+            "Number of secondary alignments:",
+            format_long(data.secondary_alignments),
+        ),
+        (
+            "Number of non-unique alignments:",
+            format_long(data.alignment_not_unique),
+        ),
+        ("Aligned to genes:", format_long(data.exonic_reads)),
+        ("Ambiguous alignments:", format_long(data.ambiguous_reads)),
+        ("No feature assigned:", format_long(data.no_feature)),
+    ]);
+    if data.seq_not_found > 0 {
+        alignment.push((
+            "Missing chromosome in annotation: ",
+            format_long(data.seq_not_found),
+        ));
+    }
+    alignment.push(("Not aligned:", format_long(data.not_aligned)));
     if data.stranded == Strandedness::Unstranded {
-        let total_ssp = data.ssp_fwd + data.ssp_rev;
-        if total_ssp > 0 {
-            let fwd_pct = data.ssp_fwd as f64 / total_ssp as f64 * 100.0;
-            let rev_pct = data.ssp_rev as f64 / total_ssp as f64 * 100.0;
-            table_row(
-                html,
-                "Strand specificity estimation (fwd/rev):",
-                &format!("{:.2}% / {:.2}%", fwd_pct, rev_pct),
-            );
-        }
+        let (fwd, rev) = super::strand_estimation(data.ssp_fwd, data.ssp_rev);
+        alignment.push((
+            "Strand specificity estimation (fwd/rev):",
+            format!("{} / {}", format_decimal(fwd), format_decimal(rev)),
+        ));
     }
-
-    html.push_str("</table>\n</div>\n</div>\n");
+    summary_table(html, "Reads alignment", &alignment);
 
     // --- Reads genomic origin ---
-    html.push_str("<div class=\"summary\">\n<div class=\"table-summary\">\n");
-    html.push_str("<h3>Reads genomic origin</h3>\n");
-    html.push_str("<table class=\"summary hovertable\">\n");
-
-    let total_classified = data.exonic_reads + data.intronic_reads + data.intergenic_reads;
-    let exonic_pct = if total_classified > 0 {
-        data.exonic_reads as f64 / total_classified as f64 * 100.0
-    } else {
-        0.0
+    // Percentages of exonic + "no feature" reads, as in the text report.
+    let total_reads = data.exonic_reads + data.no_feature;
+    let origin_row = |count: u64| {
+        format!(
+            "{} / {}",
+            format_long(count),
+            format_percentage(percentage_of(count, total_reads))
+        )
     };
-    let intronic_pct = if total_classified > 0 {
-        data.intronic_reads as f64 / total_classified as f64 * 100.0
-    } else {
-        0.0
-    };
-    let intergenic_pct = if total_classified > 0 {
-        data.intergenic_reads as f64 / total_classified as f64 * 100.0
-    } else {
-        0.0
-    };
-
-    // Qualimap format: "Exonic: " / "126,404,800 / 76.4%"  (slash separator, variable decimals)
-    table_row(
+    summary_table(
         html,
-        "Exonic: ",
-        &format!(
-            "{} / {:.2}%",
-            format_with_commas(data.exonic_reads),
-            exonic_pct
-        ),
+        "Reads genomic origin",
+        &[
+            ("Exonic: ", origin_row(data.exonic_reads)),
+            ("Intronic: ", origin_row(data.intronic_reads)),
+            ("Intergenic: ", origin_row(data.intergenic_reads)),
+            (
+                "Intronic/intergenic overlapping exon: ",
+                origin_row(data.overlapping_exon_reads),
+            ),
+        ],
     );
-    table_row(
-        html,
-        "Intronic: ",
-        &format!(
-            "{} / {:.2}%",
-            format_with_commas(data.intronic_reads),
-            intronic_pct
-        ),
-    );
-    table_row(
-        html,
-        "Intergenic: ",
-        &format!(
-            "{} / {:.2}%",
-            format_with_commas(data.intergenic_reads),
-            intergenic_pct
-        ),
-    );
-
-    let overlapping_pct = if total_classified > 0 {
-        data.overlapping_exon_reads as f64 / total_classified as f64 * 100.0
-    } else {
-        0.0
-    };
-    table_row(
-        html,
-        "Intronic/intergenic overlapping exon: ",
-        &format!(
-            "{} / {:.2}%",
-            format_with_commas(data.overlapping_exon_reads),
-            overlapping_pct
-        ),
-    );
-
-    html.push_str("</table>\n</div>\n</div>\n");
 
     // --- Transcript coverage profile ---
-    html.push_str("<div class=\"summary\">\n<div class=\"table-summary\">\n");
-    html.push_str("<h3>Transcript coverage profile</h3>\n");
-    html.push_str("<table class=\"summary hovertable\">\n");
-
-    table_row(html, "5' bias:", &format_bias(data.five_bias));
-    table_row(html, "3' bias:", &format_bias(data.three_bias));
-    table_row(html, "5'-3' bias:", &format_bias(data.five_three_bias));
-
-    html.push_str("</table>\n</div>\n</div>\n");
-
-    // --- Junction analysis ---
-    html.push_str("<div class=\"summary\">\n<div class=\"table-summary\">\n");
-    html.push_str("<h3>Junction analysis</h3>\n");
-    html.push_str("<table class=\"summary hovertable\">\n");
-
-    table_row(
+    summary_table(
         html,
-        "Reads at junctions:",
-        &format_with_commas(data.reads_at_junctions),
+        "Transcript coverage profile",
+        &[
+            ("5' bias:", format_decimal(data.five_bias)),
+            ("3' bias:", format_decimal(data.three_bias)),
+            ("5'-3' bias:", format_decimal(data.five_three_bias)),
+        ],
     );
 
-    // Top junction motifs sorted by count descending — Qualimap shows motif / percentage
-    // Use reads_at_junctions as denominator (matches text file output and upstream Qualimap)
-    let mut motifs: Vec<(&String, &u64)> = data.junction_motifs.iter().collect();
-    motifs.sort_by(|a, b| b.1.cmp(a.1));
-    let total_junctions = data.reads_at_junctions;
-    for (motif, &count) in motifs.iter().take(11) {
-        let pct = if total_junctions > 0 {
-            count as f64 / total_junctions as f64 * 100.0
-        } else {
-            0.0
-        };
-        table_row(html, motif, &format!("{:.2}%", pct));
+    // --- Junction analysis ---
+    let mut junctions: Vec<(&str, String)> =
+        vec![("Reads at junctions:", format_long(data.reads_at_junctions))];
+    for (motif, pct) in super::junction_motif_rows(data.junction_motifs, data.reads_at_junctions) {
+        junctions.push((motif, format_percentage(pct)));
     }
+    summary_table(html, "Junction analysis", &junctions);
 
-    html.push_str("</table>\n</div>\n</div>\n");
     html.push_str("</div>\n");
+}
+
+/// One `<h3>` summary table, as Qualimap's `HtmlReportGenerator.appendTableFromStats`.
+fn summary_table(html: &mut String, title: &str, rows: &[(&str, String)]) {
+    html.push_str("<div class=\"summary\">\n<div class=\"table-summary\">\n");
+    html.push_str(&format!("<h3>{title}</h3>\n"));
+    html.push_str("<table class=\"summary hovertable\">\n");
+    for (label, value) in rows {
+        table_row(html, label, value);
+    }
+    html.push_str("</table>\n</div>\n</div>\n");
 }
 
 /// Sections 3+: Image plots (matches Qualimap section structure exactly).
@@ -624,8 +560,6 @@ fn table_row(html: &mut String, label: &str, value: &str) {
     html.push_str("</tr>\n");
 }
 
-use crate::io::format_with_commas;
-
 /// Format the current local date/time as `YYYY/MM/DD HH:MM:SS`.
 ///
 /// Uses `time` crate's `OffsetDateTime` (already an indirect dependency via `env_logger`).
@@ -672,15 +606,6 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
     (y, mo, d)
 }
 
-/// Format a bias value (2 decimal places, or "NA").
-fn format_bias(v: f64) -> String {
-    if v.is_nan() || v.is_infinite() {
-        "NA".to_string()
-    } else {
-        format!("{:.2}", v)
-    }
-}
-
 // ===================================================================
 // Tests
 // ===================================================================
@@ -688,23 +613,6 @@ fn format_bias(v: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_format_with_commas() {
-        assert_eq!(format_with_commas(0), "0");
-        assert_eq!(format_with_commas(999), "999");
-        assert_eq!(format_with_commas(1_000), "1,000");
-        assert_eq!(format_with_commas(1_234_567), "1,234,567");
-        assert_eq!(format_with_commas(87_677_544), "87,677,544");
-    }
-
-    #[test]
-    fn test_format_bias() {
-        assert_eq!(format_bias(0.85), "0.85");
-        assert_eq!(format_bias(1.0), "1.00");
-        assert_eq!(format_bias(f64::NAN), "NA");
-        assert_eq!(format_bias(f64::INFINITY), "NA");
-    }
 
     #[test]
     fn test_table_row_html() {

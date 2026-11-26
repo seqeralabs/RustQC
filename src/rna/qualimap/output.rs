@@ -10,6 +10,9 @@ use anyhow::{Context, Result};
 use log::debug;
 
 use super::coverage::TranscriptCoverage;
+use super::format::{
+    format_decimal, format_long, format_percentage, java_double_to_string, percentage_of,
+};
 use super::index::QualimapIndex;
 use super::plots;
 use super::QualimapResult;
@@ -26,72 +29,16 @@ const HIGH_TIER_COUNT: usize = 500;
 /// Number of transcripts for the "low" expression tier.
 const LOW_TIER_COUNT: usize = 500;
 
-/// Number of top transcripts used for 5'-3' bias calculation.
-const NUM_TRANSCRIPTS_FOR_BIAS: usize = 1000;
+/// Number of top transcripts used for 5'-3' bias calculation, as Qualimap
+/// prints it. Its selection code actually keeps the top 1001 (see
+/// [`compute_bias`]).
+pub(super) const NUM_TRANSCRIPTS_FOR_BIAS: usize = 1000;
 
 /// Number of bases at 5'/3' ends used for bias calculation.
-const NUM_PRIME_BASES: usize = 100;
+pub(super) const NUM_PRIME_BASES: usize = 100;
 
 /// Minimum transcript length for bias calculation.
 const MIN_TRANSCRIPT_LENGTH_FOR_BIAS: usize = 500;
-
-// ============================= Number Formatting ===============================
-
-/// Format an integer with comma separators (e.g., 1234567 → "1,234,567").
-use crate::io::format_with_commas;
-
-/// Format a percentage with Qualimap-style precision.
-///
-/// Qualimap uses Java's default `String.format("%.2f", val)` but with
-/// trailing-zero trimming on the decimal part. Looking at real output:
-/// - 68.3% (not 68.30%)
-/// - 29.69%
-/// - 2.01%
-/// - 9.31%
-///
-/// The pattern is: 2 decimal places, then strip trailing zeros (but keep
-/// at least one decimal digit).
-fn format_percentage(val: f64) -> String {
-    let s = format!("{:.2}", val);
-    // Strip trailing zeros after decimal point, but keep at least one decimal
-    if s.contains('.') {
-        let trimmed = s.trim_end_matches('0');
-        let trimmed = if trimmed.ends_with('.') {
-            // e.g., "68." → keep at least "68.0"
-            // Actually Qualimap shows "68.3" not "68.0" — but if we get exactly
-            // an integer like 68.00, it would show "68.0" based on the trim logic.
-            // However looking at real data, Qualimap never shows ".0" — it shows
-            // integers as "68" etc. Let's check: the real data shows "68.3%", "29.69%"
-            // etc. When the value is exactly integer, Qualimap shows e.g. "9.31%".
-            // There's no case of exactly-integer percentages in the reference.
-            // Be safe: keep "X.0" format.
-            &s[..trimmed.len() + 1]
-        } else {
-            trimmed
-        };
-        trimmed.to_string()
-    } else {
-        s
-    }
-}
-
-/// Format a bias value with Qualimap-style precision.
-///
-/// Qualimap uses 2 decimal places with trailing-zero trimming.
-/// Examples: 0.71, 0.57, 1.3, 1.47, 0.31, 0.22
-fn format_bias(val: f64) -> String {
-    let s = format!("{:.2}", val);
-    if s.contains('.') {
-        let trimmed = s.trim_end_matches('0');
-        if trimmed.ends_with('.') {
-            format!("{}.0", trimmed.trim_end_matches('.'))
-        } else {
-            trimmed.to_string()
-        }
-    } else {
-        s
-    }
-}
 
 // ============================= Coverage Profile ================================
 
@@ -154,121 +101,137 @@ fn compute_coverage_profile(entries: &[&TranscriptCoverageEntry]) -> [f64; NUM_B
 
 /// Compute 5'-3' bias values from per-transcript coverage.
 ///
-/// For each qualifying transcript (length >= 500, mean >= 1.0):
-/// - Compute mean coverage of first `NUM_PRIME_BASES` bases (5' end)
-/// - Compute mean coverage of last `NUM_PRIME_BASES` bases (3' end)
-/// - Compute mean coverage of entire transcript
-/// - 5' bias = 5' mean / whole mean
-/// - 3' bias = 3' mean / whole mean
-/// - 5'-3' bias = 5' mean / 3' mean
+/// Follows Qualimap's `TranscriptDataHandler.calculateCoverageBias()` and
+/// `pickTranscripts()` (themselves ported from Picard's `RnaMetricsCollector`):
 ///
-/// For negative-strand transcripts, the coverage array is reversed before
-/// computing 5'/3' regions.
-///
-/// Returns (5' bias, 3' bias, 5'-3' bias) as medians across all qualifying
-/// transcripts.
-fn compute_bias(entries: &[TranscriptCoverageEntry]) -> (f64, f64, f64) {
+/// 1. Per gene, pick the transcript with the highest mean coverage among
+///    those at least 500 bp long with mean coverage >= 1. Transcripts are
+///    visited in Java `HashMap` order (`order`) and only a strictly higher
+///    mean replaces the current best, so on ties the first one visited wins.
+/// 2. Keep every picked transcript whose mean is at least the 1001st highest
+///    mean (`coverages[max(0, n - 1001)]` in the sorted means), so up to 1001
+///    transcripts plus ties, not 1000.
+/// 3. For each, with the coverage reversed for minus-strand genes:
+///    5' bias = mean(first 100 bases) / mean, 3' bias = mean(last 100) / mean,
+///    5'-3' bias = mean(first 100) / mean(last 100). No value is filtered:
+///    a transcript with no coverage in either end gives 0/0 = NaN.
+/// 4. Report `StatUtils.percentile(values, 50)` of each list (Commons Math
+///    2.0, see [`commons_math_median`]).
+fn compute_bias(entries: &[TranscriptCoverageEntry], order: &[usize]) -> (f64, f64, f64) {
     use std::collections::HashMap;
 
-    // Step 1: Pick best transcript per gene (highest mean coverage).
-    // Qualimap selects one transcript per gene, then filters by length >= 500
-    // and mean >= 1.0, then takes the top 1000 by mean coverage.
-    // Java qualimap uses strict > with HashMap iteration order (effectively
-    // non-deterministic across JVM versions). We use >= so that when two
-    // transcripts tie, the later one in GTF order wins. This is deterministic
-    // within RustQC and closer to HashMap's overwrite-on-put semantics.
-    let mut best_per_gene: HashMap<u32, &TranscriptCoverageEntry> = HashMap::new();
-    for entry in entries {
+    // Step 1: best transcript per gene.
+    let mut best_per_gene: HashMap<u32, usize> = HashMap::new();
+    for &idx in order {
+        let entry = &entries[idx];
         if entry.coverage.len() < MIN_TRANSCRIPT_LENGTH_FOR_BIAS || entry.mean_coverage < 1.0 {
             continue;
         }
-        let gene = entry.gene_idx;
-        let dominated = match best_per_gene.get(&gene) {
+        let better = match best_per_gene.get(&entry.gene_idx) {
             None => true,
-            Some(best) => entry.mean_coverage >= best.mean_coverage,
+            Some(&best) => entry.mean_coverage > entries[best].mean_coverage,
         };
-        if dominated {
-            best_per_gene.insert(gene, entry);
+        if better {
+            best_per_gene.insert(entry.gene_idx, idx);
         }
     }
-
-    // Collect qualifying transcripts and sort by mean coverage descending
-    let mut qualifying: Vec<(f64, &TranscriptCoverageEntry)> = best_per_gene
-        .values()
-        .map(|e| (e.mean_coverage, *e))
-        .collect();
-
-    if qualifying.is_empty() {
+    if best_per_gene.is_empty() {
         return (f64::NAN, f64::NAN, f64::NAN);
     }
 
-    // Sort by mean coverage descending, take top N
-    qualifying.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    qualifying.truncate(NUM_TRANSCRIPTS_FOR_BIAS);
+    // Step 2: keep transcripts at or above the 1001st best mean coverage.
+    let mut means: Vec<f64> = best_per_gene
+        .values()
+        .map(|&i| entries[i].mean_coverage)
+        .collect();
+    means.sort_by(java_double_cmp);
+    let min_mean = means[means.len().saturating_sub(NUM_TRANSCRIPTS_FOR_BIAS + 1)];
 
-    let mut five_prime_biases = Vec::with_capacity(qualifying.len());
-    let mut three_prime_biases = Vec::with_capacity(qualifying.len());
-    let mut five_three_biases = Vec::with_capacity(qualifying.len());
+    let mut five_prime_biases = Vec::new();
+    let mut three_prime_biases = Vec::new();
+    let mut five_three_biases = Vec::new();
 
-    for (_, entry) in &qualifying {
-        let cov = &entry.coverage;
-        let len = cov.len();
-        if len < NUM_PRIME_BASES {
+    for &idx in best_per_gene.values() {
+        let entry = &entries[idx];
+        if entry.mean_coverage < min_mean {
             continue;
         }
-
-        // For negative strand, reverse the array conceptually
-        let (five_prime_sum, three_prime_sum, whole_sum) = if entry.strand == '-' {
-            // 5' end is at the END of the array for negative strand
-            let five_sum: f64 = cov[len - NUM_PRIME_BASES..].iter().map(|&v| v as f64).sum();
-            let three_sum: f64 = cov[..NUM_PRIME_BASES].iter().map(|&v| v as f64).sum();
-            let whole_sum: f64 = cov.iter().map(|&v| v as f64).sum();
-            (five_sum, three_sum, whole_sum)
-        } else {
-            let five_sum: f64 = cov[..NUM_PRIME_BASES].iter().map(|&v| v as f64).sum();
-            let three_sum: f64 = cov[len - NUM_PRIME_BASES..].iter().map(|&v| v as f64).sum();
-            let whole_sum: f64 = cov.iter().map(|&v| v as f64).sum();
-            (five_sum, three_sum, whole_sum)
+        let cov = &entry.coverage;
+        let len = cov.len();
+        // Picard's MathUtil.mean: sequential sum / count. For minus-strand
+        // genes the array is reversed, so the 5' end is at the end.
+        let mean_of = |range: std::ops::Range<usize>| -> f64 {
+            let n = range.len() as f64;
+            range.map(|i| cov[i] as f64).sum::<f64>() / n
         };
-
-        let five_mean = five_prime_sum / NUM_PRIME_BASES as f64;
-        let three_mean = three_prime_sum / NUM_PRIME_BASES as f64;
-        let whole_mean = whole_sum / len as f64;
+        let (five_mean, three_mean) = if entry.strand == '-' {
+            (
+                mean_of(len - NUM_PRIME_BASES..len),
+                mean_of(0..NUM_PRIME_BASES),
+            )
+        } else {
+            (
+                mean_of(0..NUM_PRIME_BASES),
+                mean_of(len - NUM_PRIME_BASES..len),
+            )
+        };
+        let whole_mean = mean_of(0..len);
 
         five_prime_biases.push(five_mean / whole_mean);
         three_prime_biases.push(three_mean / whole_mean);
-        // The 5'/3' ratio can be Infinity or NaN when three_mean == 0.
-        // Filter NaN values only (not Infinity) to match upstream qualimap
-        // behavior — Java's StatUtils.percentile handles Infinity correctly
-        // via Arrays.sort but NaN would produce meaningless results.
-        let ratio = five_mean / three_mean;
-        if !ratio.is_nan() {
-            five_three_biases.push(ratio);
-        }
+        five_three_biases.push(five_mean / three_mean);
     }
 
-    let five = median(&mut five_prime_biases);
-    let three = median(&mut three_prime_biases);
-    let five_three = median(&mut five_three_biases);
+    debug!(
+        "Qualimap 5'-3' bias: {} transcripts, {} with no coverage at either end (NaN)",
+        five_three_biases.len(),
+        five_three_biases.iter().filter(|v| v.is_nan()).count()
+    );
 
-    (five, three, five_three)
+    (
+        commons_math_median(&mut five_prime_biases),
+        commons_math_median(&mut three_prime_biases),
+        commons_math_median(&mut five_three_biases),
+    )
 }
 
-/// Compute the median of a slice of f64 values.
+/// Order doubles as Java's `Arrays.sort(double[])` does: NaN sorts after
+/// +Infinity (whatever its sign bit) and -0.0 before 0.0.
+fn java_double_cmp(a: &f64, b: &f64) -> std::cmp::Ordering {
+    match (a.is_nan(), b.is_nan()) {
+        (false, false) => a.total_cmp(b),
+        (a_nan, b_nan) => a_nan.cmp(&b_nan),
+    }
+}
+
+/// Commons Math 2.0 `StatUtils.percentile(values, 50)`, as Qualimap uses it.
 ///
-/// Qualimap uses Apache Commons Math 2.0 `StatUtils.percentile(array, 50)`,
-/// which filters NaN values and computes a standard median.
-fn median(values: &mut [f64]) -> f64 {
-    if values.is_empty() {
-        return f64::NAN;
+/// The values are sorted with `Arrays.sort` (NaN last, not removed), then
+/// `pos = p * (n + 1) / 100` is interpolated between its neighbours as
+/// `lower + (pos - floor(pos)) * (upper - lower)`.
+fn commons_math_median(values: &mut [f64]) -> f64 {
+    const P: f64 = 50.0;
+    let length = values.len();
+    match length {
+        0 => return f64::NAN,
+        1 => return values[0],
+        _ => {}
     }
-    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let n = values.len();
-    if n.is_multiple_of(2) {
-        (values[n / 2 - 1] + values[n / 2]) / 2.0
-    } else {
-        values[n / 2]
+    let n = length as f64;
+    let pos = P * (n + 1.0) / 100.0;
+    let fpos = pos.floor();
+    let int_pos = fpos as usize;
+    let dif = pos - fpos;
+    values.sort_by(java_double_cmp);
+    if pos < 1.0 {
+        return values[0];
     }
+    if pos >= n {
+        return values[length - 1];
+    }
+    let lower = values[int_pos - 1];
+    let upper = values[int_pos];
+    lower + dif * (upper - lower)
 }
 
 // ============================= Coverage Histogram ==============================
@@ -304,6 +267,8 @@ fn compute_mean_coverage_histogram(
 /// Write the coverage profile TSV file.
 ///
 /// Format: tab-separated, header line starting with `#`, 100 rows (0.0–99.0).
+/// Qualimap writes both columns by string concatenation, i.e. with
+/// `Double.toString` (`BamQCChart.exportData`).
 fn write_coverage_profile(profile: &[f64; NUM_BINS], path: &Path) -> Result<()> {
     use std::fs::File;
 
@@ -313,7 +278,12 @@ fn write_coverage_profile(profile: &[f64; NUM_BINS], path: &Path) -> Result<()> 
     writeln!(f, "#Transcript position\tTranscript coverage profile")?;
 
     for (i, &val) in profile.iter().enumerate() {
-        writeln!(f, "{:.1}\t{}", i as f64, val)?;
+        writeln!(
+            f,
+            "{}\t{}",
+            java_double_to_string(i as f64),
+            java_double_to_string(val)
+        )?;
     }
 
     Ok(())
@@ -434,7 +404,17 @@ pub fn write_qualimap_results(
     let high_profile = compute_coverage_profile(&high_entries);
 
     // --- Compute bias ---
-    let (five_bias, three_bias, five_three_bias) = compute_bias(&entries);
+    // TranscriptDataHandler.calculateCoverageBias returns early when no
+    // transcript received any coverage, leaving the three medians at 0.0.
+    let (five_bias, three_bias, five_three_bias) = if result
+        .transcript_coverage_raw
+        .num_transcripts_with_coverage()
+        == 0
+    {
+        (0.0, 0.0, 0.0)
+    } else {
+        compute_bias(&entries, &java_ordered_indices)
+    };
 
     // --- Compute mean coverage histogram ---
     let coverage_histogram = compute_mean_coverage_histogram(&entries);
@@ -550,6 +530,7 @@ pub fn write_qualimap_results(
         primary_alignments: result.primary_alignments,
         secondary_alignments: result.secondary_alignments,
         alignment_not_unique: result.alignment_not_unique,
+        seq_not_found: result.seq_not_found,
         exonic_reads: result.exonic_reads,
         ambiguous_reads: result.ambiguous_reads,
         no_feature: result.no_feature,
@@ -622,66 +603,62 @@ fn write_results_file(
         writeln!(
             f,
             "    reads aligned (left/right) = {} / {}",
-            format_with_commas(result.left_proper_in_pair),
-            format_with_commas(result.right_proper_in_pair)
+            format_long(result.left_proper_in_pair),
+            format_long(result.right_proper_in_pair)
         )?;
         writeln!(
             f,
             "    read pairs aligned  = {}",
-            format_with_commas(result.both_proper_in_pair / 2)
+            format_long(result.both_proper_in_pair / 2)
         )?;
     } else {
         writeln!(
             f,
             "    reads aligned  = {}",
-            format_with_commas(result.read_count)
+            format_long(result.primary_alignments)
         )?;
     }
     writeln!(
         f,
         "    total alignments = {}",
-        format_with_commas(result.primary_alignments + result.secondary_alignments)
+        format_long(result.primary_alignments + result.secondary_alignments)
     )?;
     writeln!(
         f,
         "    secondary alignments = {}",
-        format_with_commas(result.secondary_alignments)
+        format_long(result.secondary_alignments)
     )?;
     writeln!(
         f,
         "    non-unique alignments = {}",
-        format_with_commas(result.alignment_not_unique)
+        format_long(result.alignment_not_unique)
     )?;
     writeln!(
         f,
         "    aligned to genes  = {}",
-        format_with_commas(result.exonic_reads)
+        format_long(result.exonic_reads)
     )?;
     writeln!(
         f,
         "    ambiguous alignments = {}",
-        format_with_commas(result.ambiguous_reads)
+        format_long(result.ambiguous_reads)
     )?;
     writeln!(
         f,
         "    no feature assigned = {}",
-        format_with_commas(result.no_feature)
+        format_long(result.no_feature)
     )?;
-    writeln!(
-        f,
-        "    not aligned = {}",
-        format_with_commas(result.not_aligned)
-    )?;
+    writeln!(f, "    not aligned = {}", format_long(result.not_aligned))?;
 
-    // SSP estimation — only written when protocol was not pre-specified (unstranded)
-    // When the user specifies --stranded, Qualimap does not output this line.
+    // SSP estimation: only when the protocol is not strand-specific.
     if stranded == Strandedness::Unstranded {
-        let ssp_total = result.ssp_fwd + result.ssp_rev;
-        if ssp_total > 0 {
-            let fwd = result.ssp_fwd as f64 / ssp_total as f64;
-            let rev = result.ssp_rev as f64 / ssp_total as f64;
-            writeln!(f, "    SSP estimation (fwd/rev) = {:.2} / {:.2}", fwd, rev)?;
-        }
+        let (fwd, rev) = super::strand_estimation(result.ssp_fwd, result.ssp_rev);
+        writeln!(
+            f,
+            "    SSP estimation (fwd/rev) = {} / {}",
+            format_decimal(fwd),
+            format_decimal(rev)
+        )?;
     }
     writeln!(f)?;
     writeln!(f)?;
@@ -690,39 +667,19 @@ fn write_results_file(
     writeln!(f, ">>>>>>> Reads genomic origin")?;
     writeln!(f)?;
 
-    let total_classified = result.exonic_reads + result.intronic_reads + result.intergenic_reads;
-    if total_classified > 0 {
-        let exonic_pct = result.exonic_reads as f64 / total_classified as f64 * 100.0;
-        let intronic_pct = result.intronic_reads as f64 / total_classified as f64 * 100.0;
-        let intergenic_pct = result.intergenic_reads as f64 / total_classified as f64 * 100.0;
-
-        // overlapping exon percentage is relative to total classified
-        let overlapping_pct =
-            result.overlapping_exon_reads as f64 / total_classified as f64 * 100.0;
-
+    // Qualimap divides by exonic + "no feature" reads (RNASeqQCAnalysis.writeReport).
+    let total_reads = result.exonic_reads + result.no_feature;
+    for (label, count) in [
+        ("exonic = ", result.exonic_reads),
+        ("intronic =", result.intronic_reads),
+        ("intergenic =", result.intergenic_reads),
+        ("overlapping exon =", result.overlapping_exon_reads),
+    ] {
         writeln!(
             f,
-            "    exonic =  {} ({}%)",
-            format_with_commas(result.exonic_reads),
-            format_percentage(exonic_pct)
-        )?;
-        writeln!(
-            f,
-            "    intronic = {} ({}%)",
-            format_with_commas(result.intronic_reads),
-            format_percentage(intronic_pct)
-        )?;
-        writeln!(
-            f,
-            "    intergenic = {} ({}%)",
-            format_with_commas(result.intergenic_reads),
-            format_percentage(intergenic_pct)
-        )?;
-        writeln!(
-            f,
-            "    overlapping exon = {} ({}%)",
-            format_with_commas(result.overlapping_exon_reads),
-            format_percentage(overlapping_pct)
+            "    {label} {} ({})",
+            format_long(count),
+            format_percentage(percentage_of(count, total_reads))
         )?;
     }
     writeln!(f)?;
@@ -731,9 +688,9 @@ fn write_results_file(
     // >>>>>>> Transcript coverage profile
     writeln!(f, ">>>>>>> Transcript coverage profile")?;
     writeln!(f)?;
-    writeln!(f, "    5' bias = {}", format_bias(five_bias))?;
-    writeln!(f, "    3' bias = {}", format_bias(three_bias))?;
-    writeln!(f, "    5'-3' bias = {}", format_bias(five_three_bias))?;
+    writeln!(f, "    5' bias = {}", format_decimal(five_bias))?;
+    writeln!(f, "    3' bias = {}", format_decimal(three_bias))?;
+    writeln!(f, "    5'-3' bias = {}", format_decimal(five_three_bias))?;
     writeln!(f)?;
     writeln!(f)?;
 
@@ -743,25 +700,15 @@ fn write_results_file(
     writeln!(
         f,
         "    reads at junctions = {}",
-        format_with_commas(result.reads_at_junctions)
+        format_long(result.reads_at_junctions)
     )?;
     writeln!(f)?;
 
-    // Sort junction motifs by percentage descending
-    if result.reads_at_junctions > 0 {
-        let total_junctions = result.reads_at_junctions as f64;
-        let mut motif_pcts: Vec<(String, f64)> = result
-            .junction_motifs
-            .iter()
-            .map(|(motif, &count)| (motif.clone(), count as f64 * 100.0 / total_junctions))
-            .collect();
-        motif_pcts.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-        // Qualimap shows top 11 motifs (count <= 10 in their loop)
-        for (motif, pct) in motif_pcts.iter().take(11) {
-            // Match Java DecimalFormat("###.##"): trailing-zero trimming.
-            writeln!(f, "    {} : {}%", motif, format_bias(*pct))?;
-        }
+    // Junction motifs by percentage descending, ties broken by motif name
+    for (motif, pct) in
+        super::junction_motif_rows(&result.junction_motifs, result.reads_at_junctions)
+    {
+        writeln!(f, "    {} : {}", motif, format_percentage(pct))?;
     }
 
     Ok(())
@@ -938,37 +885,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_format_with_commas() {
-        assert_eq!(format_with_commas(0), "0");
-        assert_eq!(format_with_commas(999), "999");
-        assert_eq!(format_with_commas(1000), "1,000");
-        assert_eq!(format_with_commas(1234567), "1,234,567");
-        assert_eq!(format_with_commas(87559392), "87,559,392");
-    }
-
-    #[test]
-    fn test_format_percentage() {
-        assert_eq!(format_percentage(68.30), "68.3");
-        assert_eq!(format_percentage(29.69), "29.69");
-        assert_eq!(format_percentage(2.01), "2.01");
-        assert_eq!(format_percentage(9.31), "9.31");
-        assert_eq!(format_percentage(100.00), "100.0");
-    }
-
-    #[test]
-    fn test_format_bias() {
-        assert_eq!(format_bias(0.71), "0.71");
-        assert_eq!(format_bias(0.57), "0.57");
-        assert_eq!(format_bias(1.30), "1.3");
-        assert_eq!(format_bias(1.47), "1.47");
-        assert_eq!(format_bias(0.22), "0.22");
-    }
-
-    #[test]
-    fn test_median() {
-        assert_eq!(median(&mut [1.0, 3.0, 2.0]), 2.0);
-        assert_eq!(median(&mut [1.0, 2.0, 3.0, 4.0]), 2.5);
-        assert!(median(&mut []).is_nan());
+    fn test_commons_math_median() {
+        assert_eq!(commons_math_median(&mut [1.0, 3.0, 2.0]), 2.0);
+        assert_eq!(commons_math_median(&mut [1.0, 2.0, 3.0, 4.0]), 2.5);
+        assert_eq!(commons_math_median(&mut [7.0]), 7.0);
+        assert!(commons_math_median(&mut []).is_nan());
+        // NaN is kept and sorts last (whatever its sign), like Java's
+        // Arrays.sort, which moves the median up; +Infinity sorts before NaN.
+        assert_eq!(commons_math_median(&mut [f64::NAN, 1.0, 2.0, 3.0]), 2.5);
+        assert_eq!(
+            commons_math_median(&mut [-f64::NAN, f64::INFINITY, 1.0, 2.0]),
+            f64::INFINITY
+        );
+        // `lower + 0 * (NaN - lower)` is NaN, as in Java.
+        assert!(commons_math_median(&mut [f64::NAN, 1.0, 2.0]).is_nan());
     }
 
     /// Helper: build a single-transcript slice for compute_coverage_profile.
