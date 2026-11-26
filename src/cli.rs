@@ -155,6 +155,24 @@ pub struct RnaArgs {
     )]
     pub biotype_attribute: Option<String>,
 
+    /// featureCounts: count multi-mapping reads (like featureCounts -M)
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "RUSTQC_COUNT_MULTI_MAPPING",
+        help_heading = "General"
+    )]
+    pub count_multi_mapping: bool,
+
+    /// featureCounts: count reads for every overlapping feature (like -O)
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "RUSTQC_COUNT_MULTI_OVERLAPPING",
+        help_heading = "General"
+    )]
+    pub count_multi_overlapping: bool,
+
     /// Skip duplicate-marking check
     #[arg(
         long,
@@ -367,6 +385,24 @@ pub struct RnaArgs {
         help_heading = "Tool parameters"
     )]
     pub preseq_seg_len: Option<i64>,
+
+    /// split_bam: BED12 of regions (e.g. rRNA) to classify reads against
+    #[arg(
+        long = "split-bam-bed",
+        value_name = "BED",
+        env = "RUSTQC_SPLIT_BAM_BED",
+        help_heading = "Tool parameters"
+    )]
+    pub split_bam_bed: Option<String>,
+
+    /// split_bam: also write .in/.ex/.junk BAMs (extra pass)
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "RUSTQC_SPLIT_BAM_WRITE_BAMS",
+        help_heading = "Tool parameters"
+    )]
+    pub split_bam_write_bams: bool,
 }
 
 /// Parse command-line arguments and return the Cli struct.
@@ -412,6 +448,10 @@ mod tests {
                 assert_eq!(args.infer_experiment_sample_size, None);
                 assert_eq!(args.min_intron, None);
                 assert_eq!(args.inner_distance_step, None);
+                assert_eq!(args.split_bam_bed, None);
+                assert!(!args.count_multi_mapping);
+                assert!(!args.count_multi_overlapping);
+                assert!(!args.split_bam_write_bams);
             }
             #[allow(unreachable_patterns)]
             _ => panic!("Expected Rna subcommand"),

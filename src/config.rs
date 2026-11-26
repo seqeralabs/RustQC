@@ -165,6 +165,10 @@ pub struct RnaConfig {
     /// Qualimap RNA-Seq QC configuration.
     #[serde(default)]
     pub qualimap: QualimapConfig,
+
+    /// split_bam (RSeQC `split_bam.py`) BED region classification configuration.
+    #[serde(default)]
+    pub split_bam: SplitBamConfig,
 }
 
 // ============================================================================
@@ -245,6 +249,8 @@ impl Default for DupradarConfig {
 ///   biotype_counts_mqc: true
 ///   biotype_rrna_mqc: true
 ///   biotype_attribute: "gene_biotype"
+///   count_multi_mapping: false
+///   count_multi_overlapping: false
 /// ```
 #[derive(Debug, Deserialize)]
 #[serde(default)]
@@ -275,6 +281,24 @@ pub struct FeatureCountsConfig {
     /// Defaults to `"gene_biotype"` (Ensembl convention).
     /// Use `"gene_type"` for GENCODE GTF files.
     pub biotype_attribute: String,
+
+    /// Count multi-mapping reads, like `featureCounts -M`.
+    ///
+    /// By default reads with `NH` > 1 are reported as `Unassigned_MultiMapping`.
+    /// When enabled, every reported alignment of a multi-mapping read is
+    /// counted. Applies to gene- and biotype-level counts, not dupRadar.
+    /// The CLI `-M` flag enables it regardless of this setting.
+    /// **Default:** `false`.
+    pub count_multi_mapping: bool,
+
+    /// Assign reads to every overlapping feature, like `featureCounts -O`.
+    ///
+    /// By default a read overlapping several genes (or biotypes) is reported
+    /// as `Unassigned_Ambiguity`. When enabled it is Assigned and counted once
+    /// for every overlapping feature.
+    /// The CLI `-O` flag enables it regardless of this setting.
+    /// **Default:** `false`.
+    pub count_multi_overlapping: bool,
 }
 
 impl Default for FeatureCountsConfig {
@@ -287,6 +311,8 @@ impl Default for FeatureCountsConfig {
             biotype_counts_mqc: true,
             biotype_rrna_mqc: true,
             biotype_attribute: "gene_biotype".to_string(),
+            count_multi_mapping: false,
+            count_multi_overlapping: false,
         }
     }
 }
@@ -572,6 +598,53 @@ impl Default for TinConfig {
             min_coverage: None,
             seed: None,
         }
+    }
+}
+
+/// Configuration for split_bam (RSeQC `split_bam.py`) BED region classification.
+///
+/// Classifies every alignment as inside (`in`) or outside (`ex`) the regions of
+/// a BED12 file, or as `junk` (QC-failed / unmapped). Typically used with an
+/// rRNA BED file to quantify rRNA contamination. Only runs when a BED file is
+/// given, here or via `--split-bam-bed`.
+///
+/// Example:
+/// ```yaml
+/// split_bam:
+///   enabled: true
+///   bed: /refs/hg38_rRNA.bed
+///   write_bams: false
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct SplitBamConfig {
+    /// Whether to run split_bam when a BED file is set. Defaults to true.
+    pub enabled: bool,
+    /// BED file of regions (BED12, plain or gzip-compressed).
+    ///
+    /// The CLI `--split-bam-bed` flag takes precedence over this setting.
+    pub bed: Option<String>,
+    /// Also write `<sample>.in.bam`, `<sample>.ex.bam` and `<sample>.junk.bam`.
+    ///
+    /// Requires one extra sequential read of each alignment file.
+    /// **Default:** `false`.
+    pub write_bams: bool,
+}
+
+impl Default for SplitBamConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            bed: None,
+            write_bams: false,
+        }
+    }
+}
+
+impl SplitBamConfig {
+    /// The BED path to use, or `None` when split_bam should not run.
+    pub fn active_bed(&self) -> Option<&str> {
+        self.bed.as_deref().filter(|_| self.enabled)
     }
 }
 
@@ -900,6 +973,7 @@ impl RnaConfig {
             || self.junction_saturation.enabled
             || self.inner_distance.enabled
             || self.tin.enabled
+            || self.split_bam.active_bed().is_some()
     }
 
     /// Returns true if any samtools-compatible output is enabled.
@@ -913,6 +987,24 @@ mod tests {
     use super::*;
 
     // --- Tests for the top-level Config (rna: wrapper) ---
+
+    #[test]
+    fn test_split_bam_config() {
+        let default = RnaConfig::default();
+        assert!(default.split_bam.enabled);
+        assert!(!default.split_bam.write_bams);
+        assert_eq!(default.split_bam.active_bed(), None);
+
+        let yaml = "rna:\n  split_bam:\n    bed: rrna.bed\n    write_bams: true\n";
+        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        assert_eq!(config.rna.split_bam.active_bed(), Some("rrna.bed"));
+        assert!(config.rna.split_bam.write_bams);
+        assert!(config.rna.any_rseqc_output());
+
+        let yaml = "rna:\n  split_bam:\n    enabled: false\n    bed: rrna.bed\n";
+        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        assert_eq!(config.rna.split_bam.active_bed(), None);
+    }
 
     #[test]
     fn test_top_level_rna_wrapper() {

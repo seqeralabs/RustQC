@@ -24,6 +24,7 @@ use super::junction_annotation::{Junction, JunctionClass, JunctionResults};
 use super::junction_saturation::SaturationResult;
 use super::read_distribution::{ChromIntervals, ReadDistributionResult, RegionSets};
 use super::read_duplication::ReadDuplicationResult;
+use super::split_bam::{SplitBamAccum, SplitBamLookup};
 use super::tin::TinAccum;
 use crate::rna::preseq::PreseqAccum;
 
@@ -50,6 +51,8 @@ pub struct RseqcAnnotations<'a> {
 
     /// TIN index for transcript integrity number calculation.
     pub tin_index: Option<&'a super::tin::TinIndex>,
+    /// Per-target BED blocks for split_bam (built per alignment file).
+    pub split_bam: Option<&'a SplitBamLookup<'a>>,
 }
 
 /// Per-tool configuration parameters.
@@ -110,6 +113,8 @@ pub struct RseqcConfig {
     pub preseq_enabled: bool,
     /// Maximum merged PE fragment length for preseq (preseq's `-seg_len`).
     pub preseq_max_segment_length: i64,
+    /// Whether split_bam BED classification is enabled.
+    pub split_bam_enabled: bool,
 }
 
 // ===================================================================
@@ -2123,6 +2128,8 @@ pub struct RseqcAccumulators {
     pub tin: Option<TinAccum>,
     /// preseq library complexity accumulator (`None` when disabled).
     pub preseq: Option<PreseqAccum>,
+    /// split_bam accumulator (`None` when disabled).
+    pub split_bam: Option<SplitBamAccum>,
 }
 
 impl RseqcAccumulators {
@@ -2138,6 +2145,7 @@ impl RseqcAccumulators {
             inner_dist: None,
             tin: None,
             preseq: None,
+            split_bam: None,
         }
     }
 
@@ -2193,6 +2201,11 @@ impl RseqcAccumulators {
             },
             preseq: if config.preseq_enabled {
                 Some(PreseqAccum::new(config.preseq_max_segment_length))
+            } else {
+                None
+            },
+            split_bam: if config.split_bam_enabled {
+                Some(SplitBamAccum::default())
             } else {
                 None
             },
@@ -2283,6 +2296,13 @@ impl RseqcAccumulators {
         if let Some(ref mut accum) = self.preseq {
             accum.process_read(record);
         }
+
+        // split_bam: classifies EVERY record (incl. unmapped, QC-fail,
+        // secondary, supplementary), keyed by the alignment's own tid so BED
+        // names match alignment names, not GTF-mapped names (as RSeQC does).
+        if let (Some(ref mut accum), Some(lookup)) = (&mut self.split_bam, annotations.split_bam) {
+            accum.process_read(record, lookup);
+        }
     }
 
     /// Merge another set of accumulators into this one.
@@ -2312,6 +2332,9 @@ impl RseqcAccumulators {
             a.merge(b);
         }
         if let (Some(ref mut a), Some(b)) = (&mut self.preseq, other.preseq) {
+            a.merge(b);
+        }
+        if let (Some(ref mut a), Some(b)) = (&mut self.split_bam, other.split_bam) {
             a.merge(b);
         }
     }

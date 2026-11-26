@@ -115,6 +115,55 @@ The biotype is extracted from the GTF attribute specified by `biotype_attribute`
 - `<sample>.biotype_counts_mqc.tsv` -- Biotype counts formatted as a MultiQC bargraph data file, suitable for visualizing the distribution of reads across biotypes.
 - `<sample>.biotype_counts_rrna_mqc.tsv` -- rRNA percentage formatted as a MultiQC general statistics value, reporting the fraction of assigned reads mapping to rRNA genes.
 
+## Multi-mapping and multi-overlapping reads
+
+By default RustQC follows featureCounts' defaults: multi-mapping reads (`NH` > 1)
+are reported as `Unassigned_MultiMapping`, and reads overlapping several features
+are reported as `Unassigned_Ambiguity`. Two flags change this, with the same
+meaning as in featureCounts:
+
+| Flag                        | Config key                              | featureCounts | Effect                                                                    |
+| --------------------------- | --------------------------------------- | ------------- | ------------------------------------------------------------------------- |
+| `--count-multi-mapping`     | `featurecounts.count_multi_mapping`     | `-M`          | Count every reported alignment of multi-mapping reads                      |
+| `--count-multi-overlapping` | `featurecounts.count_multi_overlapping` | `-O`          | Assign a read to every feature (gene or biotype) it overlaps              |
+
+Both apply to the gene-level counts and summary and to the biotype-level counts,
+summary and MultiQC files. dupRadar results are unchanged. Like featureCounts
+`-O`, `--count-multi-overlapping` reports a read as Assigned once in the
+summary but adds it to the count of every overlapping feature.
+
+On the small dataset (~52K reads), the gene and biotype summaries and every
+gene and biotype count match Subread featureCounts v2.1.1
+(`-p -B -C -s 2 -t exon`) for `-M`, `-O` and `-M -O`:
+
+| Mode     | Assigned | Unassigned_MultiMapping | Unassigned_NoFeatures | Unassigned_Ambiguity |
+| -------- | -------: | ----------------------: | --------------------: | -------------------: |
+| default  |   42,173 |                   5,496 |                 2,645 |                2,525 |
+| `-M`     |   46,885 |                       0 |                 2,719 |                3,235 |
+| `-O`     |   44,698 |                   5,496 |                 2,645 |                    0 |
+| `-M -O`  |   50,120 |                       0 |                 2,719 |                    0 |
+
+## rRNA and biotype counts
+
+<Aside type="caution" title="Biotype rRNA % can under-report rRNA">
+  The biotype rRNA percentage only counts reads assigned to genes whose biotype
+  is exactly `rRNA`. On a stock human GRCh38 build with GENCODE or Ensembl
+  annotation it can read close to 0% even when a sample has substantial rRNA,
+  for two reasons:
+
+  - The 45S rDNA repeat (18S, 5.8S and 28S rRNA) sits on the unassembled
+    acrocentric short arms and is essentially absent from the gene annotation.
+    Reads from it are `Unassigned_NoFeatures`, or land on unannotated contigs.
+  - rRNA comes from high-copy repeats, so most rRNA reads multi-map and are
+    dropped as `Unassigned_MultiMapping` unless `--count-multi-mapping` is used.
+
+  For a reliable rRNA measure, use [split_bam](../rseqc/#split_bam) with an rRNA
+  BED file. It counts alignments by position rather than gene assignment, so it
+  includes multi-mappers and regions the GTF does not annotate.
+  `--count-multi-mapping` / `--count-multi-overlapping` only help for rRNA
+  genes that the GTF does annotate.
+</Aside>
+
 ## Biotype attribute detection
 
 RustQC auto-detects whether your GTF uses `gene_biotype` (Ensembl) or `gene_type` (GENCODE). You can override this with `--biotype-attribute`. See the [CLI reference](../usage/cli-reference/) for details.

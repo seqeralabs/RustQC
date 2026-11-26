@@ -1026,3 +1026,155 @@ fn test_dup_check_parallel_uses_global_duplicate_state() {
 
     let _ = fs::remove_dir_all(root);
 }
+
+// ===================================================================
+// split_bam — parity with RSeQC 5.0.4 split_bam.py
+// ===================================================================
+//
+// tests/expected/split_bam/ holds the real split_bam.py output for the
+// tests/data/split_bam_test.{bam,bed} fixture; regenerate both with
+// tests/create_split_bam_test_data.sh.
+
+const SPLIT_BAM_FIXTURE: &str = "tests/data/split_bam_test.bam";
+const SPLIT_BAM_BED: &str = "tests/data/split_bam_test.bed";
+const SPLIT_BAM_EXPECTED: &str = "tests/expected/split_bam";
+
+/// Run rustqc on the split_bam fixture with the given extra arguments.
+fn run_split_bam(outdir: &Path, extra: &[&str]) -> std::process::Output {
+    let mut args = vec![
+        "rna",
+        SPLIT_BAM_FIXTURE,
+        "--gtf",
+        "tests/data/test.gtf",
+        "--skip-dup-check",
+        "--outdir",
+        outdir.to_str().unwrap(),
+    ];
+    args.extend_from_slice(extra);
+    Command::new(rustqc_binary())
+        .args(&args)
+        .output()
+        .expect("Failed to execute rustqc")
+}
+
+/// Read a BAM's header text and all records.
+fn read_bam(path: &Path) -> (Vec<u8>, Vec<bam::Record>) {
+    use rust_htslib::bam::Read;
+    let mut reader = bam::Reader::from_path(path)
+        .unwrap_or_else(|e| panic!("cannot open {}: {e}", path.display()));
+    let header = reader.header().as_bytes().to_vec();
+    let records = reader.records().map(|r| r.unwrap()).collect();
+    (header, records)
+}
+
+/// Assert the split_bam summary is byte-identical to RSeQC's stdout.
+fn assert_split_bam_stats_match(split_dir: &Path) {
+    let got = fs::read_to_string(split_dir.join("split_bam_test.split_bam.txt"))
+        .expect("split_bam summary not written");
+    let expected =
+        fs::read_to_string(Path::new(SPLIT_BAM_EXPECTED).join("split_bam_test.split_bam.txt"))
+            .unwrap();
+    assert_eq!(got, expected, "split_bam summary differs from RSeQC");
+}
+
+/// Counts and the three BAMs must equal RSeQC's, record for record and in
+/// order, on both the sequential (-t 1) and parallel indexed (-t 2) paths.
+#[test]
+fn test_split_bam_matches_rseqc() {
+    for threads in ["1", "2"] {
+        let root = unique_test_dir(&format!("split-bam-t{threads}"));
+        let output = run_split_bam(
+            &root,
+            &[
+                "--split-bam-bed",
+                SPLIT_BAM_BED,
+                "--split-bam-write-bams",
+                "--threads",
+                threads,
+            ],
+        );
+        assert!(
+            output.status.success(),
+            "rustqc failed (-t {threads}):\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let split_dir = root.join("rseqc").join("split_bam");
+        assert_split_bam_stats_match(&split_dir);
+
+        for class in ["in", "ex", "junk"] {
+            let name = format!("split_bam_test.{class}.bam");
+            let (got_header, got) = read_bam(&split_dir.join(&name));
+            let (exp_header, expected) = read_bam(&Path::new(SPLIT_BAM_EXPECTED).join(&name));
+            assert_eq!(
+                got_header, exp_header,
+                "{name} header differs (-t {threads})"
+            );
+            assert_eq!(
+                got.len(),
+                expected.len(),
+                "{name} record count differs (-t {threads})"
+            );
+            for (i, (g, e)) in got.iter().zip(expected.iter()).enumerate() {
+                assert!(
+                    g == e,
+                    "{name} record {i} differs (-t {threads}): got {}, expected {}",
+                    String::from_utf8_lossy(g.qname()),
+                    String::from_utf8_lossy(e.qname())
+                );
+            }
+        }
+        let _ = fs::remove_dir_all(root);
+    }
+}
+
+/// Config-file activation, no BAMs by default, and BED names matched against
+/// alignment names even when a GTF chromosome mapping renames a contig
+/// (chr2 → gtf_chr2 for GTF lookups; the BED's chr2 blocks must still apply).
+#[test]
+fn test_split_bam_config_and_counts_only() {
+    let root = unique_test_dir("split-bam-config");
+    let config_path = root.join("rustqc.yml");
+    fs::write(
+        &config_path,
+        format!(
+            "rna:\n  chromosome_mapping:\n    gtf_chr2: chr2\n  split_bam:\n    bed: {}\n",
+            fs::canonicalize(SPLIT_BAM_BED).unwrap().display()
+        ),
+    )
+    .unwrap();
+    let outdir = root.join("out");
+    let output = run_split_bam(&outdir, &["-c", config_path.to_str().unwrap()]);
+    assert!(
+        output.status.success(),
+        "rustqc failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let split_dir = outdir.join("rseqc").join("split_bam");
+    assert_split_bam_stats_match(&split_dir);
+    for class in ["in", "ex", "junk"] {
+        assert!(
+            !split_dir
+                .join(format!("split_bam_test.{class}.bam"))
+                .exists(),
+            "{class}.bam must not be written unless requested"
+        );
+    }
+    let _ = fs::remove_dir_all(root);
+}
+
+/// split_bam stays off when no BED file is configured.
+#[test]
+fn test_split_bam_off_without_bed() {
+    let root = unique_test_dir("split-bam-off");
+    let output = run_split_bam(&root, &[]);
+    assert!(
+        output.status.success(),
+        "rustqc failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !root.join("rseqc").join("split_bam").exists(),
+        "split_bam output written without a BED file"
+    );
+    let _ = fs::remove_dir_all(root);
+}
