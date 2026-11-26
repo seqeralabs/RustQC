@@ -105,8 +105,10 @@ struct TranscriptCoverageEntry {
     strand: char,
     /// Gene index for best-per-gene selection.
     gene_idx: u32,
-    /// Flat transcript index (for diagnostics).
-    #[allow(dead_code)]
+    /// Flat transcript index, assigned in GTF order.
+    ///
+    /// Used as the deterministic tie-breaker when ranking transcripts by mean
+    /// coverage in [`compute_bias`].
     flat_idx: u32,
 }
 
@@ -202,8 +204,17 @@ fn compute_bias(entries: &[TranscriptCoverageEntry]) -> (f64, f64, f64) {
         return (f64::NAN, f64::NAN, f64::NAN);
     }
 
-    // Sort by mean coverage descending, take top N
-    qualifying.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    // Sort by mean coverage descending, take top N.
+    // `best_per_gene` is a HashMap and `sort_by` is stable, so without a
+    // tie-breaker the transcripts that survive `truncate` at the 1000-entry
+    // boundary would depend on HashMap iteration order — and with them the
+    // reported bias values. Tie-break on the transcript's flat index, which is
+    // assigned in GTF order and is therefore stable across runs.
+    qualifying.sort_by(|a, b| {
+        b.0.partial_cmp(&a.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.1.flat_idx.cmp(&b.1.flat_idx))
+    });
     qualifying.truncate(NUM_TRANSCRIPTS_FOR_BIAS);
 
     let mut five_prime_biases = Vec::with_capacity(qualifying.len());
@@ -755,7 +766,14 @@ fn write_results_file(
             .iter()
             .map(|(motif, &count)| (motif.clone(), count as f64 * 100.0 / total_junctions))
             .collect();
-        motif_pcts.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        // `junction_motifs` is a HashMap and many 4-mers tie at the same
+        // percentage, so tie-break on the motif to keep the top-11 list (and
+        // its order) identical across runs.
+        motif_pcts.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.0.cmp(&b.0))
+        });
 
         // Qualimap shows top 11 motifs (count <= 10 in their loop)
         for (motif, pct) in motif_pcts.iter().take(11) {
