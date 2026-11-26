@@ -33,6 +33,9 @@ pub struct Exon {
 pub struct Transcript {
     /// Transcript identifier (from transcript_id attribute)
     pub transcript_id: String,
+    /// Whether the GTF gave a `transcript_id`. Features without one are grouped
+    /// per gene under a synthetic `{gene_id}__no_tx` identifier.
+    pub has_transcript_id: bool,
     /// Chromosome/contig name
     pub chrom: String,
     /// Transcript start (minimum of all exon starts, 1-based inclusive)
@@ -43,6 +46,11 @@ pub struct Transcript {
     pub strand: char,
     /// Sorted exon blocks as (start, end) pairs (1-based inclusive)
     pub exons: Vec<(u64, u64)>,
+    /// Start of the transcript's first `exon` line in file order (1-based).
+    ///
+    /// nf-core's `gtf2bed` sorts its BED rows by this value (not by the
+    /// lowest exon start), so tools that follow the BED's row order need it.
+    pub first_exon_start: u64,
     /// CDS start (minimum of all CDS feature starts, 1-based inclusive).
     /// `None` for non-coding transcripts.
     pub cds_start: Option<u64>,
@@ -143,6 +151,8 @@ fn compute_non_overlapping_length(exons: &[Exon]) -> u64 {
 struct TranscriptBuilder {
     /// Transcript identifier
     transcript_id: String,
+    /// Whether the identifier came from a `transcript_id` attribute
+    has_transcript_id: bool,
     /// Chromosome (from first exon)
     chrom: String,
     /// Strand (from first exon)
@@ -267,12 +277,14 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
 
         // Accumulate transcript-level data for both exon and CDS features.
         // Features without transcript_id are grouped under a synthetic key.
-        let transcript_id = get_attribute(attr_str, "transcript_id")
-            .unwrap_or_else(|| format!("{}__no_tx", gene_id));
+        let given_transcript_id = get_attribute(attr_str, "transcript_id");
+        let has_transcript_id = given_transcript_id.is_some();
+        let transcript_id = given_transcript_id.unwrap_or_else(|| format!("{}__no_tx", gene_id));
 
         let key = (gene_id.clone(), transcript_id.clone());
         let builder = tx_builders.entry(key).or_insert_with(|| TranscriptBuilder {
             transcript_id,
+            has_transcript_id,
             chrom: chrom.clone(),
             strand,
             exons: Vec::new(),
@@ -305,6 +317,9 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
         if builder.exons.is_empty() {
             continue;
         }
+
+        // Remember the first exon line before sorting (gtf2bed's sort key).
+        let first_exon_start = builder.exons[0].0;
 
         // Sort exon blocks by start position
         builder.exons.sort_unstable();
@@ -377,11 +392,13 @@ pub fn parse_gtf(path: &str, extra_attributes: &[String]) -> Result<IndexMap<Str
 
         let transcript = Transcript {
             transcript_id: builder.transcript_id,
+            has_transcript_id: builder.has_transcript_id,
             chrom: builder.chrom,
             start: tx_start,
             end: tx_end,
             strand: builder.strand,
             exons: builder.exons,
+            first_exon_start,
             cds_start,
             cds_end,
         };
@@ -573,6 +590,23 @@ chr1\ttest\tstop_codon\t381\t383\t.\t+\t.\tgene_id \"G1\"; transcript_id \"T1\";
         assert_eq!(t2.end, 250);
         assert_eq!(t2.cds_start, None); // non-coding
         assert_eq!(t2.cds_end, None);
+    }
+
+    #[test]
+    fn test_parse_gtf_first_exon_start() {
+        // Minus-strand transcripts list exons 5' to 3', so the first exon
+        // line is the highest one; gtf2bed sorts by it.
+        let (path, _f) = write_temp_gtf(
+            "\
+chr1\ttest\texon\t900\t1000\t.\t-\t.\tgene_id \"G1\"; transcript_id \"T1\";\n\
+chr1\ttest\texon\t100\t200\t.\t-\t.\tgene_id \"G1\"; transcript_id \"T1\";\n",
+        );
+
+        let genes = parse_gtf(path.to_str().unwrap(), &[]).unwrap();
+        let tx = &genes["G1"].transcripts[0];
+        assert_eq!(tx.exons, vec![(100, 200), (900, 1000)]);
+        assert_eq!(tx.start, 100);
+        assert_eq!(tx.first_exon_start, 900);
     }
 
     #[test]

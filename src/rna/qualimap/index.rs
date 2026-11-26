@@ -524,10 +524,12 @@ mod tests {
         let end = exons.iter().map(|(_, e)| *e).max().unwrap_or(1);
         Transcript {
             transcript_id: tx_id.to_string(),
+            has_transcript_id: true,
             chrom: chrom.to_string(),
             start,
             end,
             strand,
+            first_exon_start: start,
             exons,
             cds_start: None,
             cds_end: None,

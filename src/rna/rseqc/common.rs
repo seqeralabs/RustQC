@@ -291,12 +291,14 @@ mod tests {
         // Introns: [200, 300) and [400, 500)
         let tx = Transcript {
             transcript_id: "TX1".to_string(),
+            has_transcript_id: true,
 
             chrom: "chr1".to_string(),
             start: 101,
             end: 600,
             strand: '+',
             exons: vec![(101, 200), (301, 400), (501, 600)],
+            first_exon_start: 101,
             cds_start: None,
             cds_end: None,
         };
@@ -323,12 +325,14 @@ mod tests {
     fn test_build_known_junctions_from_genes() {
         let tx = Transcript {
             transcript_id: "TX1".to_string(),
+            has_transcript_id: true,
 
             chrom: "chr1".to_string(),
             start: 101,
             end: 600,
             strand: '+',
             exons: vec![(101, 200), (301, 400), (501, 600)],
+            first_exon_start: 101,
             cds_start: None,
             cds_end: None,
         };
@@ -348,12 +352,14 @@ mod tests {
     fn test_build_junctions_skips_single_exon() {
         let tx = Transcript {
             transcript_id: "TX1".to_string(),
+            has_transcript_id: true,
 
             chrom: "chr1".to_string(),
             start: 101,
             end: 200,
             strand: '+',
             exons: vec![(101, 200)],
+            first_exon_start: 101,
             cds_start: None,
             cds_end: None,
         };
@@ -374,24 +380,28 @@ mod tests {
         // Two transcripts with different splicing patterns
         let tx1 = Transcript {
             transcript_id: "TX1".to_string(),
+            has_transcript_id: true,
 
             chrom: "chr1".to_string(),
             start: 101,
             end: 600,
             strand: '+',
             exons: vec![(101, 200), (301, 600)],
+            first_exon_start: 101,
             cds_start: None,
             cds_end: None,
         };
 
         let tx2 = Transcript {
             transcript_id: "TX2".to_string(),
+            has_transcript_id: true,
 
             chrom: "chr1".to_string(),
             start: 101,
             end: 600,
             strand: '+',
             exons: vec![(101, 250), (401, 600)],
+            first_exon_start: 101,
             cds_start: None,
             cds_end: None,
         };
