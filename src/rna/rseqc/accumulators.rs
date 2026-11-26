@@ -1640,10 +1640,20 @@ fn classify_junction(
 /// Uses hashed `u64` keys instead of heap-allocated Strings to reduce memory
 /// from ~25 bytes/observation to 8 bytes/observation. The hash function is
 /// the same `SipHash` used for read_duplication sequence dedup.
+///
+/// The observation list is shuffled before sampling, so its order must not
+/// depend on the thread count. It is kept in BAM record order (then intron
+/// order within each read), which is also RSeQC's order. Observations are
+/// therefore kept in per-chromosome segments, in the order the records were
+/// read. A worker reads each chromosome in one contiguous `fetch`, and
+/// [`merge`](Self::merge) sorts the segments by reference ID, which is file
+/// order for a coordinate-sorted (indexed) BAM, whatever the thread count.
+/// The sequential path never merges, so it keeps file order for any BAM.
 #[derive(Debug, Default)]
 pub struct JuncSatAccum {
-    /// All junction observation keys (hashed `"CHROM:start-end"`).
-    pub observations: Vec<u64>,
+    /// Junction observation keys (hashed `"CHROM:start-end"`), grouped in
+    /// runs of consecutive records with the same reference ID.
+    segments: Vec<(i32, Vec<u64>)>,
     /// String keys corresponding to each hash, for the known_junctions lookup
     /// during into_result(). Stored as `(hash, string)` only for unique junctions.
     unique_keys: HashMap<u64, String>,
@@ -1690,18 +1700,30 @@ impl JuncSatAccum {
             if iend - istart < min_intron {
                 continue;
             }
-            let h = hash_junction_key(chrom_upper, istart, iend);
-            self.observations.push(h);
-            // Track the string key only for the first occurrence of each hash
-            self.unique_keys
-                .entry(h)
-                .or_insert_with(|| format!("{}:{}-{}", chrom_upper, istart, iend));
+            self.push_observation(record.tid(), chrom_upper, istart, iend);
         }
     }
 
+    /// Append one junction observation from a record on reference `tid`.
+    fn push_observation(&mut self, tid: i32, chrom_upper: &str, istart: u64, iend: u64) {
+        let h = hash_junction_key(chrom_upper, istart, iend);
+        match self.segments.last_mut() {
+            Some((seg_tid, obs)) if *seg_tid == tid => obs.push(h),
+            _ => self.segments.push((tid, vec![h])),
+        }
+        // Track the string key only for the first occurrence of each hash
+        self.unique_keys
+            .entry(h)
+            .or_insert_with(|| format!("{}:{}-{}", chrom_upper, istart, iend));
+    }
+
     /// Merge another accumulator into this one.
+    ///
+    /// Segments are stably sorted by reference ID, so the merged order is the
+    /// BAM file order no matter how chromosomes were split between workers.
     pub fn merge(&mut self, other: JuncSatAccum) {
-        self.observations.extend(other.observations);
+        self.segments.extend(other.segments);
+        self.segments.sort_by_key(|(tid, _)| *tid);
         // Merge unique key maps (first writer wins — all map to the same string)
         for (h, key) in other.unique_keys {
             self.unique_keys.entry(h).or_insert(key);
@@ -2548,15 +2570,25 @@ impl JuncAnnotAccum {
 impl JuncSatAccum {
     /// Post-process accumulated observations into a `SaturationResult`.
     ///
-    /// Performs the shuffle (Phase 2) and incremental subsampling (Phase 3)
-    /// that were previously done in the standalone `junction_saturation()` function.
+    /// Follows RSeQC's `ParseBAM.saturation_junction()`, except that the shuffle
+    /// uses RustQC's own seeded RNG, so the intermediate points are
+    /// reproducible but do not match RSeQC's (unseeded) random draws. The
+    /// x-axis values and the 100% point are deterministic and match RSeQC:
     ///
-    /// Uses incremental known/novel counting: instead of iterating all unique
-    /// junctions at each percentage step (O(U*P)), maintains running counters
-    /// updated only when new unique junctions first appear or cross the
-    /// min_coverage threshold.
+    /// 1. Drop observations on chromosomes without an annotated transcript
+    ///    (RSeQC skips reads whose chromosome is not in the BED gene model).
+    /// 2. Shuffle the observations (in BAM file order) with a seeded ChaCha8 RNG.
+    /// 3. For each sampling percentage `p` in
+    ///    `range(sample_start, sample_end, sample_step) + [100]`, add the
+    ///    observations from `int(N * ((p - sample_step) / 100.0))` (clamped
+    ///    to 0) to `int(N * (p / 100.0))` to the running junction counts,
+    ///    using the same floating-point index arithmetic. The windows can
+    ///    overlap or leave gaps for some parameter combinations, as in RSeQC.
+    ///
+    /// Known/novel/all junction counts are maintained incrementally instead
+    /// of re-scanning all unique junctions at every sampling step.
     pub fn into_result(
-        mut self,
+        self,
         known_junctions: &KnownJunctionSet,
         sample_start: u32,
         sample_end: u32,
@@ -2564,65 +2596,67 @@ impl JuncSatAccum {
         min_coverage: u32,
         seed: u64,
     ) -> SaturationResult {
-        use rand::seq::SliceRandom;
-        use rand::SeedableRng;
-        use rand_chacha::ChaCha8Rng;
+        // Hashes of known junctions, and of junctions on annotated chromosomes.
+        let mut known_hashes: HashSet<u64> = HashSet::new();
+        let mut kept_hashes: HashSet<u64> = HashSet::new();
+        for (&h, key) in &self.unique_keys {
+            if known_junctions.junctions.contains(key) {
+                known_hashes.insert(h);
+            }
+            let chrom = key.rsplit_once(':').map_or(key.as_str(), |(c, _)| c);
+            if known_junctions.chroms.contains(chrom) {
+                kept_hashes.insert(h);
+            }
+        }
 
-        // Pre-build a HashSet<u64> from known_junctions for O(1) hash-based lookup
-        let known_hashes: HashSet<u64> = self
-            .unique_keys
-            .iter()
-            .filter(|(_, key)| known_junctions.junctions.contains(*key))
-            .map(|(&h, _)| h)
+        // Phase 1: the observation list in RSeQC's order (BAM file order).
+        let mut observations: Vec<u64> = self
+            .segments
+            .into_iter()
+            .flat_map(|(_, obs)| obs)
+            .filter(|h| kept_hashes.contains(h))
             .collect();
 
         // Phase 2: deterministic shuffle
-        let mut rng = ChaCha8Rng::seed_from_u64(seed);
-        self.observations.shuffle(&mut rng);
-
-        // Build percentage series
-        let mut percentages: Vec<u32> = (sample_start..=sample_end)
-            .step_by(sample_step as usize)
-            .collect();
-        if *percentages.last().unwrap_or(&0) != 100 {
-            percentages.push(100);
+        {
+            use rand::seq::SliceRandom;
+            use rand::SeedableRng;
+            observations.shuffle(&mut rand_chacha::ChaCha8Rng::seed_from_u64(seed));
         }
 
-        // Phase 3: incremental sampling with running counters
-        let total = self.observations.len();
+        // Phase 3: sampling, with RSeQC's percentage series and index arithmetic.
+        let percentages = sampling_percentages(sample_start, sample_end, sample_step);
+        let total = observations.len();
+        let index_at = |pct: i64| -> usize {
+            // Python: int(SR_num * (pct / 100.0)), truncating toward zero.
+            let idx = (total as f64 * (pct as f64 / 100.0)) as i64;
+            idx.clamp(0, total as i64) as usize
+        };
+        // A junction counts as known once seen `max(min_coverage, 1)` times
+        // (RSeQC: `uniqSpliceSites[sj] >= recur` over junctions seen at least once).
+        let known_threshold = min_coverage.max(1);
+
         let mut junction_counts: HashMap<u64, u32> = HashMap::new();
-        let mut prev_end = 0;
         let mut known_counts = Vec::with_capacity(percentages.len());
         let mut novel_counts = Vec::with_capacity(percentages.len());
         let mut all_counts = Vec::with_capacity(percentages.len());
-
-        // Running counters — updated incrementally as new observations arrive
         let mut running_known: usize = 0;
         let mut running_novel: usize = 0;
 
         for &pct in &percentages {
-            let index_end = total * pct as usize / 100;
-            for &obs_hash in &self.observations[prev_end..index_end] {
+            let index_st = index_at(i64::from(pct) - i64::from(sample_step));
+            let index_end = index_at(i64::from(pct));
+            for &obs_hash in observations.get(index_st..index_end).unwrap_or(&[]) {
                 let count = junction_counts.entry(obs_hash).or_insert(0);
                 *count += 1;
-
-                let is_known = known_hashes.contains(&obs_hash);
-                if *count == 1 {
-                    // First time seeing this junction
-                    if is_known {
-                        if min_coverage <= 1 {
-                            running_known += 1;
-                        }
-                        // else: known but below threshold, don't count yet
-                    } else {
-                        running_novel += 1;
+                if known_hashes.contains(&obs_hash) {
+                    if *count == known_threshold {
+                        running_known += 1;
                     }
-                } else if is_known && *count == min_coverage && min_coverage > 1 {
-                    // Junction just crossed the min_coverage threshold
-                    running_known += 1;
+                } else if *count == 1 {
+                    running_novel += 1;
                 }
             }
-            prev_end = index_end;
 
             known_counts.push(running_known);
             novel_counts.push(running_novel);
@@ -2636,6 +2670,21 @@ impl JuncSatAccum {
             all_counts,
         }
     }
+}
+
+/// RSeQC's sampling percentages: `list(range(start, end, step))` followed by 100.
+///
+/// A zero step would make Python's `range()` raise; here it yields only `[100]`.
+fn sampling_percentages(sample_start: u32, sample_end: u32, sample_step: u32) -> Vec<u32> {
+    let mut percentages: Vec<u32> = if sample_step == 0 {
+        Vec::new()
+    } else {
+        (sample_start..sample_end)
+            .step_by(sample_step as usize)
+            .collect()
+    };
+    percentages.push(100);
+    percentages
 }
 
 impl InnerDistAccum {
@@ -2661,5 +2710,108 @@ impl InnerDistAccum {
             histogram,
             total_pairs: self.pair_num,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sampling_percentages_match_python_range() {
+        // list(range(5, 100, 5)) + [100]
+        let default: Vec<u32> = (1..=20).map(|i| i * 5).collect();
+        assert_eq!(sampling_percentages(5, 100, 5), default);
+        // range() excludes the end, then RSeQC appends 100.
+        assert_eq!(sampling_percentages(10, 50, 10), vec![10, 20, 30, 40, 100]);
+        assert_eq!(sampling_percentages(1, 100, 5).last(), Some(&100));
+        assert_eq!(sampling_percentages(1, 100, 5)[19], 96);
+        assert_eq!(sampling_percentages(50, 50, 5), vec![100]);
+        assert_eq!(sampling_percentages(5, 100, 0), vec![100]);
+    }
+
+    /// Observations for the saturation tests: 40 on CHR1 (tid 0) interleaved
+    /// with 4 on CHRX (tid 1), which is not annotated.
+    fn test_observations() -> Vec<(i32, &'static str, u64)> {
+        let mut out = Vec::new();
+        for i in 0..40u64 {
+            if i % 11 == 3 {
+                out.push((1, "CHRX", 1));
+            }
+            out.push((0, "CHR1", (i * 7) % 9 * 100));
+        }
+        out
+    }
+
+    fn test_known() -> KnownJunctionSet {
+        KnownJunctionSet {
+            junctions: ["CHR1:0-50", "CHR1:100-150", "CHR1:200-250", "CHR1:700-750"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            chroms: ["CHR1".to_string()].into_iter().collect(),
+        }
+    }
+
+    fn push(accum: &mut JuncSatAccum, tid: i32, chrom: &str, start: u64) {
+        let end = if chrom == "CHRX" { 100 } else { start + 50 };
+        accum.push_observation(tid, chrom, start, end);
+    }
+
+    fn filled(obs: &[(i32, &str, u64)]) -> JuncSatAccum {
+        let mut accum = JuncSatAccum::default();
+        for &(tid, chrom, st) in obs {
+            push(&mut accum, tid, chrom, st);
+        }
+        accum
+    }
+
+    #[test]
+    fn test_saturation_final_point_and_axis() {
+        // The x axis and (when the windows cover the whole list) the 100%
+        // point do not depend on the shuffle.
+        let known = test_known();
+        for seed in [1, 7, 42] {
+            for (start, end, step) in [(5, 100, 5), (1, 100, 5), (10, 100, 10)] {
+                let r = filled(&test_observations()).into_result(&known, start, end, step, 1, seed);
+                assert_eq!(r.percentages, sampling_percentages(start, end, step));
+                // All 40 CHR1 observations are used (CHRX is dropped): 9
+                // distinct junctions, 4 of them known.
+                assert_eq!(*r.all_counts.last().unwrap(), 9);
+                assert_eq!(*r.known_counts.last().unwrap(), 4);
+                assert_eq!(*r.novel_counts.last().unwrap(), 5);
+            }
+        }
+    }
+
+    #[test]
+    fn test_saturation_deterministic_and_seeded() {
+        let known = test_known();
+        let run = |seed| filled(&test_observations()).into_result(&known, 5, 100, 5, 1, seed);
+        assert_eq!(run(3).all_counts, run(3).all_counts);
+    }
+
+    #[test]
+    fn test_saturation_merge_order_independent() {
+        // A coordinate-sorted layout: tid 0 records, then tid 1, then tid 2.
+        let obs: Vec<(i32, &str, u64)> = (0..30u64)
+            .map(|i| ((i / 10) as i32, "CHR1", (i * 13) % 7 * 100))
+            .collect();
+        let known = test_known();
+        let run = |order: &[i32]| {
+            let mut merged = JuncSatAccum::default();
+            for &tid in order {
+                let part: Vec<_> = obs.iter().copied().filter(|o| o.0 == tid).collect();
+                merged.merge(filled(&part));
+            }
+            merged.into_result(&known, 5, 100, 5, 1, 3)
+        };
+        let expected = filled(&obs).into_result(&known, 5, 100, 5, 1, 3);
+        for order in [[0, 1, 2], [2, 0, 1], [1, 2, 0]] {
+            let r = run(&order);
+            assert_eq!(r.all_counts, expected.all_counts);
+            assert_eq!(r.known_counts, expected.known_counts);
+            assert_eq!(r.novel_counts, expected.novel_counts);
+        }
     }
 }
