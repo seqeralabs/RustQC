@@ -180,7 +180,8 @@ pub struct BamStatAccum {
     // --- samtools flagstat additional fields ---
     /// Secondary alignments (0x100) — counted independently of QC/dup.
     pub secondary: u64,
-    /// Supplementary alignments (0x800) — counted independently of QC/dup.
+    /// Supplementary alignments (0x800) that are not also secondary, as in
+    /// samtools (SECONDARY takes priority) — independent of QC/dup.
     pub supplementary: u64,
     /// All mapped records (not 0x4), regardless of QC/dup.
     pub mapped: u64,
@@ -462,10 +463,12 @@ impl BamStatAccum {
         // `flagstat` is what the flagstat output uses; the individual fields
         // are kept for the library API.
         // =================================================================
+        // SECONDARY takes priority over SUPPLEMENTARY, as in samtools
+        // `flagstat_loop` and `stats.c`: a record with both flags is secondary
+        // only, so `primary + secondary + supplementary == total`.
         if is_secondary {
             self.secondary += 1;
-        }
-        if is_supplementary {
+        } else if is_supplementary {
             self.supplementary += 1;
         }
         if is_mapped {

@@ -294,4 +294,310 @@ mod tests {
         assert_eq!(merged.n_reads, [8, 4]);
         assert_eq!(merged.n_diffhigh, [0, 2]);
     }
+
+    // ------------------------------------------------------------------------
+    // Oracle: samtools 1.22.1 `flagstat_loop` and `out_fmt_default`
+    // (bam_stat.c), transcribed independently of `FlagstatCounts`.
+    // Test cases adapted from seqeralabs/RustQC#175 (Nico DeVeaux).
+    // ------------------------------------------------------------------------
+
+    /// samtools' `bam_flagstat_t`; index 0 is QC-passed, 1 is QC-failed.
+    #[derive(Debug, Default)]
+    struct SamtoolsFlagstat {
+        n_reads: [u64; 2],
+        n_mapped: [u64; 2],
+        n_pair_all: [u64; 2],
+        n_pair_map: [u64; 2],
+        n_pair_good: [u64; 2],
+        n_sgltn: [u64; 2],
+        n_read1: [u64; 2],
+        n_read2: [u64; 2],
+        n_dup: [u64; 2],
+        n_diffchr: [u64; 2],
+        n_diffhigh: [u64; 2],
+        n_secondary: [u64; 2],
+        n_supp: [u64; 2],
+        n_primary: [u64; 2],
+        n_pmapped: [u64; 2],
+        n_pdup: [u64; 2],
+    }
+
+    impl SamtoolsFlagstat {
+        fn add(&mut self, flag: u16, tid: i32, mtid: i32, qual: u8) {
+            let w = usize::from(flag & BAM_FQCFAIL != 0);
+            self.n_reads[w] += 1;
+            if flag & BAM_FSECONDARY != 0 {
+                self.n_secondary[w] += 1;
+            } else if flag & BAM_FSUPPLEMENTARY != 0 {
+                self.n_supp[w] += 1;
+            } else {
+                self.n_primary[w] += 1;
+                if flag & BAM_FPAIRED != 0 {
+                    self.n_pair_all[w] += 1;
+                    if flag & BAM_FPROPER_PAIR != 0 && flag & BAM_FUNMAP == 0 {
+                        self.n_pair_good[w] += 1;
+                    }
+                    if flag & BAM_FREAD1 != 0 {
+                        self.n_read1[w] += 1;
+                    }
+                    if flag & BAM_FREAD2 != 0 {
+                        self.n_read2[w] += 1;
+                    }
+                    if flag & BAM_FMUNMAP != 0 && flag & BAM_FUNMAP == 0 {
+                        self.n_sgltn[w] += 1;
+                    }
+                    if flag & BAM_FUNMAP == 0 && flag & BAM_FMUNMAP == 0 {
+                        self.n_pair_map[w] += 1;
+                        if mtid != tid {
+                            self.n_diffchr[w] += 1;
+                            if qual >= 5 {
+                                self.n_diffhigh[w] += 1;
+                            }
+                        }
+                    }
+                }
+                if flag & BAM_FUNMAP == 0 {
+                    self.n_pmapped[w] += 1;
+                }
+                if flag & BAM_FDUP != 0 {
+                    self.n_pdup[w] += 1;
+                }
+            }
+            if flag & BAM_FUNMAP == 0 {
+                self.n_mapped[w] += 1;
+            }
+            if flag & BAM_FDUP != 0 {
+                self.n_dup[w] += 1;
+            }
+        }
+
+        fn render(&self) -> String {
+            // samtools computes `(float)n / total * 100.0`.
+            fn percent(n: u64, total: u64) -> String {
+                if total == 0 {
+                    "N/A".to_string()
+                } else {
+                    format!("{:.2}%", f64::from(n as f32 / total as f32) * 100.0)
+                }
+            }
+            let line = |c: [u64; 2], d: &str| format!("{} + {} {d}\n", c[0], c[1]);
+            let pct = |c: [u64; 2], t: [u64; 2], d: &str| {
+                format!(
+                    "{} + {} {d} ({} : {})\n",
+                    c[0],
+                    c[1],
+                    percent(c[0], t[0]),
+                    percent(c[1], t[1])
+                )
+            };
+            [
+                line(self.n_reads, "in total (QC-passed reads + QC-failed reads)"),
+                line(self.n_primary, "primary"),
+                line(self.n_secondary, "secondary"),
+                line(self.n_supp, "supplementary"),
+                line(self.n_dup, "duplicates"),
+                line(self.n_pdup, "primary duplicates"),
+                pct(self.n_mapped, self.n_reads, "mapped"),
+                pct(self.n_pmapped, self.n_primary, "primary mapped"),
+                line(self.n_pair_all, "paired in sequencing"),
+                line(self.n_read1, "read1"),
+                line(self.n_read2, "read2"),
+                pct(self.n_pair_good, self.n_pair_all, "properly paired"),
+                line(self.n_pair_map, "with itself and mate mapped"),
+                pct(self.n_sgltn, self.n_pair_all, "singletons"),
+                line(self.n_diffchr, "with mate mapped to a different chr"),
+                line(
+                    self.n_diffhigh,
+                    "with mate mapped to a different chr (mapQ>=5)",
+                ),
+            ]
+            .concat()
+        }
+    }
+
+    /// (tid, mtid, mapq) placements: mate on the same contig, mate on another
+    /// contig, mate on another contig with MAPQ below 5.
+    const PLACEMENTS: [(i32, i32, u8); 3] = [(0, 0, 60), (0, 1, 60), (1, 0, 3)];
+
+    fn record(flag: u16, (tid, mtid, mapq): (i32, i32, u8)) -> bam::Record {
+        use rust_htslib::bam::record::{Cigar, CigarString};
+        let mut rec = bam::Record::new();
+        rec.set(
+            b"r",
+            Some(&CigarString(vec![Cigar::Match(4)])),
+            b"ACGT",
+            &[30; 4],
+        );
+        rec.set_flags(flag);
+        rec.set_tid(tid);
+        rec.set_pos(9);
+        rec.set_mtid(mtid);
+        rec.set_mpos(9);
+        rec.set_mapq(mapq);
+        rec
+    }
+
+    fn render_flagstat(accum: BamStatAccum, name: &str) -> String {
+        let path = std::env::temp_dir().join(format!(
+            "rustqc_test_flagstat_{name}_{}.txt",
+            std::process::id()
+        ));
+        write_flagstat(&accum.into_result(), &path).expect("Failed to write flagstat");
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        contents
+    }
+
+    /// Each of the 4,096 flags alone, in every placement, against the oracle.
+    #[test]
+    fn flagstat_matches_samtools_flagstat_loop_per_flag() {
+        let mut mismatches = Vec::new();
+        for placement in PLACEMENTS {
+            for flag in 0..4096u16 {
+                let mut accum = BamStatAccum::default();
+                accum.process_read(&record(flag, placement), 30);
+                let mut oracle = SamtoolsFlagstat::default();
+                oracle.add(flag, placement.0, placement.1, placement.2);
+
+                let got = render_flagstat(accum, "per_flag");
+                let want = oracle.render();
+                if got != want {
+                    let diff: Vec<String> = want
+                        .lines()
+                        .zip(got.lines())
+                        .filter(|(w, g)| w != g)
+                        .map(|(w, g)| format!("want `{w}`, got `{g}`"))
+                        .collect();
+                    mismatches.push(format!("{flag:#06x} {placement:?}: {}", diff.join("; ")));
+                }
+            }
+        }
+        assert!(
+            mismatches.is_empty(),
+            "{} of {} (flag, placement) cases differ from samtools' flagstat_loop; first:\n{}",
+            mismatches.len(),
+            4096 * PLACEMENTS.len(),
+            mismatches[..mismatches.len().min(8)].join("\n")
+        );
+    }
+
+    /// All flags and placements in one file, split across two merged
+    /// accumulators as the per-contig parallel path does.
+    #[test]
+    fn flagstat_matches_samtools_flagstat_loop_merged() {
+        let mut parts = [BamStatAccum::default(), BamStatAccum::default()];
+        let mut oracle = SamtoolsFlagstat::default();
+        for placement in PLACEMENTS {
+            for flag in 0..4096u16 {
+                parts[placement.0 as usize].process_read(&record(flag, placement), 30);
+                oracle.add(flag, placement.0, placement.1, placement.2);
+            }
+        }
+        let [mut accum, other] = parts;
+        accum.merge(other);
+        assert_eq!(render_flagstat(accum, "merged"), oracle.render());
+    }
+
+    /// Dual-flagged records (secondary + supplementary), QC-failed and
+    /// duplicated: counted once, as secondary, in the right column, in both the
+    /// flagstat counters and the legacy per-field counters used by `stats`.
+    #[test]
+    fn flagstat_dual_flags_with_qcfail_and_duplicate() {
+        let mut accum = BamStatAccum::default();
+        let mut direct = FlagstatCounts::default();
+        let flags = [
+            0,
+            BAM_FDUP,
+            BAM_FSECONDARY,
+            BAM_FSUPPLEMENTARY,
+            BAM_FSECONDARY | BAM_FSUPPLEMENTARY,
+            BAM_FSECONDARY | BAM_FSUPPLEMENTARY | BAM_FDUP,
+        ];
+        for qc in [0, BAM_FQCFAIL] {
+            for flag in flags {
+                let flag = flag | qc;
+                accum.process_read(&record(flag, PLACEMENTS[0]), 30);
+                direct.add(flag, 0, 0, 60);
+            }
+        }
+        for fs in [&accum.flagstat, &direct] {
+            assert_eq!(fs.n_reads, [6, 6]);
+            assert_eq!(fs.n_primary, [2, 2]);
+            assert_eq!(fs.n_secondary, [3, 3]);
+            assert_eq!(fs.n_supp, [1, 1]);
+            assert_eq!(fs.n_dup, [2, 2]);
+            assert_eq!(fs.n_pdup, [1, 1]);
+            assert_eq!(fs.n_mapped, [6, 6]);
+            assert_eq!(fs.n_pmapped, [2, 2]);
+            for w in 0..2 {
+                assert_eq!(
+                    fs.n_primary[w] + fs.n_secondary[w] + fs.n_supp[w],
+                    fs.n_reads[w]
+                );
+            }
+        }
+        let result = accum.into_result();
+        assert_eq!(result.total_records, 12);
+        assert_eq!(result.primary_count, 4);
+        assert_eq!(result.secondary, 6);
+        assert_eq!(result.supplementary, 2);
+        assert_eq!(
+            result.primary_count + result.secondary + result.supplementary,
+            result.total_records
+        );
+    }
+
+    #[test]
+    fn flagstat_partitioned_counts_match_serial() {
+        for partitions in [1, 2, 7, 31] {
+            let mut parts = vec![FlagstatCounts::default(); partitions];
+            let mut oracle = SamtoolsFlagstat::default();
+            for (i, (flag, placement)) in (0..4096u16)
+                .flat_map(|flag| PLACEMENTS.map(|placement| (flag, placement)))
+                .enumerate()
+            {
+                parts[i % partitions].add(flag, placement.0, placement.1, placement.2);
+                oracle.add(flag, placement.0, placement.1, placement.2);
+            }
+            let mut merged = FlagstatCounts::default();
+            for part in parts.into_iter().rev() {
+                merged.merge(&part);
+            }
+            for w in 0..2 {
+                assert_eq!(
+                    merged.n_primary[w] + merged.n_secondary[w] + merged.n_supp[w],
+                    merged.n_reads[w]
+                );
+            }
+            let mut accum = BamStatAccum::default();
+            accum.flagstat.merge(&merged);
+            assert_eq!(
+                render_flagstat(accum, "partitioned"),
+                oracle.render(),
+                "{partitions} partitions"
+            );
+        }
+    }
+
+    #[test]
+    fn large_counter_percentages_match_samtools_c() {
+        // samtools 1.22.1 bam_stat.c percent():
+        // sprintf(buffer, "%.2f%%", (float)n / total * 100.0).
+        // Expected strings were checked by compiling that C function unchanged.
+        let cases = [
+            (0, 0, "N/A"),
+            (0, 1_000_000_000, "0.00%"),
+            (1, 32, "3.12%"),
+            (1, 6, "16.67%"),
+            (16_777_217, 16_777_218, "100.00%"),
+            (500_049_999, 1_000_000_000, "50.01%"),
+            (999_950_000, 1_000_000_000, "99.99%"),
+            (499_050_000, 1_000_000_000, "49.90%"),
+            (499_150_000, 1_000_000_000, "49.92%"),
+            (i64::MAX as u64 - 1, i64::MAX as u64, "100.00%"),
+        ];
+        for (n, d, expected) in cases {
+            assert_eq!(percent(n, d), expected, "{n}/{d}");
+        }
+    }
 }

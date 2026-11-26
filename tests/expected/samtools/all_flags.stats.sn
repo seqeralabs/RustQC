@@ -1,0 +1,39 @@
+SN	raw total sequences:	3072	# excluding supplementary and secondary reads
+SN	filtered sequences:	0
+SN	sequences:	3072
+SN	is sorted:	1	# sorted by coordinate
+SN	1st fragments:	1920
+SN	last fragments:	384
+SN	reads mapped:	1536
+SN	reads mapped and paired:	384	# paired-end technology bit set + both mates mapped
+SN	reads unmapped:	1536
+SN	reads properly paired:	192	# proper-pair bit set
+SN	reads paired:	1536	# paired-end technology bit set
+SN	reads duplicated:	3072	# PCR or optical duplicate bit set
+SN	reads MQ0:	0	# mapped and MQ=0
+SN	reads QC failed:	1536
+SN	non-primary alignments:	6144
+SN	supplementary alignments:	3072
+SN	total length:	12288	# ignores clipping
+SN	total first fragment length:	7680	# ignores clipping
+SN	total last fragment length:	1536	# ignores clipping
+SN	bases mapped:	6144	# ignores clipping
+SN	bases mapped (cigar):	12288	# more accurate
+SN	bases trimmed:	0
+SN	bases duplicated:	12288
+SN	mismatches:	0	# from NM fields
+SN	error rate:	0.000000e+00	# mismatches / bases mapped (cigar)
+SN	average length:	4
+SN	average first fragment length:	4
+SN	average last fragment length:	4
+SN	maximum length:	4
+SN	maximum first fragment length:	4
+SN	maximum last fragment length:	4
+SN	average quality:	30.0
+SN	insert size average:	0.0
+SN	insert size standard deviation:	0.0
+SN	inward oriented pairs:	32
+SN	outward oriented pairs:	0
+SN	pairs with other orientation:	32
+SN	pairs on different chromosomes:	128
+SN	percentage of properly paired reads (%):	6.2
