@@ -2,6 +2,9 @@
 //!
 //! Centralised definitions so every module uses the same constants.
 
+use crate::rna::bam::record::Aux;
+use crate::rna::bam::Record;
+
 /// Read is paired in sequencing (0x1).
 pub const BAM_FPAIRED: u16 = 0x1;
 /// Read is mapped in a proper pair (0x2).
@@ -36,8 +39,7 @@ pub const BAM_FSUPPLEMENTARY: u16 = 0x800;
 /// Handles all integer Aux variants (U8, U16, U32, I8, I16, I32)
 /// and returns the value as `i64`. Returns `None` if the tag is
 /// absent or has a non-integer type.
-pub fn get_aux_int(record: &rust_htslib::bam::Record, tag: &[u8]) -> Option<i64> {
-    use rust_htslib::bam::record::Aux;
+pub fn get_aux_int(record: &Record, tag: &[u8]) -> Option<i64> {
     match record.aux(tag) {
         Ok(Aux::U8(v)) => Some(v as i64),
         Ok(Aux::U16(v)) => Some(v as i64),

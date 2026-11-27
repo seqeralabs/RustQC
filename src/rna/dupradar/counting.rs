@@ -11,6 +11,7 @@
 
 use crate::gtf::Gene;
 use crate::io::format_count;
+use crate::rna::bam::{self, FetchDefinition, Read as BamRead};
 use crate::rna::qualimap::QualimapAccum;
 use crate::rna::rseqc::accumulators::{RseqcAccumulators, RseqcAnnotations, RseqcConfig};
 use crate::Strandedness;
@@ -20,7 +21,6 @@ use indexmap::IndexMap;
 use indicatif::ProgressBar;
 use log::{debug, warn};
 use rayon::prelude::*;
-use rust_htslib::bam::{self, FetchDefinition, Read as BamRead};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -435,10 +435,10 @@ fn strand_matches(
 /// * `blocks` - Reusable buffer for aligned blocks (cleared before use)
 fn cigar_to_aligned_blocks(
     start: u64,
-    cigar: &rust_htslib::bam::record::CigarStringView,
+    cigar: &crate::rna::bam::record::CigarStringView,
     blocks: &mut Vec<(u64, u64)>,
 ) {
-    use rust_htslib::bam::record::Cigar;
+    use crate::rna::bam::record::Cigar;
     blocks.clear();
     let mut ref_pos = start;
 
@@ -2189,16 +2189,18 @@ mod tests {
     // ---------------------------------------------------------------
 
     struct SamScene {
-        header: bam::HeaderView,
+        header: bam::Header,
         index: HashMap<String, ChromIndex>,
     }
 
     fn sam_scene() -> SamScene {
         let mut header = bam::Header::new();
         for name in ["chr1", "chr2"] {
-            let mut sq = bam::header::HeaderRecord::new(b"SQ");
-            sq.push_tag(b"SN", name).push_tag(b"LN", 100_000);
-            header.push_record(&sq);
+            header.push_record(
+                bam::header::HeaderRecord::new(b"SQ")
+                    .push_tag(b"SN", name)
+                    .push_tag(b"LN", "100000"),
+            );
         }
         let iv = |start: i32, end: i32, gene_idx: GeneIdx| {
             Interval::new(
@@ -2216,10 +2218,7 @@ mod tests {
             COITree::new(&[iv(1001, 2000, 0), iv(3001, 4000, 1)]),
         );
         index.insert("chr2".to_string(), COITree::new(&[iv(1001, 2000, 2)]));
-        SamScene {
-            header: bam::HeaderView::from_header(&header),
-            index,
-        }
+        SamScene { header, index }
     }
 
     /// One 50M SAM line. `mate` is (RNEXT, PNEXT); `tags` e.g. "NH:i:2".
@@ -2259,10 +2258,11 @@ mod tests {
         let mut blocks = Vec::new();
         let mut hits = Vec::new();
         let mut bio_hits = Vec::new();
+        let view = bam::header::HeaderView::from_header(&scene.header);
         let records: Vec<(String, bam::Record)> = lines
             .iter()
             .map(|l| {
-                let rec = bam::Record::from_sam(&scene.header, l.as_bytes()).unwrap();
+                let rec = bam::Record::from_sam(&view, l.as_bytes()).unwrap();
                 let chrom = String::from_utf8_lossy(scene.header.tid2name(rec.tid() as u32));
                 (chrom.into_owned(), rec)
             })

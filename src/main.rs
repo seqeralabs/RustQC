@@ -27,8 +27,6 @@ use rustqc::{config, cpu, gtf, rna, summary};
 
 use ui::{Ui, Verbosity};
 
-use rust_htslib::bam::Read as BamRead;
-
 use rna::rseqc::accumulators::{RseqcAccumulators, RseqcAnnotations, RseqcConfig};
 
 /// Common BAM filename suffixes added by alignment and duplicate-marking tools.
@@ -291,7 +289,7 @@ fn run_rna(args: cli::RnaArgs, ui: &Ui) -> Result<()> {
 
     // Validate all input alignment files before expensive GTF parsing
     for bam_path in &args.input {
-        let mut reader = rust_htslib::bam::Reader::from_path(bam_path)
+        let mut reader = crate::rna::bam::Reader::from_path(bam_path)
             .with_context(|| format!("Cannot open alignment file '{}'", bam_path))?;
         if let Some(ref reference) = args.reference {
             reader
@@ -1017,7 +1015,7 @@ fn process_single_bam(
     // Reference names + lengths from the alignment header (samtools-style
     // outputs, junction_annotation, and the split_bam target lookup)
     let bam_header_refs = {
-        let reader = rust_htslib::bam::Reader::from_path(bam_path)
+        let reader = crate::rna::bam::Reader::from_path(bam_path)
             .with_context(|| format!("Failed to open BAM for header: {}", bam_path))?;
         let header = reader.header();
         (0..header.target_count())

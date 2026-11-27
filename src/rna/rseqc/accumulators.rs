@@ -7,9 +7,9 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
+use crate::rna::bam;
 use anyhow::Result;
 use indexmap::IndexMap;
-use rust_htslib::bam;
 
 use super::bam_stat::{BamStatResult, GcDepthBin};
 use super::flagstat::FlagstatCounts;
@@ -530,21 +530,10 @@ impl BamStatAccum {
 
             let seq_len = record.seq_len();
             if seq_len > 0 {
-                // SAFETY: We access the raw BAM record data to compute CRC32
-                // checksums matching samtools' approach. The pointer arithmetic
-                // replicates htslib's bam_get_seq() macro:
-                //   data + l_qname + (n_cigar << 2)
-                // The seq_len > 0 guard above ensures sequence data exists.
-                // The slice length seq_len.div_ceil(2) matches the BAM spec's
-                // 4-bit encoded sequence format: (seq_len+1)/2 bytes.
-                let seq_bytes = unsafe {
-                    let inner = record.inner();
-                    let data = inner.data;
-                    let seq_offset =
-                        inner.core.l_qname as isize + ((inner.core.n_cigar as isize) << 2);
-                    let seq_nbytes = seq_len.div_ceil(2);
-                    std::slice::from_raw_parts(data.offset(seq_offset), seq_nbytes)
-                };
+                let seq = record.seq();
+                let seq_bytes = seq.encoded_bytes();
+                let seq_nbytes = seq_len.div_ceil(2);
+                let seq_bytes = &seq_bytes[..seq_nbytes.min(seq_bytes.len())];
                 let seq_crc = crc32fast::hash(seq_bytes);
                 self.chk[1] = self.chk[1].wrapping_add(seq_crc);
 
@@ -629,7 +618,7 @@ impl BamStatAccum {
         let has_splice = record
             .cigar()
             .iter()
-            .any(|op| matches!(op, rust_htslib::bam::record::Cigar::RefSkip(_)));
+            .any(|op| matches!(op, crate::rna::bam::record::Cigar::RefSkip(_)));
         if has_splice {
             self.splice += 1;
         } else {
@@ -650,7 +639,7 @@ impl BamStatAccum {
     /// Follows `collect_stats` in samtools `stats.c` (1.22.1) with default
     /// options: no flag filters, no reference, coordinate-sorted input.
     fn process_stats_read(&mut self, record: &bam::Record, flags: u16, seq_len: usize) {
-        use rust_htslib::bam::record::Cigar as C;
+        use crate::rna::bam::record::Cigar as C;
 
         let is_primary = flags & BAM_FSUPPLEMENTARY == 0;
         let is_unmapped = flags & BAM_FUNMAP != 0;
@@ -955,12 +944,12 @@ impl BamStatAccum {
     /// read-oriented cycle (IC) of a mapped, non-secondary record.
     fn count_indels(
         &mut self,
-        cigar: &rust_htslib::bam::record::CigarStringView,
+        cigar: &crate::rna::bam::record::CigarStringView,
         is_reverse: bool,
         order: u8,
         seq_len: usize,
     ) {
-        use rust_htslib::bam::record::Cigar as C;
+        use crate::rna::bam::record::Cigar as C;
 
         let read_len = seq_len as i64;
         let mut icycle: i64 = 0;
@@ -1240,7 +1229,7 @@ impl InferExpAccum {
             .cigar()
             .iter()
             .filter_map(|op| {
-                use rust_htslib::bam::record::Cigar::*;
+                use crate::rna::bam::record::Cigar::*;
                 match op {
                     Match(len) | Ins(len) | Equal(len) | Diff(len) => Some(*len as u64),
                     _ => None,
@@ -1374,7 +1363,7 @@ fn hash_sequence_encoded(seq: &bam::record::Seq<'_>) -> u128 {
 /// Hash position key matching RSeQC's `fetch_exon` + position key logic.
 /// Uses FNV-1a hashing to avoid string allocation per read.
 fn hash_position_key(chrom: &str, pos: i64, cigar: &bam::record::CigarStringView) -> u64 {
-    use rust_htslib::bam::record::Cigar;
+    use crate::rna::bam::record::Cigar;
 
     let mut h = crate::io::FNV1A_OFFSET;
     crate::io::fnv1a_update(&mut h, chrom.as_bytes());
@@ -1960,7 +1949,7 @@ fn compute_qalen_and_intron_size(record: &bam::Record) -> (u64, u64) {
     let mut qalen: u64 = 0;
     let mut intron_size: u64 = 0;
     for op in record.cigar().iter() {
-        use rust_htslib::bam::record::Cigar::*;
+        use crate::rna::bam::record::Cigar::*;
         match op {
             Match(len) | Equal(len) | Diff(len) => qalen += *len as u64,
             Ins(len) => qalen += *len as u64,
@@ -1980,7 +1969,7 @@ fn fetch_exon_blocks_rseqc(record: &bam::Record) -> Vec<(u64, u64)> {
     let mut chrom_st = record.pos() as u64;
 
     for op in record.cigar().iter() {
-        use rust_htslib::bam::record::Cigar::*;
+        use crate::rna::bam::record::Cigar::*;
         match op {
             Match(len) => {
                 let start = chrom_st;
@@ -2330,9 +2319,9 @@ fn merge_vec_arrays<const N: usize>(target: &mut Vec<[u64; N]>, source: Vec<[u64
     if source.len() > target.len() {
         target.resize(source.len(), [0u64; N]);
     }
-    for (i, arr) in source.into_iter().enumerate() {
-        for j in 0..N {
-            target[i][j] += arr[j];
+    for (target_row, source_row) in target.iter_mut().zip(source) {
+        for (target_count, source_count) in target_row.iter_mut().zip(source_row) {
+            *target_count += source_count;
         }
     }
 }

@@ -8,9 +8,9 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 
+use crate::rna::bam::{self, Read as BamRead};
 use anyhow::{bail, ensure, Context, Result};
 use log::debug;
-use rust_htslib::bam::{self, Read as BamRead};
 
 use crate::rna::bam_flags::{BAM_FMUNMAP, BAM_FQCFAIL, BAM_FUNMAP};
 
@@ -380,35 +380,22 @@ pub fn write_split_bams(
             .set_reference(ref_path)
             .with_context(|| format!("Failed to set reference FASTA: {ref_path}"))?;
     }
-    let pool = if threads > 1 {
-        let pool = rust_htslib::tpool::ThreadPool::new(threads as u32)
-            .context("Failed to create htslib thread pool")?;
-        reader
-            .set_thread_pool(&pool)
-            .context("Failed to attach thread pool to reader")?;
-        Some(pool)
-    } else {
-        None
-    };
+    reader
+        .set_threads(threads)
+        .context("Failed to set decompression threads")?;
 
-    let header_view = reader.header().clone();
-    let target_names: Vec<String> = (0..header_view.target_count())
-        .map(|tid| String::from_utf8_lossy(header_view.tid2name(tid)).into_owned())
+    let header = reader.header().clone();
+    let target_names: Vec<String> = (0..header.target_count())
+        .map(|tid| String::from_utf8_lossy(header.tid2name(tid)).into_owned())
         .collect();
     let lookup = regions.lookup_for_targets(&target_names);
-    let header = bam::Header::from_template(&header_view);
 
     let prefix = prefix.to_string_lossy();
     let open = |suffix: &str| -> Result<bam::Writer> {
         let path = format!("{prefix}.{suffix}.bam");
-        let mut writer = bam::Writer::from_path(&path, &header, bam::Format::Bam)
-            .with_context(|| format!("Failed to create {path}"))?;
-        if let Some(ref pool) = pool {
-            writer
-                .set_thread_pool(pool)
-                .context("Failed to attach thread pool to writer")?;
-        }
-        Ok(writer)
+        // ponytail: single-threaded BGZF compression; use noodles' multithreaded bgzf writer if this pass gets slow
+        bam::Writer::from_path(Path::new(&path), &header, bam::Format::Bam)
+            .with_context(|| format!("Failed to create {path}"))
     };
     let mut in_writer = open("in")?;
     let mut ex_writer = open("ex")?;
@@ -535,7 +522,13 @@ mod tests {
         let sam = format!("@HD\tVN:1.6\n@SQ\tSN:chr1\tLN:20000\n@SQ\tSN:chr2\tLN:20000\n{body}");
         let path = temp_file(name, &sam);
         let mut reader = bam::Reader::from_path(&path).unwrap();
-        reader.records().map(|r| r.unwrap()).collect()
+        let mut records = Vec::new();
+        let mut record = bam::Record::new();
+        while let Some(result) = reader.read(&mut record) {
+            result.unwrap();
+            records.push(record.clone());
+        }
+        records
     }
 
     #[test]

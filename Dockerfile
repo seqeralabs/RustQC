@@ -2,16 +2,12 @@
 FROM rust:1-bookworm AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    cmake \
-    zlib1g-dev \
-    libbz2-dev \
-    liblzma-dev \
-    libcurl4-openssl-dev \
-    libssl-dev \
+    g++ \
     libfontconfig1-dev \
     pkg-config \
-    clang \
     && rm -rf /var/lib/apt/lists/*
+
+ENV CXX=g++
 
 ARG GIT_SHORT_HASH=unknown
 ARG CPU_TARGET=""

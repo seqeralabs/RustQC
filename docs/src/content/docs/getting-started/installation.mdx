@@ -91,7 +91,12 @@ docker run -v $(pwd):/data ghcr.io/seqeralabs/rustqc:latest-sve \
 
 ## Build from source
 
-Building from source requires the Rust toolchain, a C++ compiler, and a few system libraries needed by [rust-htslib](https://github.com/rust-bio/rust-htslib) for SAM/BAM/CRAM I/O. The C++ compiler is used both by rust-htslib and by RustQC's preseq FFI shim (a small C++ wrapper that links against the host's `std::mt19937` and `std::binomial_distribution` for exact bootstrap compatibility with upstream preseq).
+Building from source requires the Rust toolchain, a C++ compiler, and
+libfontconfig (for plot rendering). SAM/BAM/CRAM I/O is handled by the pure-Rust
+[noodles](https://crates.io/crates/noodles) crate — no htslib or cmake required.
+The C++ compiler is used by RustQC's preseq FFI shim (a small C++ wrapper that
+links against the host's `std::mt19937` and `std::binomial_distribution` for exact
+bootstrap compatibility with upstream preseq).
 
 ### Install from crates.io
 
@@ -109,7 +114,7 @@ Select your operating system for build instructions:
   <TabItem label="macOS" icon="apple">
     ```bash
     # Install system dependencies
-    brew install cmake zlib bzip2 xz curl openssl
+    brew install fontconfig
 
     # Install Rust (if not already installed)
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -127,8 +132,7 @@ Select your operating system for build instructions:
   <TabItem label="Ubuntu / Debian" icon="linux">
     ```bash
     # Install system dependencies
-    sudo apt install cmake zlib1g-dev libbz2-dev liblzma-dev \
-      libcurl4-openssl-dev libssl-dev clang
+    sudo apt install g++ libfontconfig1-dev pkg-config
 
     # Install Rust (if not already installed)
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -144,8 +148,7 @@ Select your operating system for build instructions:
   <TabItem label="Fedora / RHEL" icon="linux">
     ```bash
     # Install system dependencies
-    sudo dnf install cmake zlib-devel bzip2-devel xz-devel \
-      libcurl-devel openssl-devel clang
+    sudo dnf install gcc-c++ fontconfig-devel pkg-config
 
     # Install Rust (if not already installed)
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -162,7 +165,7 @@ Select your operating system for build instructions:
 
 The compiled binary is at `target/release/rustqc`. You can copy it to a directory on your `PATH` for convenient access. Release builds use link-time optimization (LTO) and symbol stripping for better performance and a smaller binary.
 
-The system dependencies are: cmake, zlib, bz2, lzma, curl, ssl, and a C++ compiler (clang or g++).
+The system dependencies are: a C++ compiler (`g++` or `clang++`) and libfontconfig.
 
 ### Extra performance
 

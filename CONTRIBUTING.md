@@ -6,24 +6,18 @@ Thanks for your interest in contributing to RustQC! This document covers how to 
 
 ### Prerequisites
 
-You need a working Rust toolchain (stable) and the following system libraries for building `rust-htslib`:
-
-- cmake, clang
-- zlib, libbz2, liblzma
-- libcurl, libssl
-- libfontconfig (for plot rendering)
+You need a working Rust toolchain (stable), a C++ compiler (for the preseq RNG FFI shim), and libfontconfig (for plot rendering). BAM/SAM/CRAM I/O is handled by the pure-Rust [noodles](https://crates.io/crates/noodles) crate — no htslib or cmake required.
 
 On Ubuntu/Debian:
 
 ```bash
-sudo apt-get install cmake clang zlib1g-dev libbz2-dev liblzma-dev \
-  libcurl4-openssl-dev libssl-dev libfontconfig1-dev
+sudo apt-get install g++ libfontconfig1-dev
 ```
 
 On macOS (with Homebrew):
 
 ```bash
-brew install cmake xz
+brew install fontconfig
 ```
 
 ### Building

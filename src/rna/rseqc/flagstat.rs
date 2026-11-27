@@ -210,8 +210,8 @@ fn format_flagstat(s: &FlagstatCounts) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rna::bam::{self, Read as BamRead};
     use crate::rna::rseqc::accumulators::BamStatAccum;
-    use rust_htslib::bam::{self, Read as BamRead};
     use std::io::Read;
     #[test]
     fn test_flagstat_format() {
@@ -420,21 +420,22 @@ mod tests {
     const PLACEMENTS: [(i32, i32, u8); 3] = [(0, 0, 60), (0, 1, 60), (1, 0, 3)];
 
     fn record(flag: u16, (tid, mtid, mapq): (i32, i32, u8)) -> bam::Record {
-        use rust_htslib::bam::record::{Cigar, CigarString};
-        let mut rec = bam::Record::new();
-        rec.set(
-            b"r",
-            Some(&CigarString(vec![Cigar::Match(4)])),
-            b"ACGT",
-            &[30; 4],
+        use crate::rna::bam::header::{HeaderRecord, HeaderView};
+        let mut header = bam::Header::new();
+        for name in ["chr1", "chr2"] {
+            header.push_record(
+                HeaderRecord::new(b"SQ")
+                    .push_tag(b"SN", name)
+                    .push_tag(b"LN", "1000"),
+            );
+        }
+        let chrom = |tid: i32| ["chr1", "chr2"][tid as usize];
+        let line = format!(
+            "r\t{flag}\t{}\t10\t{mapq}\t4M\t{}\t10\t0\tACGT\t????",
+            chrom(tid),
+            chrom(mtid)
         );
-        rec.set_flags(flag);
-        rec.set_tid(tid);
-        rec.set_pos(9);
-        rec.set_mtid(mtid);
-        rec.set_mpos(9);
-        rec.set_mapq(mapq);
-        rec
+        bam::Record::from_sam(&HeaderView::from_header(&header), line.as_bytes()).unwrap()
     }
 
     fn render_flagstat(accum: BamStatAccum, name: &str) -> String {
