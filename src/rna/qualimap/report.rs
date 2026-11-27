@@ -9,7 +9,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-use super::format::{format_decimal, format_long, format_percentage, percentage_of};
+use super::format::{format_decimal, format_long, format_percentage};
 use super::output::{NUM_PRIME_BASES, NUM_TRANSCRIPTS_FOR_BIAS};
 use crate::Strandedness;
 use log::debug;
@@ -392,7 +392,7 @@ fn write_summary_section(html: &mut String, data: &ReportData) {
         format!(
             "{} / {}",
             format_long(count),
-            format_percentage(percentage_of(count, total_reads))
+            format_percentage(100.0 * count as f64 / total_reads as f64)
         )
     };
     summary_table(

@@ -10,9 +10,7 @@ use anyhow::{Context, Result};
 use log::debug;
 
 use super::coverage::TranscriptCoverage;
-use super::format::{
-    format_decimal, format_long, format_percentage, java_double_to_string, percentage_of,
-};
+use super::format::{format_decimal, format_long, format_percentage};
 use super::index::QualimapIndex;
 use super::plots;
 use super::QualimapResult;
@@ -144,7 +142,7 @@ fn compute_bias(entries: &[TranscriptCoverageEntry], order: &[usize]) -> (f64, f
         .values()
         .map(|&i| entries[i].mean_coverage)
         .collect();
-    means.sort_by(java_double_cmp);
+    means.sort_by(nan_last_cmp);
     let min_mean = means[means.len().saturating_sub(NUM_TRANSCRIPTS_FOR_BIAS + 1)];
 
     let mut five_prime_biases = Vec::new();
@@ -195,13 +193,10 @@ fn compute_bias(entries: &[TranscriptCoverageEntry], order: &[usize]) -> (f64, f
     )
 }
 
-/// Order doubles as Java's `Arrays.sort(double[])` does: NaN sorts after
-/// +Infinity (whatever its sign bit) and -0.0 before 0.0.
-fn java_double_cmp(a: &f64, b: &f64) -> std::cmp::Ordering {
-    match (a.is_nan(), b.is_nan()) {
-        (false, false) => a.total_cmp(b),
-        (a_nan, b_nan) => a_nan.cmp(&b_nan),
-    }
+/// Order doubles with NaN last (whatever its sign bit).
+fn nan_last_cmp(a: &f64, b: &f64) -> std::cmp::Ordering {
+    a.partial_cmp(b)
+        .unwrap_or_else(|| a.is_nan().cmp(&b.is_nan()))
 }
 
 /// Commons Math 2.0 `StatUtils.percentile(values, 50)`, as Qualimap uses it.
@@ -222,7 +217,7 @@ fn commons_math_median(values: &mut [f64]) -> f64 {
     let fpos = pos.floor();
     let int_pos = fpos as usize;
     let dif = pos - fpos;
-    values.sort_by(java_double_cmp);
+    values.sort_by(nan_last_cmp);
     if pos < 1.0 {
         return values[0];
     }
@@ -267,8 +262,7 @@ fn compute_mean_coverage_histogram(
 /// Write the coverage profile TSV file.
 ///
 /// Format: tab-separated, header line starting with `#`, 100 rows (0.0–99.0).
-/// Qualimap writes both columns by string concatenation, i.e. with
-/// `Double.toString` (`BamQCChart.exportData`).
+/// Values are written with Rust's `Debug` format (shortest round-trip digits, `0.0` for whole numbers).
 fn write_coverage_profile(profile: &[f64; NUM_BINS], path: &Path) -> Result<()> {
     use std::fs::File;
 
@@ -278,12 +272,8 @@ fn write_coverage_profile(profile: &[f64; NUM_BINS], path: &Path) -> Result<()> 
     writeln!(f, "#Transcript position\tTranscript coverage profile")?;
 
     for (i, &val) in profile.iter().enumerate() {
-        writeln!(
-            f,
-            "{}\t{}",
-            java_double_to_string(i as f64),
-            java_double_to_string(val)
-        )?;
+        // Positions are whole numbers, written as `0.0` to keep the files' existing format.
+        writeln!(f, "{:.1}\t{:?}", i as f64, val)?;
     }
 
     Ok(())
@@ -679,7 +669,7 @@ fn write_results_file(
             f,
             "    {label} {} ({})",
             format_long(count),
-            format_percentage(percentage_of(count, total_reads))
+            format_percentage(100.0 * count as f64 / total_reads as f64)
         )?;
     }
     writeln!(f)?;

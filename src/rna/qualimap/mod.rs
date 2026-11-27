@@ -131,19 +131,23 @@ pub(crate) fn junction_motif_rows(
         .collect()
 }
 
-/// Qualimap's strand-specificity estimation (fwd, rev).
-///
-/// `ComputeCountsTask.getFwdStrandEstimation` divides in single precision,
-/// `fwd / (float)(fwd + rev)`, so the value is computed as an `f32` and only
-/// then widened for formatting. Both are NaN when no read overlapped a feature.
+/// Strand-specificity estimation (fwd, rev): each strand's share of the reads
+/// that overlapped a feature. Both are NaN when there were none.
 pub(crate) fn strand_estimation(fwd: u64, rev: u64) -> (f64, f64) {
-    let total = (fwd + rev) as f32;
-    (f64::from(fwd as f32 / total), f64::from(rev as f32 / total))
+    let total = (fwd + rev) as f64;
+    (fwd as f64 / total, rev as f64 / total)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strand_estimation_is_a_plain_fraction() {
+        assert_eq!(strand_estimation(1, 3), (0.25, 0.75));
+        let (fwd, rev) = strand_estimation(0, 0);
+        assert!(fwd.is_nan() && rev.is_nan());
+    }
 
     fn motif_map(entries: &[(&str, u64)]) -> HashMap<String, u64> {
         entries.iter().map(|&(m, c)| (m.to_string(), c)).collect()
