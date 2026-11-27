@@ -101,6 +101,11 @@ pub fn classify_junction(
 pub struct KnownJunctionSet {
     /// Junction keys in `"CHROM:start-end"` format (uppercased chromosome).
     pub junctions: HashSet<String>,
+    /// Uppercased names of chromosomes with at least one annotated transcript.
+    ///
+    /// RSeQC's junction_saturation ignores reads on chromosomes that are not in
+    /// its BED gene model, which has one line per transcript.
+    pub chroms: HashSet<String>,
 }
 
 // ===================================================================
@@ -166,11 +171,12 @@ pub fn build_known_junctions_from_genes(genes: &IndexMap<String, Gene>) -> Known
 
     for gene in genes.values() {
         for tx in &gene.transcripts {
-            if tx.exons.len() <= 1 {
+            if tx.exons.is_empty() {
                 continue;
             }
 
             let chrom = tx.chrom.to_uppercase();
+            result.chroms.insert(chrom.clone());
 
             // Same coordinate conversion as build_reference_junctions_from_genes
             for i in 0..tx.exons.len() - 1 {
@@ -291,12 +297,14 @@ mod tests {
         // Introns: [200, 300) and [400, 500)
         let tx = Transcript {
             transcript_id: "TX1".to_string(),
+            has_transcript_id: true,
 
             chrom: "chr1".to_string(),
             start: 101,
             end: 600,
             strand: '+',
             exons: vec![(101, 200), (301, 400), (501, 600)],
+            first_exon_start: 101,
             cds_start: None,
             cds_end: None,
         };
@@ -323,12 +331,14 @@ mod tests {
     fn test_build_known_junctions_from_genes() {
         let tx = Transcript {
             transcript_id: "TX1".to_string(),
+            has_transcript_id: true,
 
             chrom: "chr1".to_string(),
             start: 101,
             end: 600,
             strand: '+',
             exons: vec![(101, 200), (301, 400), (501, 600)],
+            first_exon_start: 101,
             cds_start: None,
             cds_end: None,
         };
@@ -348,12 +358,14 @@ mod tests {
     fn test_build_junctions_skips_single_exon() {
         let tx = Transcript {
             transcript_id: "TX1".to_string(),
+            has_transcript_id: true,
 
             chrom: "chr1".to_string(),
             start: 101,
             end: 200,
             strand: '+',
             exons: vec![(101, 200)],
+            first_exon_start: 101,
             cds_start: None,
             cds_end: None,
         };
@@ -367,6 +379,8 @@ mod tests {
 
         let known = build_known_junctions_from_genes(&genes);
         assert!(known.junctions.is_empty());
+        // The chromosome still counts as annotated (RSeQC's BED has the transcript).
+        assert!(known.chroms.contains("CHR1"));
     }
 
     #[test]
@@ -374,24 +388,28 @@ mod tests {
         // Two transcripts with different splicing patterns
         let tx1 = Transcript {
             transcript_id: "TX1".to_string(),
+            has_transcript_id: true,
 
             chrom: "chr1".to_string(),
             start: 101,
             end: 600,
             strand: '+',
             exons: vec![(101, 200), (301, 600)],
+            first_exon_start: 101,
             cds_start: None,
             cds_end: None,
         };
 
         let tx2 = Transcript {
             transcript_id: "TX2".to_string(),
+            has_transcript_id: true,
 
             chrom: "chr1".to_string(),
             start: 101,
             end: 600,
             strand: '+',
             exons: vec![(101, 250), (401, 600)],
+            first_exon_start: 101,
             cds_start: None,
             cds_end: None,
         };

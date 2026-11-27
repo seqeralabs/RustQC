@@ -268,10 +268,16 @@ impl MergedGeneCoverage {
         self.coverage.get(&gene_idx).map(|v| v.as_slice())
     }
 
-    /// Iterate over all genes with coverage data.
+    /// Iterate over all genes with coverage data, in ascending gene index order.
     #[allow(dead_code)]
     pub fn iter(&self) -> impl Iterator<Item = (u32, &[i32])> {
-        self.coverage.iter().map(|(&idx, v)| (idx, v.as_slice()))
+        let mut genes: Vec<(u32, &[i32])> = self
+            .coverage
+            .iter()
+            .map(|(&idx, v)| (idx, v.as_slice()))
+            .collect();
+        genes.sort_unstable_by_key(|&(idx, _)| idx);
+        genes.into_iter()
     }
 
     /// Number of genes that have any coverage recorded.

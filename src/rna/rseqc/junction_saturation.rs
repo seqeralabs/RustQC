@@ -28,12 +28,21 @@ pub struct SaturationResult {
 /// Write the junction saturation R script.
 ///
 /// Produces an R script matching RSeQC's `junctionSaturation_plot.r` format.
+///
+/// The `pdf()` call names the PDF by the file name of `prefix` only (no
+/// directory), as RSeQC writes it when run with `-o <sample>` in the output
+/// directory. The script is then byte-identical to RSeQC's and does not
+/// depend on `--outdir`; running it from its own directory puts the PDF next
+/// to it.
 pub fn write_r_script(result: &SaturationResult, prefix: &str) -> Result<()> {
     let r_path = format!("{prefix}.junctionSaturation_plot.r");
     let mut f =
         std::fs::File::create(&r_path).with_context(|| format!("creating R script: {r_path}"))?;
 
-    let pdf_path = format!("{prefix}.junctionSaturation_plot.pdf");
+    let stem = std::path::Path::new(prefix)
+        .file_name()
+        .map_or_else(|| prefix.into(), |s| s.to_string_lossy());
+    let pdf_path = format!("{stem}.junctionSaturation_plot.pdf");
 
     // x values
     let x_str: Vec<String> = result.percentages.iter().map(|p| p.to_string()).collect();
@@ -104,3 +113,36 @@ pub fn write_summary(result: &SaturationResult, path: &str) -> Result<()> {
 
 // Note: CIGAR intron extraction tests are in the common module
 // (rseqc::common::tests). Tests here focus on saturation-specific logic.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_r_script_matches_rseqc_format() {
+        let dir = std::env::temp_dir().join(format!("rustqc_junc_sat_r_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let prefix = dir.join("sample").to_string_lossy().to_string();
+        let result = SaturationResult {
+            percentages: vec![50, 100],
+            known_counts: vec![1500, 2944],
+            novel_counts: vec![200, 317],
+            all_counts: vec![1700, 3261],
+        };
+        write_r_script(&result, &prefix).unwrap();
+        let script =
+            std::fs::read_to_string(format!("{prefix}.junctionSaturation_plot.r")).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        let lines: Vec<&str> = script.lines().collect();
+        // The PDF is named without the output directory, as in RSeQC run with -o sample.
+        assert_eq!(lines[0], "pdf('sample.junctionSaturation_plot.pdf')");
+        assert_eq!(lines[1], "x=c(50,100)");
+        assert_eq!(lines[2], "y=c(1500,2944)");
+        assert_eq!(lines[3], "z=c(1700,3261)");
+        assert_eq!(lines[4], "w=c(200,317)");
+        assert_eq!(lines[5], "m=max(2,3,0)");
+        assert_eq!(lines[6], "n=min(1,1,0)");
+        assert_eq!(lines.len(), 12);
+        assert!(script.ends_with("dev.off()\n"));
+    }
+}

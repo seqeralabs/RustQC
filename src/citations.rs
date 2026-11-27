@@ -34,7 +34,7 @@ const FEATURECOUNTS: Citation = Citation {
 
 const RSEQC: Citation = Citation {
     heading: "RSeQC (v5.0.4)",
-    description: "RustQC reimplements eight RSeQC quality control tools.",
+    description: "RustQC reimplements nine RSeQC quality control tools.",
     reference: "Wang L, Wang S, Li W. RSeQC: quality control of RNA-seq experiments. *Bioinformatics*. 2012;28(16):2184-2185.",
     url: "https://rseqc.sourceforge.net/",
     doi: "10.1093/bioinformatics/bts356",

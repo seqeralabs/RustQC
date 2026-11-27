@@ -458,11 +458,13 @@ mod tests {
         // all exon bases become CDS exon bases.
         let tx_plus = Transcript {
             transcript_id: "TX_NC_PLUS".to_string(),
+            has_transcript_id: true,
             chrom: "chr1".to_string(),
             start: 101,
             end: 400,
             strand: '+',
             exons: vec![(101, 200), (301, 400)],
+            first_exon_start: 101,
             cds_start: None,
             cds_end: None,
         };
@@ -471,11 +473,13 @@ mod tests {
         // All exon bases should also become CDS exon bases.
         let tx_minus = Transcript {
             transcript_id: "TX_NC_MINUS".to_string(),
+            has_transcript_id: true,
             chrom: "chr1".to_string(),
             start: 501,
             end: 800,
             strand: '-',
             exons: vec![(501, 600), (701, 800)],
+            first_exon_start: 501,
             cds_start: None,
             cds_end: None,
         };

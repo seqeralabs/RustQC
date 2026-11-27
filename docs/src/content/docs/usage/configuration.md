@@ -18,8 +18,8 @@ The configuration file mirrors the CLI subcommand hierarchy. All RNA-Seq QC
 settings live under a top-level `rna:` key, matching the `rustqc rna` subcommand.
 
 :::note
-The `rna:` section controls all tools: dupRadar, featureCounts, all 8 RSeQC tools
-(including TIN), Qualimap, preseq, and samtools. Each tool has an `enabled` toggle
+The `rna:` section controls all tools: dupRadar, featureCounts, the RSeQC tools
+(including TIN and split_bam), Qualimap, preseq, and samtools. Each tool has an `enabled` toggle
 and tool-specific parameter overrides where applicable.
 CLI flags take precedence over config file values.
 :::
@@ -131,6 +131,8 @@ Run `rustqc rna --help` to see the associated environment variable for each flag
 | `RUSTQC_THREADS` | `--threads` | Number of threads |
 | `RUSTQC_MAPQ` | `--mapq` | MAPQ quality cutoff |
 | `RUSTQC_BIOTYPE_ATTRIBUTE` | `--biotype-attribute` | GTF biotype attribute name |
+| `RUSTQC_COUNT_MULTI_MAPPING` | `--count-multi-mapping` | featureCounts `-M` |
+| `RUSTQC_COUNT_MULTI_OVERLAPPING` | `--count-multi-overlapping` | featureCounts `-O` |
 | `RUSTQC_SKIP_DUP_CHECK` | `--skip-dup-check` | Skip duplicate-marking check |
 | `RUSTQC_QUIET` | `--quiet` | Suppress output |
 | `RUSTQC_VERBOSE` | `--verbose` | Show additional detail |
@@ -153,6 +155,8 @@ Run `rustqc rna --help` to see the associated environment variable for each flag
 | `RUSTQC_TIN_SEED` | `--tin-seed` |
 | `RUSTQC_SKIP_TIN` | `--skip-tin` |
 | `RUSTQC_SKIP_READ_DUPLICATION` | `--skip-read-duplication` |
+| `RUSTQC_SPLIT_BAM_BED` | `--split-bam-bed` |
+| `RUSTQC_SPLIT_BAM_WRITE_BAMS` | `--split-bam-write-bams` |
 | `RUSTQC_SKIP_PRESEQ` | `--skip-preseq` |
 | `RUSTQC_PRESEQ_SEED` | `--preseq-seed` |
 | `RUSTQC_PRESEQ_MAX_EXTRAP` | `--preseq-max-extrap` |
@@ -331,6 +335,10 @@ An explicit mapping from GTF chromosome names (keys) to alignment file chromosom
 names (values). Applied after the prefix, so explicit entries can override the
 prefix for specific chromosomes.
 
+Each alignment chromosome name may appear only once as a value. A mapping that
+sends two GTF chromosomes to the same alignment chromosome is rejected when the
+configuration is loaded.
+
 ```yaml
 rna:
   # After adding "chr" prefix, override the mitochondrial chromosome
@@ -361,7 +369,7 @@ rna:
     density_scatter_plot: true # Density scatter plot (PNG + SVG)
     boxplot: true # Duplication rate boxplot (PNG + SVG)
     expression_histogram: true # Expression histogram (PNG + SVG)
-    multiqc_intercept: true # MultiQC intercept/slope file
+    multiqc_intercept: true # MultiQC intercept file
     multiqc_curve: true # MultiQC fitted curve file
 ```
 
@@ -389,7 +397,13 @@ rna:
     biotype_counts_mqc: true # Biotype counts MultiQC bargraph file
     biotype_rrna_mqc: true # Biotype rRNA percentage MultiQC file
     biotype_attribute: "gene_biotype" # GTF attribute for biotype grouping
+    count_multi_mapping: false # featureCounts -M: count multi-mapping reads
+    count_multi_overlapping: false # featureCounts -O: count reads for every overlapping feature
 ```
+
+`count_multi_mapping` and `count_multi_overlapping` are also enabled by the
+`--count-multi-mapping` / `--count-multi-overlapping` CLI flags. See
+[Multi-mapping and multi-overlapping reads](../rna/featurecounts/#multi-mapping-and-multi-overlapping-reads).
 
 ### `biotype_attribute`
 
@@ -412,8 +426,8 @@ printed and biotype counting is skipped.
 
 ## RSeQC tool settings
 
-Each of the 8 RSeQC tools has an `enabled` toggle (default `true`) and
-tool-specific parameter overrides. Disabling a tool here prevents it from
+Each RSeQC tool has an `enabled` toggle (default `true`) and
+tool-specific parameter overrides. split_bam additionally needs a BED file. Disabling a tool here prevents it from
 running even when annotation is provided. CLI flags take precedence over
 config file values for all parameters.
 
@@ -478,7 +492,7 @@ Requires annotation (`--gtf`). The `min_intron` can also be set via `--min-intro
 rna:
   junction_saturation:
     enabled: true
-    seed: 42 # Random seed for reproducible sampling (default: 42)
+    seed: 42 # Seed for the sampling shuffle; reproducible, but not RSeQC's draws (default: 42)
     min_coverage: 1 # Minimum read count to consider a junction (default: 1)
     percentile_floor: 5 # Sampling start percentage (default: 5)
     percentile_ceiling: 100 # Sampling end percentage (default: 100)
@@ -522,6 +536,23 @@ measures transcript integrity via Shannon entropy of read coverage uniformity.
 The `seed` can also be set via `--tin-seed`.
 
 > **CLI shortcut:** Use `--skip-tin` to disable without a config file.
+
+### split_bam
+
+```yaml
+rna:
+  split_bam:
+    enabled: true # Run when a BED file is set (default: true)
+    bed: /refs/hg38_rRNA.bed # BED12 of regions, plain or .gz (default: none, tool off)
+    write_bams: false # Also write .in/.ex/.junk BAMs, one extra pass (default: false)
+```
+
+Reimplements RSeQC `split_bam.py`, typically for rRNA quantification. Nothing
+runs unless `bed` is set. `--split-bam-bed` overrides `bed` and enables the tool
+even if `enabled: false`; `--split-bam-write-bams` sets `write_bams`. BED
+chromosome names are matched case-insensitively against the alignment file's
+reference names; `chromosome_prefix` / `chromosome_mapping` do not apply. See
+[split_bam](../rna/rseqc/#split_bam).
 
 ## qualimap
 

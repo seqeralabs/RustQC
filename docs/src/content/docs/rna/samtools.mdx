@@ -40,7 +40,8 @@ written to a `samtools/` subdirectory under the output directory. Use
 **File:** `<sample>.flagstat`
 
 A text file matching the `samtools flagstat` output format. Each line reports a
-count with the format `<count> + 0 <description>`. The 16 standard metrics are:
+count with the format `<QC-passed> + <QC-failed> <description>`. The 16 standard
+metrics are:
 
 | Line | Description                                   |
 | ---- | --------------------------------------------- |
@@ -61,7 +62,8 @@ count with the format `<count> + 0 <description>`. The 16 standard metrics are:
 | 15   | With mate mapped to a different chr           |
 | 16   | With mate mapped to a different chr (mapQ>=5) |
 
-The QC-failed column is always 0 (RustQC does not separate QC-pass/fail counts).
+Records with the QC-fail flag (0x200) are counted in the second column, as in
+samtools.
 
 Example:
 
@@ -266,9 +268,16 @@ unmapped counts, plus the `*` row for unplaced reads.
 **Result: Near-identical**
 
 All SN (Summary Numbers) fields and 19 of 20 histogram sections match exactly
-between `samtools stats` and RustQC on both datasets. The GCD (GC depth) section
-shows minor differences (max absolute difference of 0.018) due to sampling
-variation in the GC depth calculation.
+between `samtools stats` and RustQC on both datasets. In this run the GCD (GC
+depth) section showed small differences (max absolute difference of 0.018). They
+came from rounding and floating-point precision details of the samtools
+calculation, which RustQC now reproduces, so every data line of the GCD section
+matches as well.
+
+RustQC reproduces `samtools stats` 1.22.1 run without options on a
+coordinate-sorted BAM. One case is known to differ: the coverage distribution
+(`COV`) when reads are 300 bases or longer, because samtools then resizes its
+coverage buffer and drops part of the pending coverage.
 
 <details>
 <summary>Large dataset (GM12878)</summary>

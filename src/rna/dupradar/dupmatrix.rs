@@ -240,7 +240,7 @@ pub struct DupMatStats {
 
 /// Format a float for TSV output, handling NaN as "NA" to match R's output.
 /// Uses R-compatible formatting with up to 15 significant digits.
-fn format_float(v: f64) -> String {
+pub(crate) fn format_float(v: f64) -> String {
     if v.is_nan() {
         "NA".to_string()
     } else if v.is_infinite() {

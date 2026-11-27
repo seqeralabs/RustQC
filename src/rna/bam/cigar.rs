@@ -41,6 +41,22 @@ impl Cigar {
         }
     }
 
+    /// BAM binary encoding (`len << 4 | op`, op codes `MIDNSHP=X`).
+    pub fn encode(&self) -> u32 {
+        let op = match self {
+            Self::Match(_) => 0,
+            Self::Ins(_) => 1,
+            Self::Del(_) => 2,
+            Self::RefSkip(_) => 3,
+            Self::SoftClip(_) => 4,
+            Self::HardClip(_) => 5,
+            Self::Pad(_) => 6,
+            Self::Equal(_) => 7,
+            Self::Diff(_) => 8,
+        };
+        (self.len() << 4) | op
+    }
+
     /// Whether this operation has zero length.
     pub fn is_empty(&self) -> bool {
         self.len() == 0

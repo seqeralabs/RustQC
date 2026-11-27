@@ -12,9 +12,27 @@ use anyhow::Result;
 use indexmap::IndexMap;
 
 use super::bam_stat::{BamStatResult, GcDepthBin};
+use super::flagstat::FlagstatCounts;
+use super::stats_coverage::{resolve_carries, ContigCovSummary, ContigCoverage};
 
 /// Default GC-depth bin size in base pairs (matches upstream samtools default).
 const GCD_BIN_SIZE: u64 = 20_000;
+/// samtools stats insert size cap (`-i`, default 8000).
+const MAX_INSERT_SIZE: u64 = 8000;
+/// Longest indel in samtools stats' ID section (`nindels`, fixed at 300).
+const MAX_INDEL_LEN: i64 = 300;
+/// samtools stats read order: first fragment (unpaired, or read1 only).
+const READ_ORDER_FIRST: u8 = 1;
+/// samtools stats read order: last fragment (read2 only).
+const READ_ORDER_LAST: u8 = 2;
+
+/// samtools stats read order of a record: 1 = first, 2 = last, 0 or 3 = other.
+fn read_order(flags: u16) -> u8 {
+    if flags & BAM_FPAIRED == 0 {
+        return READ_ORDER_FIRST;
+    }
+    u8::from(flags & BAM_FREAD1 != 0) + 2 * u8::from(flags & BAM_FREAD2 != 0)
+}
 use super::common::{self, KnownJunctionSet, ReferenceJunctions};
 use super::infer_experiment::{GeneModel, InferExperimentResult};
 use super::inner_distance::{
@@ -24,6 +42,7 @@ use super::junction_annotation::{Junction, JunctionClass, JunctionResults};
 use super::junction_saturation::SaturationResult;
 use super::read_distribution::{ChromIntervals, ReadDistributionResult, RegionSets};
 use super::read_duplication::ReadDuplicationResult;
+use super::split_bam::{SplitBamAccum, SplitBamLookup};
 use super::tin::TinAccum;
 use crate::rna::preseq::PreseqAccum;
 
@@ -50,6 +69,8 @@ pub struct RseqcAnnotations<'a> {
 
     /// TIN index for transcript integrity number calculation.
     pub tin_index: Option<&'a super::tin::TinIndex>,
+    /// Per-target BED blocks for split_bam (built per alignment file).
+    pub split_bam: Option<&'a SplitBamLookup<'a>>,
 }
 
 /// Per-tool configuration parameters.
@@ -110,6 +131,8 @@ pub struct RseqcConfig {
     pub preseq_enabled: bool,
     /// Maximum merged PE fragment length for preseq (preseq's `-seg_len`).
     pub preseq_max_segment_length: i64,
+    /// Whether split_bam BED classification is enabled.
+    pub split_bam_enabled: bool,
 }
 
 // ===================================================================
@@ -157,7 +180,8 @@ pub struct BamStatAccum {
     // --- samtools flagstat additional fields ---
     /// Secondary alignments (0x100) — counted independently of QC/dup.
     pub secondary: u64,
-    /// Supplementary alignments (0x800) — counted independently of QC/dup.
+    /// Supplementary alignments (0x800) that are not also secondary, as in
+    /// samtools (SECONDARY takes priority) — independent of QC/dup.
     pub supplementary: u64,
     /// All mapped records (not 0x4), regardless of QC/dup.
     pub mapped: u64,
@@ -167,9 +191,11 @@ pub struct BamStatAccum {
     pub read1_flagstat: u64,
     /// Read2 in pair (0x80), regardless of QC/dup — for flagstat.
     pub read2_flagstat: u64,
-    /// First fragments for samtools stats: primary reads that are not "last fragments".
+    /// samtools stats first fragments: primary reads with a sequence that are
+    /// unpaired, or paired with only the read1 flag.
     pub first_fragments: u64,
-    /// Last fragments for samtools stats: primary reads with 0x80 flag.
+    /// samtools stats last fragments: primary paired reads with a sequence and
+    /// only the read2 flag.
     pub last_fragments: u64,
     /// Properly paired reads (0x1 + 0x2), regardless of QC/dup.
     pub properly_paired: u64,
@@ -191,30 +217,30 @@ pub struct BamStatAccum {
     // --- samtools stats SN additional fields ---
     /// Sum of query sequence lengths for all primary reads (non-secondary, non-supplementary).
     pub total_len: u64,
-    /// Sum of first fragment (read1 or unpaired) sequence lengths.
+    /// Sum of first fragment sequence lengths.
     pub total_first_fragment_len: u64,
-    /// Sum of last fragment (read2) sequence lengths.
+    /// Sum of last fragment sequence lengths.
     pub total_last_fragment_len: u64,
     /// Sum of query lengths for mapped primary reads.
     pub bases_mapped: u64,
-    /// Sum of M/=/X CIGAR operations for mapped primary reads.
+    /// Sum of M/I/=/X CIGAR operations for mapped non-secondary reads.
     pub bases_mapped_cigar: u64,
     /// Sum of query lengths for duplicate-flagged primary reads.
     pub bases_duplicated: u64,
-    /// Maximum query sequence length (among primary reads).
+    /// Maximum read length including hard clips (non-secondary reads).
     pub max_len: u64,
-    /// Maximum first-fragment sequence length.
+    /// Maximum first-fragment read length including hard clips.
     pub max_first_fragment_len: u64,
-    /// Maximum last-fragment sequence length.
+    /// Maximum last-fragment read length including hard clips.
     pub max_last_fragment_len: u64,
-    /// Sum of average per-read base qualities (for average-of-averages).
+    /// Sum of base qualities of primary first and last fragments.
     pub quality_sum: f64,
-    /// Number of reads contributing to quality_sum (primary, non-QC-fail).
+    /// Number of bases contributing to quality_sum.
     pub quality_count: u64,
-    /// Sum of NM tag values across mapped primary reads.
+    /// Sum of NM tag values across mapped non-secondary reads (wrapping).
     pub mismatches: u64,
     /// Insert size with orientation: abs_tlen → [total, inward, outward, other].
-    /// Only one mate per pair contributes (upstream mate), capped at 8000.
+    /// Both mates contribute (halved at output), capped at 8000.
     pub is_hist: HashMap<u64, [u64; 4]>,
     /// Inward-oriented pairs (FR).
     pub inward_pairs: u64,
@@ -230,11 +256,11 @@ pub struct BamStatAccum {
     pub primary_duplicates: u64,
     /// Primary mapped reads with MAPQ = 0 (matching upstream samtools stats).
     pub reads_mq0: u64,
-    /// Primary non-QC-fail mapped paired reads where mate is also mapped.
+    /// Primary mapped paired reads with a sequence whose mate is also mapped.
     pub reads_mapped_and_paired: u64,
 
     // --- samtools stats histogram/distribution fields ---
-    /// Read length histogram (all primary reads): length → count.
+    /// Read length histogram (primary reads, length including hard clips): length → count.
     pub rl_hist: HashMap<u64, u64>,
     /// First fragment read length histogram: length → count.
     pub frl_hist: HashMap<u64, u64>,
@@ -242,11 +268,11 @@ pub struct BamStatAccum {
     pub lrl_hist: HashMap<u64, u64>,
     /// MAPQ histogram: primary, mapped, !qcfail, !dup (quality 0-255).
     pub mapq_hist: [u64; 256],
-    /// Per-cycle quality for first fragments (primary, mapped, !qcfail, !dup).
-    /// Outer: cycle index. Inner: quality value → count (64 buckets covers Q0-Q63).
-    pub ffq: Vec<[u64; 64]>,
-    /// Per-cycle quality for last fragments.
-    pub lfq: Vec<[u64; 64]>,
+    /// Per-cycle quality for primary first fragments (read-oriented cycles).
+    /// Outer: cycle index. Inner: quality value (0-255) → count.
+    pub ffq: Vec<[u64; 256]>,
+    /// Per-cycle quality for primary last fragments.
+    pub lfq: Vec<[u64; 256]>,
     /// GC content step-function for first fragments, 200 bins (matching samtools ngc=200).
     /// Each bin i stores the number of reads with gc_count * 199 / seq_len <= i.
     pub gcf: [u64; 200],
@@ -279,20 +305,38 @@ pub struct BamStatAccum {
     /// Coverage distribution: depth → number of reference positions at that depth.
     /// Populated from a round buffer pileup during sorted BAM processing.
     pub cov_hist: HashMap<u32, u64>,
-    /// Circular buffer for coverage pileup, matching upstream samtools design.
-    /// `cov_buf[cov_buf_idx]` corresponds to reference position `cov_buf_pos`.
-    /// The buffer grows dynamically to accommodate `max_read_length * 5`.
-    cov_buf: Vec<u32>,
-    /// Index into `cov_buf` corresponding to `cov_buf_pos`.
-    cov_buf_idx: usize,
-    /// Reference position of the element at `cov_buf[cov_buf_idx]`.
-    cov_buf_pos: i64,
-    /// Current chromosome tid for round buffer tracking.
-    cov_buf_tid: i32,
+    /// Coverage round buffer of the contig being read.
+    cov_contig: Option<ContigCoverage>,
+    /// Finished contigs, for the slot samtools carries between contigs.
+    cov_done: Vec<ContigCovSummary>,
+
+    // --- samtools stats counters without a bam_stat/flagstat equivalent ---
+    /// Primary reads with a sequence that are neither first nor last fragments
+    /// (paired with both or neither of the read1/read2 flags).
+    pub other_fragments: u64,
+    /// Primary reads with a sequence and the QC-fail flag.
+    pub stats_qcfail: u64,
+    /// Primary unmapped reads with a sequence.
+    pub stats_unmapped: u64,
+    /// Primary reads with a sequence and the paired flag.
+    pub stats_paired_tech: u64,
+    /// Primary reads with a sequence, both mates mapped and the proper-pair flag.
+    pub stats_properly_paired: u64,
+    /// Primary reads with a sequence, both mates mapped, mate on another contig.
+    pub stats_anomalous: u64,
+    /// Duplicate-flagged non-secondary reads with a sequence.
+    pub stats_dup_reads: u64,
+    /// Sequence length of `stats_dup_reads`.
+    pub stats_dup_bases: u64,
+
+    /// samtools flagstat counters, split by QC-fail.
+    pub flagstat: FlagstatCounts,
 
     // --- GC-depth (GCD section) fields ---
-    /// Accumulated GC-depth bins (one per `GCD_BIN_SIZE`-bp genomic window).
-    gcd_bins: Vec<GcDepthBin>,
+    /// GC-depth bins (one per `GCD_BIN_SIZE`-bp window) with their contig and start.
+    gcd_bins: Vec<(i32, i64, GcDepthBin)>,
+    /// Index in `gcd_bins` of the bin being filled.
+    gcd_cur: Option<usize>,
     /// Start position of the current GCD bin.
     gcd_pos: i64,
     /// Chromosome tid of the current GCD bin.
@@ -372,11 +416,19 @@ impl Default for BamStatAccum {
             ic: Vec::new(),
             chk: [0u32; 3],
             cov_hist: HashMap::new(),
-            cov_buf: vec![0u32; 1500], // matches upstream samtools: nbases * 5 = 300 * 5
-            cov_buf_idx: 0,
-            cov_buf_pos: 0,
-            cov_buf_tid: -1,
+            cov_contig: None,
+            cov_done: Vec::new(),
+            other_fragments: 0,
+            stats_qcfail: 0,
+            stats_unmapped: 0,
+            stats_paired_tech: 0,
+            stats_properly_paired: 0,
+            stats_anomalous: 0,
+            stats_dup_reads: 0,
+            stats_dup_bases: 0,
+            flagstat: FlagstatCounts::default(),
             gcd_bins: Vec::new(),
+            gcd_cur: None,
             gcd_pos: -1,
             gcd_tid: -1,
         }
@@ -407,27 +459,22 @@ impl BamStatAccum {
         let mapq = record.mapq();
 
         // =================================================================
-        // samtools flagstat counters (count ALL records, no early returns)
+        // samtools flagstat counters (count ALL records, no early returns).
+        // `flagstat` is what the flagstat output uses; the individual fields
+        // are kept for the library API.
         // =================================================================
+        // SECONDARY takes priority over SUPPLEMENTARY, as in samtools
+        // `flagstat_loop` and `stats.c`: a record with both flags is secondary
+        // only, so `primary + secondary + supplementary == total`.
         if is_secondary {
             self.secondary += 1;
-        }
-        if is_supplementary {
+        } else if is_supplementary {
             self.supplementary += 1;
         }
         if is_mapped {
             self.mapped += 1;
         }
-        // samtools stats: "1st fragments" / "last fragments" count primary reads only
-        // For paired reads: read2 flag -> last, everything else -> 1st
-        // For SE reads (no PAIRED flag): all counted as 1st fragments
-        if is_primary {
-            if flags & BAM_FREAD2 != 0 {
-                self.last_fragments += 1;
-            } else {
-                self.first_fragments += 1;
-            }
-        }
+        self.flagstat.add(flags, tid, record.mtid(), mapq);
         // samtools flagstat: paired-read metrics count PRIMARY reads only
         // (secondary/supplementary are excluded from paired/read1/read2/properly-paired counts)
         if is_paired && is_primary {
@@ -483,7 +530,6 @@ impl BamStatAccum {
 
             let seq_len = record.seq_len();
             if seq_len > 0 {
-                let seq_len = seq_len as usize;
                 let seq = record.seq();
                 let seq_bytes = seq.encoded_bytes();
                 let seq_nbytes = seq_len.div_ceil(2);
@@ -497,521 +543,27 @@ impl BamStatAccum {
             }
         }
 
-        // Track gc_count from the primary-read per-cycle loop so the GCD
-        // section below can reuse it without re-scanning the sequence.
-        let mut primary_gc_count: u64 = 0;
-
-        // =================================================================
-        // samtools stats SN counters (primary reads only)
-        // =================================================================
+        // Primary-read totals kept for the library API (`BamStatResult`).
+        let seq_len = record.seq_len();
         if is_primary {
             self.primary_count += 1;
-            let seq_len = record.seq_len() as u64;
-            let mate_unmapped = flags & BAM_FMUNMAP != 0;
-
-            self.total_len += seq_len;
-            let is_last_fragment = is_paired && flags & BAM_FREAD2 != 0;
-            if is_last_fragment {
-                self.total_last_fragment_len += seq_len;
-                if seq_len > self.max_last_fragment_len {
-                    self.max_last_fragment_len = seq_len;
-                }
-            } else {
-                self.total_first_fragment_len += seq_len;
-                if seq_len > self.max_first_fragment_len {
-                    self.max_first_fragment_len = seq_len;
-                }
-            }
-            if seq_len > self.max_len {
-                self.max_len = seq_len;
-            }
-
-            // RL/FRL/LRL: read length histograms (all primary reads)
-            *self.rl_hist.entry(seq_len).or_insert(0) += 1;
-            if is_last_fragment {
-                *self.lrl_hist.entry(seq_len).or_insert(0) += 1;
-            } else {
-                *self.frl_hist.entry(seq_len).or_insert(0) += 1;
-            }
-
             if is_dup {
                 self.primary_duplicates += 1;
-                self.bases_duplicated += seq_len;
-            }
-            // "reads mapped and paired" for samtools stats: primary, non-QC-fail,
-            // mapped, paired, mate also mapped
-            if is_mapped && is_paired && !is_qcfail && !mate_unmapped {
-                self.reads_mapped_and_paired += 1;
+                self.bases_duplicated += seq_len as u64;
             }
             if is_mapped {
                 self.primary_mapped += 1;
-                self.bases_mapped += seq_len;
-
-                // samtools stats: reads MQ0 counts primary mapped reads with MAPQ=0
-                // (upstream stats.c: MQ0 is counted inside collect_orig_read_stats,
-                // which is only called for IS_ORIGINAL reads = non-secondary, non-supplementary)
-                if record.mapq() == 0 {
-                    self.reads_mq0 += 1;
-                }
-
-                // NOTE: bases_mapped_cigar is now computed in the IC/ID CIGAR
-                // loop below (for all mapped non-secondary reads) to avoid a
-                // separate full CIGAR traversal here.
-
-                // NM tag (edit distance)
-                if let Ok(bam::record::Aux::U8(nm)) = record.aux(b"NM") {
-                    self.mismatches += u64::from(nm);
-                } else if let Ok(bam::record::Aux::U16(nm)) = record.aux(b"NM") {
-                    self.mismatches += u64::from(nm);
-                } else if let Ok(bam::record::Aux::U32(nm)) = record.aux(b"NM") {
-                    self.mismatches += u64::from(nm);
-                } else if let Ok(bam::record::Aux::I8(nm)) = record.aux(b"NM") {
-                    if nm > 0 {
-                        self.mismatches += nm as u64;
-                    }
-                } else if let Ok(bam::record::Aux::I16(nm)) = record.aux(b"NM") {
-                    if nm > 0 {
-                        self.mismatches += nm as u64;
-                    }
-                } else if let Ok(bam::record::Aux::I32(nm)) = record.aux(b"NM") {
-                    if nm > 0 {
-                        self.mismatches += nm as u64;
-                    }
-                }
-
-                // Insert size + orientation for paired primary reads where both
-                // mates are mapped. Matches samtools stats gate:
-                //   IS_PAIRED_AND_MAPPED && IS_ORIGINAL
-                //   if (isize > 0 || tid == mtid)
-                // Both mates contribute; samtools divides by 2 at output.
-                // We do the same in write_insert_size() and the SN section.
-                if is_paired && !mate_unmapped {
-                    let tid = record.tid();
-                    let mtid = record.mtid();
-                    let tlen = record.insert_size();
-                    let abs_tlen = tlen.unsigned_abs();
-
-                    if abs_tlen > 0 || tid == mtid {
-                        let pos = record.pos();
-                        let mpos = record.mpos();
-
-                        // Compute orientation (only meaningful for same-chromosome)
-                        let pos_fst = mpos - pos;
-                        let is_fst: i64 = if flags & BAM_FREAD1 != 0 { 1 } else { -1 };
-                        let is_fwd: i64 = if flags & BAM_FREVERSE != 0 { -1 } else { 1 };
-                        let is_mfwd: i64 = if flags & BAM_FMREVERSE != 0 { -1 } else { 1 };
-
-                        // orientation_idx: 1=inward, 2=outward, 3=other
-                        let orientation_idx = if is_fwd * is_mfwd > 0 {
-                            self.other_orientation += 1;
-                            3usize
-                        } else if is_fst * pos_fst > 0 {
-                            if is_fst * is_fwd > 0 {
-                                self.inward_pairs += 1;
-                                1usize
-                            } else {
-                                self.outward_pairs += 1;
-                                2usize
-                            }
-                        } else if is_fst * pos_fst < 0 {
-                            if is_fst * is_fwd > 0 {
-                                self.outward_pairs += 1;
-                                2usize
-                            } else {
-                                self.inward_pairs += 1;
-                                1usize
-                            }
-                        } else {
-                            self.inward_pairs += 1;
-                            1usize
-                        };
-
-                        if abs_tlen > 0 {
-                            // Cap at MAX_INSERT_SIZE (8000), matching
-                            // samtools stats which accumulates overflow
-                            // into the cap bucket.
-                            let capped = u64::from(abs_tlen.min(8000));
-                            let entry = self.is_hist.entry(capped).or_insert([0; 4]);
-                            entry[0] += 1; // total
-                            entry[orientation_idx] += 1;
-                        }
-                    }
-                }
             }
+        }
 
-            // Average quality for primary non-QC-fail reads.
-            // Upstream samtools stats computes per-BASE quality average:
-            // sum of all individual base qualities / total bases.
-            // (Not a per-read average of averages.)
-            if !is_qcfail {
-                let quals = record.qual();
-                if !quals.is_empty() {
-                    let base_qual_sum: f64 = quals.iter().map(|&q| f64::from(q)).sum::<f64>();
-                    self.quality_sum += base_qual_sum;
-                    self.quality_count += quals.len() as u64;
-                }
-            }
-
-            // =============================================================
-            // MAPQ histogram: primary + mapped + !qcfail + !dup
-            // (matches samtools stats.c:1239 five-flag exclusion)
-            // =============================================================
-            if is_mapped && !is_qcfail && !is_dup {
-                self.mapq_hist[mapq as usize] += 1;
-            }
-
-            // =============================================================
-            // Per-cycle quality & base composition histograms:
-            // FFQ/LFQ, FBC/LBC, GCF/GCL, FTC/LTC, FBC_RO/LBC_RO
-            //
-            // Upstream samtools stats includes duplicates, unmapped, and
-            // qcfail reads in these histograms (collect_orig_read_stats
-            // has no such checks). Only secondary+supplementary are
-            // excluded (via IS_ORIGINAL), which is already handled by
-            // the outer is_primary guard.
-            // =============================================================
-            {
-                let is_reverse = flags & BAM_FREVERSE != 0;
-
-                let seq = record.seq();
-                let quals = record.qual();
-                let read_len = seq.len();
-
-                // Determine which arrays to use (first vs last fragment)
-                // If paired: read2 = last, read1 = first. If SE: all = first.
-                let (qual_arr, base_arr, base_ro_arr, gc_arr, tc_arr) = if is_last_fragment {
-                    (
-                        &mut self.lfq,
-                        &mut self.lbc,
-                        &mut self.lbc_ro,
-                        &mut self.gcl,
-                        &mut self.ltc,
-                    )
-                } else {
-                    (
-                        &mut self.ffq,
-                        &mut self.fbc,
-                        &mut self.fbc_ro,
-                        &mut self.gcf,
-                        &mut self.ftc,
-                    )
-                };
-
-                // Ensure per-cycle arrays are large enough
-                if read_len > qual_arr.len() {
-                    qual_arr.resize(read_len, [0u64; 64]);
-                }
-                if read_len > base_arr.len() {
-                    base_arr.resize(read_len, [0u64; 6]);
-                }
-                if read_len > base_ro_arr.len() {
-                    base_ro_arr.resize(read_len, [0u64; 6]);
-                }
-                if read_len > self.gcc_rc.len() {
-                    self.gcc_rc.resize(read_len, [0u64; 4]);
-                }
-
-                let mut gc_count: u64 = 0;
-
-                // Pre-built lookup tables for the per-cycle inner loop,
-                // avoiding branches and match overhead on every base.
-                //
-                // BAM 4-bit encoding: A=1, C=2, G=4, T=8, N=15, others=0,3,5..14
-                // BASE_IDX[nibble] → 0=A, 1=C, 2=G, 3=T, 4=N, 5=Other
-                const BASE_IDX: [u8; 16] = [5, 0, 1, 5, 2, 5, 5, 5, 3, 5, 5, 5, 5, 5, 5, 4];
-                // RC_IDX[base_idx] → reverse-complement base_idx (A↔T, C↔G)
-                // Only meaningful for base_idx 0-3 (ACGT). Index 4/5 not used.
-                const RC_IDX: [u8; 6] = [3, 2, 1, 0, 4, 5]; // A→T, C→G, G→C, T→A
-
-                // Hoist the is_reverse branch outside the inner loop so the
-                // compiler can version the loop and potentially auto-vectorize
-                // each variant independently.
-                if !is_reverse {
-                    for i in 0..read_len {
-                        let q = quals[i] as usize;
-                        qual_arr[i][q.min(63)] += 1;
-
-                        let base_idx = BASE_IDX[seq.encoded_base(i) as usize] as usize;
-                        base_arr[i][base_idx] += 1;
-                        base_ro_arr[i][base_idx] += 1;
-                        if base_idx < 4 {
-                            self.gcc_rc[i][base_idx] += 1;
-                        }
-                        if base_idx == 1 || base_idx == 2 {
-                            gc_count += 1;
-                        }
-                        if base_idx < 5 {
-                            tc_arr[base_idx] += 1;
-                        }
-                    }
-                } else {
-                    for i in 0..read_len {
-                        let ro_cycle = read_len - 1 - i;
-                        let q = quals[i] as usize;
-                        qual_arr[ro_cycle][q.min(63)] += 1;
-
-                        let base_idx = BASE_IDX[seq.encoded_base(i) as usize] as usize;
-                        base_arr[i][base_idx] += 1;
-                        base_ro_arr[ro_cycle][base_idx] += 1;
-                        if base_idx < 4 {
-                            self.gcc_rc[ro_cycle][RC_IDX[base_idx] as usize] += 1;
-                        }
-                        if base_idx == 1 || base_idx == 2 {
-                            gc_count += 1;
-                        }
-                        if base_idx < 5 {
-                            tc_arr[base_idx] += 1;
-                        }
-                    }
-                }
-
-                // Save gc_count for GCD section below (avoids re-scanning the sequence).
-                primary_gc_count = gc_count;
-
-                // GC content: cumulative step function with ngc=200 bins.
-                // Matches samtools stats.c:925-941. For a read with gc_count G/C
-                // bases out of read_len total, increment bins gc_idx_min..gc_idx_max.
-                let ngc: usize = 200;
-                if let (Some(gc_idx_min), Some(gc_idx_max)) = (
-                    (gc_count as usize * (ngc - 1)).checked_div(read_len),
-                    ((gc_count as usize + 1) * (ngc - 1)).checked_div(read_len),
-                ) {
-                    let gc_idx_max = gc_idx_max.min(ngc - 1);
-                    for item in gc_arr.iter_mut().take(gc_idx_max).skip(gc_idx_min) {
-                        *item += 1;
-                    }
-                }
-            }
-        } // if is_primary
-
-        // =============================================================
-        // Indel distribution (ID) and indels per cycle (IC) from CIGAR.
-        //
-        // Upstream samtools stats calls count_indels() AFTER the
-        // secondary-read early return (line 1206-1210) and the
-        // IS_UNMAPPED return (line 1255), but OUTSIDE IS_ORIGINAL().
-        // This means: all mapped, non-secondary reads are included
-        // (supplementary, duplicate, qcfail all contribute).
-        //
-        // IC uses first-fragment/last-fragment read order (not
-        // forward/reverse strand) and read-oriented cycle indices,
-        // matching upstream count_indels().
-        // =============================================================
-        // =============================================================
-        // Combined single-CIGAR-pass block for IC/ID (indel distribution),
-        // bases_mapped_cigar, and COV (coverage ring-buffer pileup).
-        //
-        // Both IC/ID and COV apply to the same read set (mapped,
-        // non-secondary). Merging them into one CIGAR traversal
-        // eliminates two redundant record.cigar() calls per read.
-        //
-        // IC/ID: Upstream samtools stats calls count_indels() outside
-        //   IS_ORIGINAL() — supplementary/dup/qcfail all contribute.
-        //   IC uses first/last-fragment order and read-oriented cycles.
-        //
-        // COV: Circular-buffer pileup; buffer flushed up to read start
-        //   before CIGAR walk; M/=/X blocks inserted as ranges.
-        //   Buffer grown to max_read_len * 5 as needed.
-        // =============================================================
-        if is_mapped && !is_secondary {
-            use crate::rna::bam::record::Cigar as C;
-            let is_reverse = flags & BAM_FREVERSE != 0;
-            let read_len = record.seq_len();
-            let tid = record.tid();
-            let pos = record.pos(); // 0-based
-
-            // Upstream order: paired ? (read1?FIRST:0)+(read2?LAST:0) : FIRST
-            let order: u32 = if is_paired {
-                (if flags & BAM_FREAD1 != 0 { 1 } else { 0 })
-                    + (if flags & BAM_FREAD2 != 0 { 2 } else { 0 })
-            } else {
-                1 // unpaired → FIRST
-            };
-
-            // COV buffer setup (must happen before CIGAR walk).
-            // Skip reads with no sequence (upstream samtools early-return).
-            let do_cov = read_len > 0;
-            let buf_size = if do_cov {
-                // Grow buffer to max_read_len * 5 if needed.
-                // When growing, linearise the circular data just like
-                // upstream samtools: copy [idx..old_size] then [0..idx]
-                // into a fresh buffer, and reset idx to 0.
-                let need = (read_len * 5) as usize;
-                if need > self.cov_buf.len() {
-                    let old_size = self.cov_buf.len();
-                    let mut new_buf = vec![0u32; need];
-                    let head = old_size - self.cov_buf_idx;
-                    new_buf[..head].copy_from_slice(&self.cov_buf[self.cov_buf_idx..]);
-                    new_buf[head..head + self.cov_buf_idx]
-                        .copy_from_slice(&self.cov_buf[..self.cov_buf_idx]);
-                    self.cov_buf = new_buf;
-                    self.cov_buf_idx = 0;
-                }
-                let bs = self.cov_buf.len();
-                // Flush entire buffer on chromosome change
-                if tid != self.cov_buf_tid {
-                    self.flush_cov_buf_all();
-                    self.cov_buf_tid = tid;
-                    self.cov_buf_pos = pos;
-                    self.cov_buf_idx = 0;
-                }
-                // Flush positions from cov_buf_pos up to read start
-                self.cov_buf_flush_to(pos, bs);
-                bs
-            } else {
-                0
-            };
-
-            // Single CIGAR traversal serving IC/ID + bases_mapped_cigar + COV
-            let cigar = record.cigar();
-            let mut icycle: i32 = 0;
-            let mut cigar_mapped: u64 = 0;
-            let mut ref_pos = pos;
-
-            for op in cigar.iter() {
-                match op {
-                    C::Ins(n) => {
-                        let ncig = *n as i32;
-                        let len = *n as u64;
-                        cigar_mapped += len; // I counts toward bases_mapped_cigar
-
-                        // ID: indel size distribution
-                        let id_entry = self.id_hist.entry(len).or_insert([0; 2]);
-                        id_entry[0] += 1; // insertions
-
-                        // IC: indels per cycle (read-oriented index)
-                        let idx = if is_reverse {
-                            read_len.saturating_sub(icycle + ncig) as usize
-                        } else {
-                            icycle as usize
-                        };
-                        if idx >= self.ic.len() {
-                            self.ic.resize(idx + 1, [0u64; 4]);
-                        }
-                        if order == 1 {
-                            self.ic[idx][0] += 1; // ins_1st
-                        }
-                        if order == 2 {
-                            self.ic[idx][1] += 1; // ins_2nd
-                        }
-
-                        icycle += ncig; // I advances query cycle; ref unchanged
-                                        // COV: I consumes no reference positions
-                    }
-                    C::Del(n) => {
-                        let len = *n as u64;
-                        // ID: indel size distribution
-                        let id_entry = self.id_hist.entry(len).or_insert([0; 2]);
-                        id_entry[1] += 1; // deletions
-
-                        // IC: indels per cycle (read-oriented index)
-                        let idx = if is_reverse {
-                            if icycle == 0 {
-                                // Discard meaningless deletions at cycle 0
-                                // (upstream: "if (idx<0) continue;")
-                                ref_pos += *n as i64; // still advance ref for COV
-                                continue;
-                            }
-                            read_len.saturating_sub(icycle + 1) as usize
-                        } else {
-                            if icycle == 0 {
-                                ref_pos += *n as i64;
-                                continue;
-                            }
-                            (icycle - 1) as usize
-                        };
-                        if idx >= self.ic.len() {
-                            self.ic.resize(idx + 1, [0u64; 4]);
-                        }
-                        if order == 1 {
-                            self.ic[idx][2] += 1; // del_1st
-                        }
-                        if order == 2 {
-                            self.ic[idx][3] += 1; // del_2nd
-                        }
-                        // D does NOT advance query cycle; does advance ref
-                        ref_pos += *n as i64;
-                    }
-                    C::Match(n) | C::Equal(n) | C::Diff(n) => {
-                        let len = *n as u64;
-                        cigar_mapped += len; // M/=/X count toward bases_mapped_cigar
-                        icycle += *n as i32;
-                        // COV: M/=/X consumes reference positions
-                        if do_cov {
-                            let end = ref_pos + *n as i64;
-                            self.cov_buf_insert(ref_pos, end, buf_size);
-                            ref_pos = end;
-                        } else {
-                            ref_pos += *n as i64;
-                        }
-                    }
-                    C::RefSkip(n) => {
-                        ref_pos += *n as i64; // N advances ref (COV skips it)
-                    }
-                    C::SoftClip(n) => {
-                        icycle += *n as i32; // S advances query cycle
-                                             // COV: S consumes no reference positions
-                    }
-                    C::HardClip(_) | C::Pad(_) => {}
-                }
-            }
-            self.bases_mapped_cigar += cigar_mapped;
-        } // if is_mapped && !is_secondary (IC/ID + COV combined)
-
-        // =============================================================
-        // GCD: GC-depth accumulation (no-reference path).
-        //
-        // Matches upstream samtools stats without --ref-seq: bins of
-        // GCD_BIN_SIZE bp, depth incremented for each read, GC fraction
-        // accumulated from the read's sequence.
-        //
-        // Included reads: mapped, non-secondary (same as COV).
-        //
-        // NOTE: gc_count_for_gcd is set from the primary-read per-cycle
-        // loop above (when is_primary is true), or computed here only for
-        // non-primary mapped reads, avoiding a redundant full sequence scan.
-        // =============================================================
-        if is_mapped && !is_secondary {
-            let tid = record.tid();
-            let pos = record.pos();
-            let seq_len = record.seq_len();
-
-            if seq_len > 0 {
-                // Start a new bin on: first read, chromosome change, or
-                // read beyond current bin boundary.
-                let new_bin = self.gcd_pos < 0
-                    || tid != self.gcd_tid
-                    || pos - self.gcd_pos > GCD_BIN_SIZE as i64;
-
-                if new_bin {
-                    self.gcd_bins.push(GcDepthBin { gc: 0.0, depth: 0 });
-                    self.gcd_pos = pos;
-                    self.gcd_tid = tid;
-                }
-
-                // Increment depth and accumulate GC fraction from read seq.
-                if let Some(bin) = self.gcd_bins.last_mut() {
-                    bin.depth += 1;
-                    // For primary reads, gc_count was already computed in the
-                    // per-cycle base loop above. For non-primary mapped reads
-                    // (supplementary, etc.) compute it here from the sequence.
-                    let gc_count: u32 = if is_primary {
-                        primary_gc_count as u32
-                    } else {
-                        let seq = record.seq();
-                        let mut count: u32 = 0;
-                        for i in 0..seq_len {
-                            let base = seq.encoded_base(i as usize);
-                            if base == 2 || base == 4 {
-                                count += 1;
-                            }
-                        }
-                        count
-                    };
-                    bin.gc += gc_count as f32 / seq_len as f32;
-                }
-            }
-        } // if is_mapped && !is_secondary (GCD)
+        // =================================================================
+        // samtools stats. Secondary records only count towards
+        // "non-primary alignments" and the CHK checksums above, and records
+        // without a sequence stop here, as in samtools `collect_stats`.
+        // =================================================================
+        if !is_secondary && seq_len > 0 {
+            self.process_stats_read(record, flags, seq_len);
+        }
 
         // =================================================================
         // RSeQC bam_stat cascade (original logic, with early returns)
@@ -1082,86 +634,390 @@ impl BamStatAccum {
         }
     }
 
-    /// Flush all remaining positions in the coverage round buffer into cov_hist.
-    /// Must be called after processing all reads (or when switching chromosomes).
-    /// Flush the circular buffer from `cov_buf_pos` up to (but not including) `pos`.
-    /// Each slot's depth is recorded in `cov_hist` and the slot is zeroed.
-    /// Matches upstream `round_buffer_flush` logic from samtools stats.c.
-    fn cov_buf_flush_to(&mut self, pos: i64, buf_size: usize) {
-        if pos - self.cov_buf_pos >= buf_size as i64 {
-            // Gap exceeds buffer size.  Match upstream samtools exactly:
-            // flush `size - 1` positions (from cov_buf_pos to
-            // cov_buf_pos + size - 2), leaving the LAST slot untouched.
-            // Then advance idx by `size - 1` and jump pos.
-            //
-            // Upstream (stats.c round_buffer_flush lines 334-366):
-            //   pos = rbuf.pos + size - 1;          // cap at last slot
-            //   ito = lidx2ridx(start, size, rbuf.pos, pos-1);
-            //   // flush from start to ito (size-1 slots)
-            //   rbuf.start = lidx2ridx(start, size, rbuf.pos, pos);
-            //   rbuf.pos = new_pos;
-            let flush_count = buf_size - 1; // flush all but the last slot
-            for _ in 0..flush_count {
-                let depth = self.cov_buf[self.cov_buf_idx];
-                if depth > 0 {
-                    *self.cov_hist.entry(depth).or_insert(0) += 1;
-                    self.cov_buf[self.cov_buf_idx] = 0;
-                }
-                self.cov_buf_idx += 1;
-                if self.cov_buf_idx >= buf_size {
-                    self.cov_buf_idx = 0;
+    /// samtools stats counters for one non-secondary record with a sequence.
+    ///
+    /// Follows `collect_stats` in samtools `stats.c` (1.22.1) with default
+    /// options: no flag filters, no reference, coordinate-sorted input.
+    fn process_stats_read(&mut self, record: &bam::Record, flags: u16, seq_len: usize) {
+        use crate::rna::bam::record::Cigar as C;
+
+        let is_primary = flags & BAM_FSUPPLEMENTARY == 0;
+        let is_unmapped = flags & BAM_FUNMAP != 0;
+        let is_paired = flags & BAM_FPAIRED != 0;
+        let mate_unmapped = flags & BAM_FMUNMAP != 0;
+        let tid = record.tid();
+        let pos = record.pos();
+        let cigar = record.cigar();
+
+        if flags & BAM_FDUP != 0 {
+            self.stats_dup_reads += 1;
+            self.stats_dup_bases += seq_len as u64;
+        }
+
+        let order = read_order(flags);
+
+        // samtools `unclipped_length`: the sequence plus hard clips.
+        let read_len = seq_len as u64
+            + cigar
+                .iter()
+                .map(|op| match op {
+                    C::HardClip(n) => u64::from(*n),
+                    _ => 0,
+                })
+                .sum::<u64>();
+        self.max_len = self.max_len.max(read_len);
+        if order == READ_ORDER_FIRST {
+            self.max_first_fragment_len = self.max_first_fragment_len.max(read_len);
+        }
+        if order == READ_ORDER_LAST {
+            self.max_last_fragment_len = self.max_last_fragment_len.max(read_len);
+        }
+
+        // MAPQ histogram: !(UNMAP|SECOND|SUPPL|QCFAIL|DUP).
+        if is_primary && !is_unmapped && flags & (BAM_FQCFAIL | BAM_FDUP) == 0 {
+            self.mapq_hist[record.mapq() as usize] += 1;
+        }
+
+        // GC of the read for the GC-depth bins: samtools only computes it for
+        // primary first/last fragments; other reads add depth with GC 0.
+        let mut gc_count: u32 = 0;
+        if is_primary {
+            *self.rl_hist.entry(read_len).or_insert(0) += 1;
+            if order == READ_ORDER_FIRST {
+                *self.frl_hist.entry(read_len).or_insert(0) += 1;
+            }
+            if order == READ_ORDER_LAST {
+                *self.lrl_hist.entry(read_len).or_insert(0) += 1;
+            }
+            gc_count = self.collect_orig_read_stats(record, flags, order, seq_len);
+        }
+
+        if is_unmapped {
+            return;
+        }
+
+        self.count_indels(&cigar, flags & BAM_FREVERSE != 0, order, seq_len);
+
+        // Insert size and pair orientation: primary, paired, both mapped.
+        // Both mates are counted; output halves the counts.
+        if is_primary && is_paired && !mate_unmapped {
+            let mtid = record.mtid();
+            let isize = record.insert_size().unsigned_abs().min(MAX_INSERT_SIZE);
+            if isize > 0 || tid == mtid {
+                let pos_fst = record.mpos() - pos;
+                let is_fst: i64 = if flags & BAM_FREAD1 != 0 { 1 } else { -1 };
+                let is_fwd: i64 = if flags & BAM_FREVERSE != 0 { -1 } else { 1 };
+                let is_mfwd: i64 = if flags & BAM_FMREVERSE != 0 { -1 } else { 1 };
+
+                // orientation index: 1 = inward, 2 = outward, 3 = other
+                let orientation_idx = if is_fwd * is_mfwd > 0 {
+                    self.other_orientation += 1;
+                    3usize
+                } else if is_fst * pos_fst > 0 {
+                    if is_fst * is_fwd > 0 {
+                        self.inward_pairs += 1;
+                        1
+                    } else {
+                        self.outward_pairs += 1;
+                        2
+                    }
+                } else if is_fst * pos_fst < 0 {
+                    if is_fst * is_fwd > 0 {
+                        self.outward_pairs += 1;
+                        2
+                    } else {
+                        self.inward_pairs += 1;
+                        1
+                    }
+                } else {
+                    // exactly overlapping reads count as inward
+                    self.inward_pairs += 1;
+                    1
+                };
+                let entry = self.is_hist.entry(isize).or_insert([0; 4]);
+                entry[0] += 1;
+                entry[orientation_idx] += 1;
+            }
+        }
+
+        // Mismatches from NM (`bam_aux2i`: signed, non-integer types count 0).
+        if let Some(nm) = get_aux_int(record, b"NM") {
+            self.mismatches = self.mismatches.wrapping_add(nm as u64);
+        }
+
+        // Bases mapped (cigar): M, I, = and X operations.
+        self.bases_mapped_cigar += cigar
+            .iter()
+            .map(|op| match op {
+                C::Match(n) | C::Ins(n) | C::Equal(n) | C::Diff(n) => u64::from(*n),
+                _ => 0,
+            })
+            .sum::<u64>();
+
+        // GC-depth bins (no reference): a new bin on the first read, a contig
+        // change, or a read starting more than GCD_BIN_SIZE past the bin start.
+        let new_bin = self.gcd_cur.is_none()
+            || tid != self.gcd_tid
+            || pos - self.gcd_pos > GCD_BIN_SIZE as i64;
+        if new_bin {
+            self.gcd_tid = tid;
+            self.gcd_pos = pos;
+            self.gcd_cur = Some(self.gcd_bins.len());
+            self.gcd_bins
+                .push((tid, pos, GcDepthBin { gc: 0.0, depth: 0 }));
+        }
+        if let Some((_, _, bin)) = self.gcd_cur.and_then(|i| self.gcd_bins.get_mut(i)) {
+            bin.depth += 1;
+            bin.gc += gc_count as f32 / seq_len as f32;
+        }
+
+        // Coverage distribution: one round buffer per contig (see stats_coverage).
+        if self.cov_contig.as_ref().is_none_or(|c| c.tid() != tid) {
+            self.finish_cov_contig();
+            self.cov_contig = Some(ContigCoverage::new(tid));
+        }
+        if let Some(cov) = self.cov_contig.as_mut() {
+            cov.ensure_read_len(read_len as usize);
+            cov.flush(pos, &mut self.cov_hist);
+            let mut p = pos;
+            for op in cigar.iter() {
+                match op {
+                    C::Match(n) | C::Equal(n) | C::Diff(n) => {
+                        cov.insert(p, p + i64::from(*n));
+                        p += i64::from(*n);
+                    }
+                    C::Del(n) | C::RefSkip(n) => p += i64::from(*n),
+                    _ => {}
                 }
             }
-            // idx now points to the ONE unflushed slot (the last position
-            // in the old window).  Jump pos to the new read position.
-            self.cov_buf_pos = pos;
+        }
+    }
+
+    /// samtools `collect_orig_read_stats`: per-read statistics of a primary
+    /// record with a sequence. Returns the read's G+C count (0 unless it is a
+    /// first or last fragment).
+    fn collect_orig_read_stats(
+        &mut self,
+        record: &bam::Record,
+        flags: u16,
+        order: u8,
+        seq_len: usize,
+    ) -> u32 {
+        self.total_len += seq_len as u64;
+        if flags & BAM_FQCFAIL != 0 {
+            self.stats_qcfail += 1;
+        }
+        if flags & BAM_FPAIRED != 0 {
+            self.stats_paired_tech += 1;
+        }
+
+        let mut gc_count: u32 = 0;
+        if order == READ_ORDER_FIRST || order == READ_ORDER_LAST {
+            let is_reverse = flags & BAM_FREVERSE != 0;
+            let seq = record.seq();
+            let quals = record.qual();
+
+            let (qual_arr, base_arr, base_ro_arr, gc_arr, tc_arr) = if order == READ_ORDER_LAST {
+                (
+                    &mut self.lfq,
+                    &mut self.lbc,
+                    &mut self.lbc_ro,
+                    &mut self.gcl,
+                    &mut self.ltc,
+                )
+            } else {
+                (
+                    &mut self.ffq,
+                    &mut self.fbc,
+                    &mut self.fbc_ro,
+                    &mut self.gcf,
+                    &mut self.ftc,
+                )
+            };
+
+            if seq_len > qual_arr.len() {
+                qual_arr.resize(seq_len, [0u64; 256]);
+            }
+            if seq_len > base_arr.len() {
+                base_arr.resize(seq_len, [0u64; 6]);
+            }
+            if seq_len > base_ro_arr.len() {
+                base_ro_arr.resize(seq_len, [0u64; 6]);
+            }
+            if seq_len > self.gcc_rc.len() {
+                self.gcc_rc.resize(seq_len, [0u64; 4]);
+            }
+
+            // BAM 4-bit encoding: A=1, C=2, G=4, T=8, N=15, others=0,3,5..14
+            // BASE_IDX[nibble] → 0=A, 1=C, 2=G, 3=T, 4=N, 5=Other
+            const BASE_IDX: [u8; 16] = [5, 0, 1, 5, 2, 5, 5, 5, 3, 5, 5, 5, 5, 5, 5, 4];
+            // RC_IDX[base_idx] → reverse-complement base_idx (A↔T, C↔G)
+            const RC_IDX: [u8; 6] = [3, 2, 1, 0, 4, 5];
+
+            let mut qual_sum: u64 = 0;
+            // Hoist the strand branch out of the inner loop.
+            if !is_reverse {
+                for i in 0..seq_len {
+                    let q = quals[i];
+                    qual_sum += u64::from(q);
+                    qual_arr[i][usize::from(q)] += 1;
+
+                    let base_idx = BASE_IDX[seq.encoded_base(i) as usize] as usize;
+                    base_arr[i][base_idx] += 1;
+                    base_ro_arr[i][base_idx] += 1;
+                    if base_idx < 4 {
+                        self.gcc_rc[i][base_idx] += 1;
+                    }
+                    if base_idx == 1 || base_idx == 2 {
+                        gc_count += 1;
+                    }
+                    if base_idx < 5 {
+                        tc_arr[base_idx] += 1;
+                    }
+                }
+            } else {
+                for i in 0..seq_len {
+                    let ro_cycle = seq_len - 1 - i;
+                    let q = quals[i];
+                    qual_sum += u64::from(q);
+                    qual_arr[ro_cycle][usize::from(q)] += 1;
+
+                    let base_idx = BASE_IDX[seq.encoded_base(i) as usize] as usize;
+                    base_arr[i][base_idx] += 1;
+                    base_ro_arr[ro_cycle][base_idx] += 1;
+                    if base_idx < 4 {
+                        self.gcc_rc[ro_cycle][RC_IDX[base_idx] as usize] += 1;
+                    }
+                    if base_idx == 1 || base_idx == 2 {
+                        gc_count += 1;
+                    }
+                    if base_idx < 5 {
+                        tc_arr[base_idx] += 1;
+                    }
+                }
+            }
+            self.quality_sum += qual_sum as f64;
+            self.quality_count += seq_len as u64;
+
+            // GC content: cumulative step function with ngc = 200 bins.
+            let ngc: usize = 200;
+            let gc_idx_min = gc_count as usize * (ngc - 1) / seq_len;
+            let gc_idx_max = ((gc_count as usize + 1) * (ngc - 1) / seq_len).min(ngc - 1);
+            for item in gc_arr.iter_mut().take(gc_idx_max).skip(gc_idx_min) {
+                *item += 1;
+            }
+        }
+
+        match order {
+            READ_ORDER_FIRST => {
+                self.first_fragments += 1;
+                self.total_first_fragment_len += seq_len as u64;
+            }
+            READ_ORDER_LAST => {
+                self.last_fragments += 1;
+                self.total_last_fragment_len += seq_len as u64;
+            }
+            _ => self.other_fragments += 1,
+        }
+
+        if flags & BAM_FUNMAP != 0 {
+            self.stats_unmapped += 1;
         } else {
-            // Normal case: flush slot by slot.
-            while self.cov_buf_pos < pos {
-                let depth = self.cov_buf[self.cov_buf_idx];
-                if depth > 0 {
-                    *self.cov_hist.entry(depth).or_insert(0) += 1;
-                    self.cov_buf[self.cov_buf_idx] = 0;
+            self.bases_mapped += seq_len as u64;
+            if record.mapq() == 0 {
+                self.reads_mq0 += 1;
+            }
+            if flags & BAM_FPAIRED != 0 && flags & BAM_FMUNMAP == 0 {
+                self.reads_mapped_and_paired += 1;
+                if flags & BAM_FPROPER_PAIR != 0 {
+                    self.stats_properly_paired += 1;
                 }
-                self.cov_buf_idx += 1;
-                if self.cov_buf_idx >= buf_size {
-                    self.cov_buf_idx = 0;
+                if record.tid() != record.mtid() {
+                    self.stats_anomalous += 1;
                 }
-                self.cov_buf_pos += 1;
+            }
+        }
+        gc_count
+    }
+
+    /// samtools `count_indels`: indel size distribution (ID) and indels per
+    /// read-oriented cycle (IC) of a mapped, non-secondary record.
+    fn count_indels(
+        &mut self,
+        cigar: &crate::rna::bam::record::CigarStringView,
+        is_reverse: bool,
+        order: u8,
+        seq_len: usize,
+    ) {
+        use crate::rna::bam::record::Cigar as C;
+
+        let read_len = seq_len as i64;
+        let mut icycle: i64 = 0;
+        for op in cigar.iter() {
+            let ncig = i64::from(op.len());
+            if ncig == 0 {
+                continue; // "curiously, this can happen: 0D"
+            }
+            match op {
+                C::Ins(_) => {
+                    let idx = if is_reverse {
+                        read_len - icycle - ncig
+                    } else {
+                        icycle
+                    };
+                    if idx >= 0 {
+                        self.add_indel_cycle(idx as usize, order, 0);
+                    }
+                    icycle += ncig;
+                    if ncig <= MAX_INDEL_LEN {
+                        self.id_hist.entry(ncig as u64).or_insert([0; 2])[0] += 1;
+                    }
+                }
+                C::Del(_) => {
+                    let idx = if is_reverse {
+                        read_len - icycle - 1
+                    } else {
+                        icycle - 1
+                    };
+                    if idx < 0 {
+                        continue; // samtools discards these "meaningless deletions"
+                    }
+                    self.add_indel_cycle(idx as usize, order, 2);
+                    if ncig <= MAX_INDEL_LEN {
+                        self.id_hist.entry(ncig as u64).or_insert([0; 2])[1] += 1;
+                    }
+                }
+                C::RefSkip(_) | C::HardClip(_) | C::Pad(_) => {}
+                _ => icycle += ncig,
             }
         }
     }
 
-    /// Insert a contiguous reference range `[from, to)` into the circular buffer,
-    /// incrementing depth for each position. The range must fit within `buf_size`.
-    fn cov_buf_insert(&mut self, from: i64, to: i64, buf_size: usize) {
-        for ref_pos in from..to {
-            // Map ref_pos to buffer index: offset from cov_buf_idx by (ref_pos - cov_buf_pos)
-            let offset = (ref_pos - self.cov_buf_pos) as usize;
-            let idx = (self.cov_buf_idx + offset) % buf_size;
-            self.cov_buf[idx] += 1;
+    /// Count an insertion (`kind` 0) or deletion (`kind` 2) at cycle `idx`
+    /// for first (`+0`) or last (`+1`) fragments.
+    fn add_indel_cycle(&mut self, idx: usize, order: u8, kind: usize) {
+        let col = match order {
+            READ_ORDER_FIRST => kind,
+            READ_ORDER_LAST => kind + 1,
+            _ => return,
+        };
+        if idx >= self.ic.len() {
+            self.ic.resize(idx + 1, [0u64; 4]);
         }
+        self.ic[idx][col] += 1;
     }
 
-    /// Flush the entire circular buffer and reset tracking state.
-    pub fn flush_cov_buf_all(&mut self) {
-        for slot in self.cov_buf.iter_mut() {
-            if *slot > 0 {
-                *self.cov_hist.entry(*slot).or_insert(0) += 1;
-                *slot = 0;
-            }
+    /// End the coverage round buffer of the current contig, if any.
+    fn finish_cov_contig(&mut self) {
+        if let Some(cov) = self.cov_contig.take() {
+            self.cov_done.push(cov.finish(&mut self.cov_hist));
         }
-        self.cov_buf_idx = 0;
-        self.cov_buf_pos = 0;
-        self.cov_buf_tid = -1;
     }
 
     /// Merge another accumulator into this one.
     pub fn merge(&mut self, mut other: BamStatAccum) {
-        // Flush any remaining positions in the other's round buffer into its
-        // cov_hist before merging.  Without this, positions still in the
-        // round buffer would be silently lost during parallel merges.
-        other.flush_cov_buf_all();
+        // End the other worker's open contig so its coverage is complete.
+        other.finish_cov_contig();
 
         // RSeQC bam_stat fields
         self.total_records += other.total_records;
@@ -1221,7 +1077,7 @@ impl BamStatAccum {
         }
         self.quality_sum += other.quality_sum;
         self.quality_count += other.quality_count;
-        self.mismatches += other.mismatches;
+        self.mismatches = self.mismatches.wrapping_add(other.mismatches);
         for (isize_val, counts) in other.is_hist {
             let entry = self.is_hist.entry(isize_val).or_insert([0; 4]);
             for i in 0..4 {
@@ -1294,8 +1150,21 @@ impl BamStatAccum {
             *self.cov_hist.entry(depth).or_insert(0) += count;
         }
 
-        // GCD bins (concatenate — bins from different chromosome workers
-        // are independent and will be sorted during output).
+        // Finished contigs; the carried slots are resolved in into_result().
+        self.cov_done.append(&mut other.cov_done);
+
+        // samtools stats-only counters
+        self.other_fragments += other.other_fragments;
+        self.stats_qcfail += other.stats_qcfail;
+        self.stats_unmapped += other.stats_unmapped;
+        self.stats_paired_tech += other.stats_paired_tech;
+        self.stats_properly_paired += other.stats_properly_paired;
+        self.stats_anomalous += other.stats_anomalous;
+        self.stats_dup_reads += other.stats_dup_reads;
+        self.stats_dup_bases += other.stats_dup_bases;
+        self.flagstat.merge(&other.flagstat);
+
+        // GCD bins (whole contigs per worker; put back in BAM order in into_result()).
         self.gcd_bins.append(&mut other.gcd_bins);
     }
 }
@@ -1760,10 +1629,20 @@ fn classify_junction(
 /// Uses hashed `u64` keys instead of heap-allocated Strings to reduce memory
 /// from ~25 bytes/observation to 8 bytes/observation. The hash function is
 /// the same `SipHash` used for read_duplication sequence dedup.
+///
+/// The observation list is shuffled before sampling, so its order must not
+/// depend on the thread count. It is kept in BAM record order (then intron
+/// order within each read), which is also RSeQC's order. Observations are
+/// therefore kept in per-chromosome segments, in the order the records were
+/// read. A worker reads each chromosome in one contiguous `fetch`, and
+/// [`merge`](Self::merge) sorts the segments by reference ID, which is file
+/// order for a coordinate-sorted (indexed) BAM, whatever the thread count.
+/// The sequential path never merges, so it keeps file order for any BAM.
 #[derive(Debug, Default)]
 pub struct JuncSatAccum {
-    /// All junction observation keys (hashed `"CHROM:start-end"`).
-    pub observations: Vec<u64>,
+    /// Junction observation keys (hashed `"CHROM:start-end"`), grouped in
+    /// runs of consecutive records with the same reference ID.
+    segments: Vec<(i32, Vec<u64>)>,
     /// String keys corresponding to each hash, for the known_junctions lookup
     /// during into_result(). Stored as `(hash, string)` only for unique junctions.
     unique_keys: HashMap<u64, String>,
@@ -1810,18 +1689,30 @@ impl JuncSatAccum {
             if iend - istart < min_intron {
                 continue;
             }
-            let h = hash_junction_key(chrom_upper, istart, iend);
-            self.observations.push(h);
-            // Track the string key only for the first occurrence of each hash
-            self.unique_keys
-                .entry(h)
-                .or_insert_with(|| format!("{}:{}-{}", chrom_upper, istart, iend));
+            self.push_observation(record.tid(), chrom_upper, istart, iend);
         }
     }
 
+    /// Append one junction observation from a record on reference `tid`.
+    fn push_observation(&mut self, tid: i32, chrom_upper: &str, istart: u64, iend: u64) {
+        let h = hash_junction_key(chrom_upper, istart, iend);
+        match self.segments.last_mut() {
+            Some((seg_tid, obs)) if *seg_tid == tid => obs.push(h),
+            _ => self.segments.push((tid, vec![h])),
+        }
+        // Track the string key only for the first occurrence of each hash
+        self.unique_keys
+            .entry(h)
+            .or_insert_with(|| format!("{}:{}-{}", chrom_upper, istart, iend));
+    }
+
     /// Merge another accumulator into this one.
+    ///
+    /// Segments are stably sorted by reference ID, so the merged order is the
+    /// BAM file order no matter how chromosomes were split between workers.
     pub fn merge(&mut self, other: JuncSatAccum) {
-        self.observations.extend(other.observations);
+        self.segments.extend(other.segments);
+        self.segments.sort_by_key(|(tid, _)| *tid);
         // Merge unique key maps (first writer wins — all map to the same string)
         for (h, key) in other.unique_keys {
             self.unique_keys.entry(h).or_insert(key);
@@ -1855,6 +1746,8 @@ pub struct InnerDistAccum {
     pub pair_num: u64,
     /// Maximum pairs to sample.
     pub sample_size: u64,
+    /// Chromosome runs of `pairs` (see [`merge_chrom_runs`]).
+    pair_runs: Vec<(i32, usize)>,
 }
 
 impl InnerDistAccum {
@@ -1920,6 +1813,7 @@ impl InnerDistAccum {
                 distance: None,
                 classification: "sameChrom=No",
             });
+            push_chrom_run(&mut self.pair_runs, record.tid());
             return;
         }
 
@@ -1996,6 +1890,7 @@ impl InnerDistAccum {
                         distance: Some(mrna_dist),
                         classification: "sameTranscript=Yes,sameExon=No,dist=mRNA",
                     });
+                    push_chrom_run(&mut self.pair_runs, record.tid());
                     self.distances.push(mrna_dist);
                     return;
                 } else {
@@ -2011,27 +1906,30 @@ impl InnerDistAccum {
             distance: Some(inner_dist),
             classification,
         });
+        push_chrom_run(&mut self.pair_runs, record.tid());
         self.distances.push(inner_dist);
     }
 
     /// Merge another accumulator into this one, respecting the sample size limit.
     ///
-    /// In parallel mode each worker accumulates pairs independently.  After
-    /// merging all workers the total may exceed `sample_size`, so we truncate
-    /// to the limit.  This matches the upstream RSeQC behaviour of sampling
-    /// at most `sample_size` pairs regardless of processing order.
+    /// Upstream RSeQC keeps the first `sample_size` pairs of the file. Each
+    /// worker keeps the first `sample_size` pairs of its own chromosomes
+    /// (processed in ascending order), so putting the pairs back in
+    /// chromosome order and cutting at `sample_size` gives the same pairs as
+    /// a single pass, whatever the thread count.
     pub fn merge(&mut self, other: InnerDistAccum) {
-        self.pairs.extend(other.pairs);
-        self.distances.extend(other.distances);
-        self.pair_num += other.pair_num;
-
-        // Enforce the sampling limit after merging
-        if self.pair_num > self.sample_size {
-            let limit = self.sample_size as usize;
-            self.pairs.truncate(limit);
-            self.distances.truncate(limit);
-            self.pair_num = self.sample_size;
-        }
+        merge_chrom_runs(
+            &mut self.pairs,
+            &mut self.pair_runs,
+            other.pairs,
+            other.pair_runs,
+        );
+        let limit = self.sample_size.min(self.pairs.len() as u64) as usize;
+        truncate_chrom_runs(&mut self.pairs, &mut self.pair_runs, limit);
+        self.pair_num = self.pairs.len() as u64;
+        // Every pair except those with mates on different chromosomes has a
+        // distance, in the same order.
+        self.distances = self.pairs.iter().filter_map(|p| p.distance).collect();
     }
 }
 
@@ -2113,6 +2011,8 @@ pub struct RseqcAccumulators {
     pub tin: Option<TinAccum>,
     /// preseq library complexity accumulator (`None` when disabled).
     pub preseq: Option<PreseqAccum>,
+    /// split_bam accumulator (`None` when disabled).
+    pub split_bam: Option<SplitBamAccum>,
 }
 
 impl RseqcAccumulators {
@@ -2128,6 +2028,7 @@ impl RseqcAccumulators {
             inner_dist: None,
             tin: None,
             preseq: None,
+            split_bam: None,
         }
     }
 
@@ -2183,6 +2084,11 @@ impl RseqcAccumulators {
             },
             preseq: if config.preseq_enabled {
                 Some(PreseqAccum::new(config.preseq_max_segment_length))
+            } else {
+                None
+            },
+            split_bam: if config.split_bam_enabled {
+                Some(SplitBamAccum::default())
             } else {
                 None
             },
@@ -2273,6 +2179,13 @@ impl RseqcAccumulators {
         if let Some(ref mut accum) = self.preseq {
             accum.process_read(record);
         }
+
+        // split_bam: classifies EVERY record (incl. unmapped, QC-fail,
+        // secondary, supplementary), keyed by the alignment's own tid so BED
+        // names match alignment names, not GTF-mapped names (as RSeQC does).
+        if let (Some(ref mut accum), Some(lookup)) = (&mut self.split_bam, annotations.split_bam) {
+            accum.process_read(record, lookup);
+        }
     }
 
     /// Merge another set of accumulators into this one.
@@ -2304,6 +2217,9 @@ impl RseqcAccumulators {
         if let (Some(ref mut a), Some(b)) = (&mut self.preseq, other.preseq) {
             a.merge(b);
         }
+        if let (Some(ref mut a), Some(b)) = (&mut self.split_bam, other.split_bam) {
+            a.merge(b);
+        }
     }
 }
 
@@ -2315,6 +2231,83 @@ impl RseqcAccumulators {
 /// in a region map (HashMap<String, ChromIntervals>).
 fn point_in(region_map: &HashMap<String, ChromIntervals>, chrom: &str, point: u64) -> bool {
     region_map.get(chrom).is_some_and(|ci| ci.contains(point))
+}
+
+// ===================================================================
+// Chromosome-ordered merging
+// ===================================================================
+
+/// Record that one more item was appended for chromosome `tid`.
+///
+/// `runs` describes a vector of items as consecutive `(tid, count)` runs.
+/// Accumulators whose output depends on the order of the items they collect
+/// (inner_distance's first-N sample) keep such runs so that
+/// [`merge_chrom_runs`] can restore file order.
+#[inline]
+fn push_chrom_run(runs: &mut Vec<(i32, usize)>, tid: i32) {
+    match runs.last_mut() {
+        Some((last_tid, count)) if *last_tid == tid => *count += 1,
+        _ => runs.push((tid, 1)),
+    }
+}
+
+/// Append `other_items` to `items` and reorder the result by chromosome.
+///
+/// Each parallel worker reads whole chromosomes, but which chromosomes a
+/// worker gets depends on the thread count. Sorting the runs by tid (a stable
+/// sort, so the order within a chromosome is kept) gives the order of a
+/// single pass over a coordinate-sorted file, so the merged result is the
+/// same for any `--threads` and any merge order.
+fn merge_chrom_runs<T>(
+    items: &mut Vec<T>,
+    runs: &mut Vec<(i32, usize)>,
+    other_items: Vec<T>,
+    other_runs: Vec<(i32, usize)>,
+) {
+    debug_assert_eq!(runs.iter().map(|r| r.1).sum::<usize>(), items.len());
+    debug_assert_eq!(
+        other_runs.iter().map(|r| r.1).sum::<usize>(),
+        other_items.len()
+    );
+    if other_items.is_empty() {
+        return;
+    }
+    let mut chunks: Vec<(i32, Vec<T>)> = Vec::with_capacity(runs.len() + other_runs.len());
+    let mut mine = std::mem::take(items).into_iter();
+    for &(tid, n) in runs.iter() {
+        chunks.push((tid, mine.by_ref().take(n).collect()));
+    }
+    let mut theirs = other_items.into_iter();
+    for &(tid, n) in &other_runs {
+        chunks.push((tid, theirs.by_ref().take(n).collect()));
+    }
+    chunks.sort_by_key(|c| c.0);
+
+    runs.clear();
+    for (tid, chunk) in chunks {
+        match runs.last_mut() {
+            Some((last_tid, count)) if *last_tid == tid => *count += chunk.len(),
+            _ => runs.push((tid, chunk.len())),
+        }
+        items.extend(chunk);
+    }
+}
+
+/// Keep the first `len` items, adjusting the chromosome runs to match.
+fn truncate_chrom_runs<T>(items: &mut Vec<T>, runs: &mut Vec<(i32, usize)>, len: usize) {
+    if items.len() <= len {
+        return;
+    }
+    items.truncate(len);
+    let mut left = len;
+    runs.retain_mut(|(_, count)| {
+        if left == 0 {
+            return false;
+        }
+        *count = (*count).min(left);
+        left -= *count;
+        true
+    });
 }
 
 // ===================================================================
@@ -2340,8 +2333,15 @@ fn merge_vec_arrays<const N: usize>(target: &mut Vec<[u64; N]>, source: Vec<[u64
 impl BamStatAccum {
     /// Convert accumulated counters into a `BamStatResult` for output.
     pub fn into_result(mut self) -> BamStatResult {
-        // Flush remaining positions in the coverage round buffer
-        self.flush_cov_buf_all();
+        // End the last contig and resolve the slots carried between contigs.
+        self.finish_cov_contig();
+        resolve_carries(std::mem::take(&mut self.cov_done), &mut self.cov_hist);
+
+        // GC-depth bins in BAM order (contig, then position): samtools treats
+        // the last bin specially, so the order must not depend on threads.
+        self.gcd_bins.sort_by_key(|&(tid, pos, _)| (tid, pos));
+        let gcd_bins = self.gcd_bins.into_iter().map(|(_, _, bin)| bin).collect();
+
         BamStatResult {
             // RSeQC bam_stat fields
             total_records: self.total_records,
@@ -2418,7 +2418,16 @@ impl BamStatAccum {
             ic: self.ic,
             chk: self.chk,
             cov_hist: self.cov_hist,
-            gcd_bins: self.gcd_bins,
+            gcd_bins,
+            other_fragments: self.other_fragments,
+            stats_qcfail: self.stats_qcfail,
+            stats_unmapped: self.stats_unmapped,
+            stats_paired_tech: self.stats_paired_tech,
+            stats_properly_paired: self.stats_properly_paired,
+            stats_anomalous: self.stats_anomalous,
+            stats_dup_reads: self.stats_dup_reads,
+            stats_dup_bases: self.stats_dup_bases,
+            flagstat: self.flagstat,
         }
     }
 }
@@ -2634,15 +2643,25 @@ impl JuncAnnotAccum {
 impl JuncSatAccum {
     /// Post-process accumulated observations into a `SaturationResult`.
     ///
-    /// Performs the shuffle (Phase 2) and incremental subsampling (Phase 3)
-    /// that were previously done in the standalone `junction_saturation()` function.
+    /// Follows RSeQC's `ParseBAM.saturation_junction()`, except that the shuffle
+    /// uses RustQC's own seeded RNG, so the intermediate points are
+    /// reproducible but do not match RSeQC's (unseeded) random draws. The
+    /// x-axis values and the 100% point are deterministic and match RSeQC:
     ///
-    /// Uses incremental known/novel counting: instead of iterating all unique
-    /// junctions at each percentage step (O(U*P)), maintains running counters
-    /// updated only when new unique junctions first appear or cross the
-    /// min_coverage threshold.
+    /// 1. Drop observations on chromosomes without an annotated transcript
+    ///    (RSeQC skips reads whose chromosome is not in the BED gene model).
+    /// 2. Shuffle the observations (in BAM file order) with a seeded ChaCha8 RNG.
+    /// 3. For each sampling percentage `p` in
+    ///    `range(sample_start, sample_end, sample_step) + [100]`, add the
+    ///    observations from `int(N * ((p - sample_step) / 100.0))` (clamped
+    ///    to 0) to `int(N * (p / 100.0))` to the running junction counts,
+    ///    using the same floating-point index arithmetic. The windows can
+    ///    overlap or leave gaps for some parameter combinations, as in RSeQC.
+    ///
+    /// Known/novel/all junction counts are maintained incrementally instead
+    /// of re-scanning all unique junctions at every sampling step.
     pub fn into_result(
-        mut self,
+        self,
         known_junctions: &KnownJunctionSet,
         sample_start: u32,
         sample_end: u32,
@@ -2650,65 +2669,67 @@ impl JuncSatAccum {
         min_coverage: u32,
         seed: u64,
     ) -> SaturationResult {
-        use rand::seq::SliceRandom;
-        use rand::SeedableRng;
-        use rand_chacha::ChaCha8Rng;
+        // Hashes of known junctions, and of junctions on annotated chromosomes.
+        let mut known_hashes: HashSet<u64> = HashSet::new();
+        let mut kept_hashes: HashSet<u64> = HashSet::new();
+        for (&h, key) in &self.unique_keys {
+            if known_junctions.junctions.contains(key) {
+                known_hashes.insert(h);
+            }
+            let chrom = key.rsplit_once(':').map_or(key.as_str(), |(c, _)| c);
+            if known_junctions.chroms.contains(chrom) {
+                kept_hashes.insert(h);
+            }
+        }
 
-        // Pre-build a HashSet<u64> from known_junctions for O(1) hash-based lookup
-        let known_hashes: HashSet<u64> = self
-            .unique_keys
-            .iter()
-            .filter(|(_, key)| known_junctions.junctions.contains(*key))
-            .map(|(&h, _)| h)
+        // Phase 1: the observation list in RSeQC's order (BAM file order).
+        let mut observations: Vec<u64> = self
+            .segments
+            .into_iter()
+            .flat_map(|(_, obs)| obs)
+            .filter(|h| kept_hashes.contains(h))
             .collect();
 
         // Phase 2: deterministic shuffle
-        let mut rng = ChaCha8Rng::seed_from_u64(seed);
-        self.observations.shuffle(&mut rng);
-
-        // Build percentage series
-        let mut percentages: Vec<u32> = (sample_start..=sample_end)
-            .step_by(sample_step as usize)
-            .collect();
-        if *percentages.last().unwrap_or(&0) != 100 {
-            percentages.push(100);
+        {
+            use rand::seq::SliceRandom;
+            use rand::SeedableRng;
+            observations.shuffle(&mut rand_chacha::ChaCha8Rng::seed_from_u64(seed));
         }
 
-        // Phase 3: incremental sampling with running counters
-        let total = self.observations.len();
+        // Phase 3: sampling, with RSeQC's percentage series and index arithmetic.
+        let percentages = sampling_percentages(sample_start, sample_end, sample_step);
+        let total = observations.len();
+        let index_at = |pct: i64| -> usize {
+            // Python: int(SR_num * (pct / 100.0)), truncating toward zero.
+            let idx = (total as f64 * (pct as f64 / 100.0)) as i64;
+            idx.clamp(0, total as i64) as usize
+        };
+        // A junction counts as known once seen `max(min_coverage, 1)` times
+        // (RSeQC: `uniqSpliceSites[sj] >= recur` over junctions seen at least once).
+        let known_threshold = min_coverage.max(1);
+
         let mut junction_counts: HashMap<u64, u32> = HashMap::new();
-        let mut prev_end = 0;
         let mut known_counts = Vec::with_capacity(percentages.len());
         let mut novel_counts = Vec::with_capacity(percentages.len());
         let mut all_counts = Vec::with_capacity(percentages.len());
-
-        // Running counters — updated incrementally as new observations arrive
         let mut running_known: usize = 0;
         let mut running_novel: usize = 0;
 
         for &pct in &percentages {
-            let index_end = total * pct as usize / 100;
-            for &obs_hash in &self.observations[prev_end..index_end] {
+            let index_st = index_at(i64::from(pct) - i64::from(sample_step));
+            let index_end = index_at(i64::from(pct));
+            for &obs_hash in observations.get(index_st..index_end).unwrap_or(&[]) {
                 let count = junction_counts.entry(obs_hash).or_insert(0);
                 *count += 1;
-
-                let is_known = known_hashes.contains(&obs_hash);
-                if *count == 1 {
-                    // First time seeing this junction
-                    if is_known {
-                        if min_coverage <= 1 {
-                            running_known += 1;
-                        }
-                        // else: known but below threshold, don't count yet
-                    } else {
-                        running_novel += 1;
+                if known_hashes.contains(&obs_hash) {
+                    if *count == known_threshold {
+                        running_known += 1;
                     }
-                } else if is_known && *count == min_coverage && min_coverage > 1 {
-                    // Junction just crossed the min_coverage threshold
-                    running_known += 1;
+                } else if *count == 1 {
+                    running_novel += 1;
                 }
             }
-            prev_end = index_end;
 
             known_counts.push(running_known);
             novel_counts.push(running_novel);
@@ -2722,6 +2743,21 @@ impl JuncSatAccum {
             all_counts,
         }
     }
+}
+
+/// RSeQC's sampling percentages: `list(range(start, end, step))` followed by 100.
+///
+/// A zero step would make Python's `range()` raise; here it yields only `[100]`.
+fn sampling_percentages(sample_start: u32, sample_end: u32, sample_step: u32) -> Vec<u32> {
+    let mut percentages: Vec<u32> = if sample_step == 0 {
+        Vec::new()
+    } else {
+        (sample_start..sample_end)
+            .step_by(sample_step as usize)
+            .collect()
+    };
+    percentages.push(100);
+    percentages
 }
 
 impl InnerDistAccum {
@@ -2747,5 +2783,144 @@ impl InnerDistAccum {
             histogram,
             total_pairs: self.pair_num,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sampling_percentages_match_python_range() {
+        // list(range(5, 100, 5)) + [100]
+        let default: Vec<u32> = (1..=20).map(|i| i * 5).collect();
+        assert_eq!(sampling_percentages(5, 100, 5), default);
+        // range() excludes the end, then RSeQC appends 100.
+        assert_eq!(sampling_percentages(10, 50, 10), vec![10, 20, 30, 40, 100]);
+        assert_eq!(sampling_percentages(1, 100, 5).last(), Some(&100));
+        assert_eq!(sampling_percentages(1, 100, 5)[19], 96);
+        assert_eq!(sampling_percentages(50, 50, 5), vec![100]);
+        assert_eq!(sampling_percentages(5, 100, 0), vec![100]);
+    }
+
+    /// Observations for the saturation tests: 40 on CHR1 (tid 0) interleaved
+    /// with 4 on CHRX (tid 1), which is not annotated.
+    fn test_observations() -> Vec<(i32, &'static str, u64)> {
+        let mut out = Vec::new();
+        for i in 0..40u64 {
+            if i % 11 == 3 {
+                out.push((1, "CHRX", 1));
+            }
+            out.push((0, "CHR1", (i * 7) % 9 * 100));
+        }
+        out
+    }
+
+    fn test_known() -> KnownJunctionSet {
+        KnownJunctionSet {
+            junctions: ["CHR1:0-50", "CHR1:100-150", "CHR1:200-250", "CHR1:700-750"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            chroms: ["CHR1".to_string()].into_iter().collect(),
+        }
+    }
+
+    fn push(accum: &mut JuncSatAccum, tid: i32, chrom: &str, start: u64) {
+        let end = if chrom == "CHRX" { 100 } else { start + 50 };
+        accum.push_observation(tid, chrom, start, end);
+    }
+
+    fn filled(obs: &[(i32, &str, u64)]) -> JuncSatAccum {
+        let mut accum = JuncSatAccum::default();
+        for &(tid, chrom, st) in obs {
+            push(&mut accum, tid, chrom, st);
+        }
+        accum
+    }
+
+    #[test]
+    fn test_saturation_final_point_and_axis() {
+        // The x axis and (when the windows cover the whole list) the 100%
+        // point do not depend on the shuffle.
+        let known = test_known();
+        for seed in [1, 7, 42] {
+            for (start, end, step) in [(5, 100, 5), (1, 100, 5), (10, 100, 10)] {
+                let r = filled(&test_observations()).into_result(&known, start, end, step, 1, seed);
+                assert_eq!(r.percentages, sampling_percentages(start, end, step));
+                // All 40 CHR1 observations are used (CHRX is dropped): 9
+                // distinct junctions, 4 of them known.
+                assert_eq!(*r.all_counts.last().unwrap(), 9);
+                assert_eq!(*r.known_counts.last().unwrap(), 4);
+                assert_eq!(*r.novel_counts.last().unwrap(), 5);
+            }
+        }
+    }
+
+    #[test]
+    fn test_saturation_deterministic_and_seeded() {
+        let known = test_known();
+        let run = |seed| filled(&test_observations()).into_result(&known, 5, 100, 5, 1, seed);
+        assert_eq!(run(3).all_counts, run(3).all_counts);
+    }
+
+    #[test]
+    fn test_saturation_merge_order_independent() {
+        // A coordinate-sorted layout: tid 0 records, then tid 1, then tid 2.
+        let obs: Vec<(i32, &str, u64)> = (0..30u64)
+            .map(|i| ((i / 10) as i32, "CHR1", (i * 13) % 7 * 100))
+            .collect();
+        let known = test_known();
+        let run = |order: &[i32]| {
+            let mut merged = JuncSatAccum::default();
+            for &tid in order {
+                let part: Vec<_> = obs.iter().copied().filter(|o| o.0 == tid).collect();
+                merged.merge(filled(&part));
+            }
+            merged.into_result(&known, 5, 100, 5, 1, 3)
+        };
+        let expected = filled(&obs).into_result(&known, 5, 100, 5, 1, 3);
+        for order in [[0, 1, 2], [2, 0, 1], [1, 2, 0]] {
+            let r = run(&order);
+            assert_eq!(r.all_counts, expected.all_counts);
+            assert_eq!(r.known_counts, expected.known_counts);
+            assert_eq!(r.novel_counts, expected.novel_counts);
+        }
+    }
+}
+
+#[cfg(test)]
+mod chrom_run_tests {
+    use super::*;
+
+    fn runs_of(items: &[(i32, u32)]) -> (Vec<u32>, Vec<(i32, usize)>) {
+        let mut runs = Vec::new();
+        for &(tid, _) in items {
+            push_chrom_run(&mut runs, tid);
+        }
+        (items.iter().map(|x| x.1).collect(), runs)
+    }
+
+    #[test]
+    fn test_merge_chrom_runs_restores_file_order() {
+        // Worker 1 read chromosomes 1 and 3, worker 2 read chromosomes 0 and 2.
+        let w1 = [(1, 10), (1, 11), (3, 30)];
+        let w2 = [(0, 0), (2, 20), (2, 21)];
+        let expected = vec![0, 10, 11, 20, 21, 30];
+        for (first, second) in [(&w1, &w2), (&w2, &w1)] {
+            let (mut items, mut runs) = runs_of(first);
+            let (other, other_runs) = runs_of(second);
+            merge_chrom_runs(&mut items, &mut runs, other, other_runs);
+            assert_eq!(items, expected);
+            assert_eq!(runs, vec![(0, 1), (1, 2), (2, 2), (3, 1)]);
+        }
+    }
+
+    #[test]
+    fn test_truncate_chrom_runs() {
+        let (mut items, mut runs) = runs_of(&[(0, 0), (1, 10), (1, 11), (2, 20)]);
+        truncate_chrom_runs(&mut items, &mut runs, 2);
+        assert_eq!(items, vec![0, 10]);
+        assert_eq!(runs, vec![(0, 1), (1, 1)]);
     }
 }

@@ -4,7 +4,7 @@ version = "0.2.1"
 edition = "2021"
 rust-version = "1.89"
 authors = ["Phil Ewels <phil.ewels@seqera.io>", "Jon Manning <jonathan.manning@seqera.io>"]
-description = "Fast RNA-seq QC in a single pass: dupRadar, featureCounts, 8 RSeQC tools, preseq, samtools stats, and Qualimap — reimplemented in Rust"
+description = "Fast RNA-seq QC in a single pass: dupRadar, featureCounts, 9 RSeQC tools, preseq, samtools stats, and Qualimap — reimplemented in Rust"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/seqeralabs/RustQC"
 readme = "README.md"
@@ -41,7 +41,7 @@ plotters-svg = "0.3"
 # Configuration
 serde = { version = "1", features = ["derive"] }
 serde_yaml_ng = "0.10"
-dirs = "6"
+dirs = "7"
 
 # Interval trees
 coitrees = "0.4"
@@ -64,8 +64,8 @@ indexmap = "2"
 crc32fast = "1.5.0"
 
 # Terminal UI
-console = "0.15"
-indicatif = "0.17"
+console = "0.16"
+indicatif = "0.18"
 number_prefix = "0.4"
 serde_json = "1"
 

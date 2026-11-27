@@ -46,17 +46,102 @@ fn fmt_sci(v: f64) -> String {
     }
 }
 
-/// Write samtools stats SN-section compatible output.
+/// Insert size summary computed like samtools `output_stats`.
+struct InsertSizeStats {
+    /// Per insert size `[inward, outward, other]`, each halved (both mates
+    /// were counted) and truncated, for insert sizes `0..ibulk`.
+    rows: Vec<[u64; 3]>,
+    /// Totals of the halved counts over all insert sizes.
+    inward: u64,
+    outward: u64,
+    other: u64,
+    avg: f64,
+    sd: f64,
+}
+
+/// samtools `isize_main_bulk` default, a `float` in samtools.
+const ISIZE_MAIN_BULK: f32 = 0.99;
+/// samtools insert size cap (`-i`, default 8000).
+const MAX_INSERT_SIZE: usize = 8000;
+
+/// Port of the insert size part of samtools `output_stats`: halve each
+/// orientation count, keep the main bulk (99%) of pairs, then compute the
+/// mean and the population standard deviation over insert sizes `1..ibulk`.
+fn insert_size_stats(is_hist: &HashMap<u64, [u64; 4]>) -> InsertSizeStats {
+    let mut halved = vec![[0u64; 3]; MAX_INSERT_SIZE + 1];
+    for (&isize, counts) in is_hist {
+        if let Some(row) = halved.get_mut(isize as usize) {
+            for (half, &count) in row.iter_mut().zip(&counts[1..]) {
+                *half = (count as f64 * 0.5) as u64;
+            }
+        }
+    }
+    let (mut inward, mut outward, mut other) = (0u64, 0u64, 0u64);
+    for row in &halved {
+        inward += row[0];
+        outward += row[1];
+        other += row[2];
+    }
+    let mut nisize = inward + outward + other;
+
+    let main_bulk = f64::from(ISIZE_MAIN_BULK);
+    let mut ibulk = 0usize;
+    let mut bulk = 0.0f64;
+    let mut avg = 0.0f64;
+    for (isize, row) in halved.iter().enumerate() {
+        let num = row[0] + row[1] + row[2];
+        if num > 0 {
+            ibulk = isize + 1;
+        }
+        bulk += num as f64;
+        avg += (isize as u64 * num) as f64;
+        if bulk / nisize as f64 > main_bulk {
+            ibulk = isize + 1;
+            nisize = bulk as u64;
+            break;
+        }
+    }
+    let denom = if nisize > 0 { nisize } else { 1 } as f64;
+    avg /= denom;
+    let mut sd = 0.0f64;
+    for (isize, row) in halved.iter().enumerate().take(ibulk).skip(1) {
+        let num = (row[0] + row[1] + row[2]) as f64;
+        let diff = isize as f64 - avg;
+        sd += num * diff * diff / denom;
+    }
+    halved.truncate(ibulk);
+    InsertSizeStats {
+        rows: halved,
+        inward,
+        outward,
+        other,
+        avg,
+        sd: sd.sqrt(),
+    }
+}
+
+/// `a / b` in single precision, as samtools computes its `float` averages.
+fn ratio_f32(a: u64, b: u64) -> f64 {
+    if b == 0 {
+        0.0
+    } else {
+        f64::from(a as f32 / b as f32)
+    }
+}
+
+/// Write samtools stats compatible output.
 ///
-/// The output starts with a samtools-compatible comment header (important for
-/// MultiQC detection) and then emits `SN\t<key>:\t<value>\t# <comment>` lines.
+/// The data lines match `samtools stats` (1.22.1) run without options on a
+/// coordinate-sorted BAM. The output starts with a samtools-style comment
+/// header (MultiQC detects "This file was produced by samtools stats").
 ///
 /// # Arguments
 /// * `result` - The computed BAM statistics
 /// * `output_path` - Path to write the stats file
 pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
-    let mut out = std::fs::File::create(output_path)
+    let file = std::fs::File::create(output_path)
         .with_context(|| format!("Failed to create stats file: {}", output_path.display()))?;
+    let mut out = std::io::BufWriter::new(file);
 
     // Header comment — MultiQC detects "This file was produced by samtools stats"
     writeln!(out, "# This file was produced by samtools stats and RustQC")?;
@@ -65,101 +150,16 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
         "# The command line was: rustqc rna (samtools stats compatible output)"
     )?;
 
-    // Derived values
-    let raw_total = result.primary_count; // primary = non-secondary, non-supplementary
-    let filtered = result.qc_failed;
+    // Reads counted by samtools stats: primary reads with a sequence.
+    let sequences = result.first_fragments + result.last_fragments + result.other_fragments;
+    let is = insert_size_stats(&result.is_hist);
 
-    // "sequences" = primary reads that passed QC
-    let sequences = raw_total.saturating_sub(filtered);
-
-    // Average lengths — use round() to match samtools' printf("%.0f") behavior
-    let avg_len = if raw_total > 0 {
-        (result.total_len as f64 / raw_total as f64).round()
-    } else {
-        0.0
-    };
-    let avg_first = if result.first_fragments > 0 {
-        (result.total_first_fragment_len as f64 / result.first_fragments as f64).round()
-    } else {
-        0.0
-    };
-    let avg_last = if result.last_fragments > 0 {
-        (result.total_last_fragment_len as f64 / result.last_fragments as f64).round()
-    } else {
-        0.0
-    };
-
-    // Average quality
-    let avg_quality = if result.quality_count > 0 {
-        result.quality_sum / result.quality_count as f64
-    } else {
-        0.0
-    };
-
-    // Insert size stats — 99th percentile truncation matching samtools stats.c.
-    // Each pair is counted once (upstream mate only), capped at 8000.
-    //
-    // Upstream samtools stats.c logic (report_stats, lines 1492-1522):
-    //   1. nisize = total count across ALL bins (including isize=0)
-    //   2. Iterate bins: accumulate bulk count and weighted sum.
-    //      Stop (including current bin) when bulk/nisize > 0.99.
-    //      Then nisize = bulk (truncated count).
-    //   3. mean = weighted_sum / nisize
-    //   4. SD loop runs from isize=1 to ibulk-1 (skips isize=0):
-    //      sd = sqrt( sum(count[i] * (i - mean)^2) / nisize )  [population SD]
-    let (avg_insert, insert_sd) = {
-        let total_count: u64 = result.is_hist.values().map(|v| v[0]).sum();
-        if total_count > 0 {
-            let mut sorted_isizes: Vec<(u64, u64)> =
-                result.is_hist.iter().map(|(&k, v)| (k, v[0])).collect();
-            sorted_isizes.sort_by_key(|&(k, _)| k);
-
-            // Phase 1: Find 99th percentile cutoff and compute mean.
-            // Include entire bins; stop when cumulative/total > 0.99.
-            let mut bulk_count = 0u64;
-            let mut weighted_sum = 0.0f64;
-            let mut ibulk: u64 = 0; // exclusive upper bound for SD loop
-
-            for &(isize_val, count) in &sorted_isizes {
-                if count > 0 {
-                    ibulk = isize_val + 1;
-                }
-                bulk_count += count;
-                weighted_sum += isize_val as f64 * count as f64;
-
-                if bulk_count as f64 / total_count as f64 > 0.99 {
-                    break;
-                }
-            }
-
-            if bulk_count > 0 {
-                let mean = weighted_sum / bulk_count as f64;
-
-                // Phase 2: SD — population SD, loop from isize=1 (skip 0).
-                let mut sd_sum = 0.0f64;
-                for &(isize_val, count) in &sorted_isizes {
-                    if isize_val == 0 {
-                        continue; // upstream SD loop starts at isize=1
-                    }
-                    if isize_val >= ibulk {
-                        break;
-                    }
-                    let diff = isize_val as f64 - mean;
-                    sd_sum += count as f64 * diff * diff;
-                }
-                let sd = (sd_sum / bulk_count as f64).sqrt();
-                (mean, sd)
-            } else {
-                (0.0, 0.0)
-            }
-        } else {
-            (0.0, 0.0)
-        }
-    };
-
-    // Error rate = mismatches / bases_mapped_cigar
-    let error_rate = if result.bases_mapped_cigar > 0 {
-        result.mismatches as f64 / result.bases_mapped_cigar as f64
+    // samtools: (float)nmismatches / nbases_mapped_cigar
+    let error_rate = ratio_f32(result.mismatches, result.bases_mapped_cigar);
+    // samtools: float avg_read_length = (float)total_len / sequences
+    let avg_read_len = ratio_f32(result.total_len, sequences);
+    let avg_quality = if result.total_len > 0 {
+        result.quality_sum / result.total_len as f64
     } else {
         0.0
     };
@@ -179,51 +179,43 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
     sn(
         &mut out,
         "raw total sequences:",
-        raw_total,
+        sequences,
         "excluding supplementary and secondary reads",
     )?;
-    sn_no_comment(&mut out, "filtered sequences:", filtered)?;
+    sn_no_comment(&mut out, "filtered sequences:", 0_u64)?;
     sn_no_comment(&mut out, "sequences:", sequences)?;
     sn(&mut out, "is sorted:", 1_u64, "sorted by coordinate")?;
     sn_no_comment(&mut out, "1st fragments:", result.first_fragments)?;
     sn_no_comment(&mut out, "last fragments:", result.last_fragments)?;
-
-    // Reads mapped
-    sn_no_comment(&mut out, "reads mapped:", result.primary_mapped)?;
+    sn_no_comment(&mut out, "reads mapped:", sequences - result.stats_unmapped)?;
     sn(
         &mut out,
         "reads mapped and paired:",
         result.reads_mapped_and_paired,
         "paired-end technology bit set + both mates mapped",
     )?;
-    sn_no_comment(&mut out, "reads unmapped:", result.unmapped)?;
+    sn_no_comment(&mut out, "reads unmapped:", result.stats_unmapped)?;
     sn(
         &mut out,
         "reads properly paired:",
-        result.properly_paired,
+        result.stats_properly_paired,
         "proper-pair bit set",
     )?;
     sn(
         &mut out,
         "reads paired:",
-        result.paired_flagstat,
+        result.stats_paired_tech,
         "paired-end technology bit set",
     )?;
     sn(
         &mut out,
         "reads duplicated:",
-        result.primary_duplicates,
+        result.stats_dup_reads,
         "PCR or optical duplicate bit set",
     )?;
     sn(&mut out, "reads MQ0:", result.reads_mq0, "mapped and MQ=0")?;
-
-    // Quality and length stats
-    sn_no_comment(&mut out, "reads QC failed:", filtered)?;
-    sn_no_comment(
-        &mut out,
-        "non-primary alignments:",
-        result.secondary + result.supplementary,
-    )?;
+    sn_no_comment(&mut out, "reads QC failed:", result.stats_qcfail)?;
+    sn_no_comment(&mut out, "non-primary alignments:", result.secondary)?;
     sn_no_comment(&mut out, "supplementary alignments:", result.supplementary)?;
     sn(
         &mut out,
@@ -256,17 +248,37 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
         "more accurate",
     )?;
     sn_no_comment(&mut out, "bases trimmed:", 0_u64)?;
-    sn_no_comment(&mut out, "bases duplicated:", result.bases_duplicated)?;
-    sn(&mut out, "mismatches:", result.mismatches, "from NM fields")?;
+    sn_no_comment(&mut out, "bases duplicated:", result.stats_dup_bases)?;
+    // samtools prints the unsigned counter through a (long) cast.
+    sn(
+        &mut out,
+        "mismatches:",
+        result.mismatches as i64,
+        "from NM fields",
+    )?;
     sn(
         &mut out,
         "error rate:",
         fmt_sci(error_rate),
         "mismatches / bases mapped (cigar)",
     )?;
-    sn_no_comment(&mut out, "average length:", avg_len as u64)?;
-    sn_no_comment(&mut out, "average first fragment length:", avg_first as u64)?;
-    sn_no_comment(&mut out, "average last fragment length:", avg_last as u64)?;
+    sn_no_comment(&mut out, "average length:", format!("{avg_read_len:.0}"))?;
+    sn_no_comment(
+        &mut out,
+        "average first fragment length:",
+        format!(
+            "{:.0}",
+            ratio_f32(result.total_first_fragment_len, result.first_fragments)
+        ),
+    )?;
+    sn_no_comment(
+        &mut out,
+        "average last fragment length:",
+        format!(
+            "{:.0}",
+            ratio_f32(result.total_last_fragment_len, result.last_fragments)
+        ),
+    )?;
     sn_no_comment(&mut out, "maximum length:", result.max_len)?;
     sn_no_comment(
         &mut out,
@@ -279,50 +291,49 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
         result.max_last_fragment_len,
     )?;
     sn_no_comment(&mut out, "average quality:", fmt_1dp(avg_quality))?;
-    sn_no_comment(&mut out, "insert size average:", fmt_1dp(avg_insert))?;
-    sn_no_comment(
-        &mut out,
-        "insert size standard deviation:",
-        fmt_1dp(insert_sd),
-    )?;
-    // Orientation counts: both mates are counted, so halve to match samtools.
-    sn_no_comment(&mut out, "inward oriented pairs:", result.inward_pairs / 2)?;
-    sn_no_comment(
-        &mut out,
-        "outward oriented pairs:",
-        result.outward_pairs / 2,
-    )?;
-    sn_no_comment(
-        &mut out,
-        "pairs with other orientation:",
-        result.other_orientation / 2,
-    )?;
+    sn_no_comment(&mut out, "insert size average:", fmt_1dp(is.avg))?;
+    sn_no_comment(&mut out, "insert size standard deviation:", fmt_1dp(is.sd))?;
+    sn_no_comment(&mut out, "inward oriented pairs:", is.inward)?;
+    sn_no_comment(&mut out, "outward oriented pairs:", is.outward)?;
+    sn_no_comment(&mut out, "pairs with other orientation:", is.other)?;
     sn_no_comment(
         &mut out,
         "pairs on different chromosomes:",
-        result.mate_diff_chr_mapq5,
+        result.stats_anomalous / 2,
     )?;
-
-    // Percentage stats
+    // samtools: (float)(100 * nreads_properly_paired) / sequences
     sn_no_comment(
         &mut out,
         "percentage of properly paired reads (%):",
-        fmt_1dp(if raw_total > 0 {
-            100.0 * result.properly_paired as f64 / raw_total as f64
-        } else {
-            0.0
-        }),
+        fmt_1dp(ratio_f32(100 * result.stats_properly_paired, sequences)),
     )?;
 
     // =================================================================
     // Histogram/distribution sections
     // =================================================================
 
+    // samtools uses one maximum quality for both FFQ and LFQ.
+    let max_qual = max_quality(&result.ffq).max(max_quality(&result.lfq));
+
     // FFQ — first fragment quality per cycle
-    write_ffq_lfq(&mut out, "FFQ", "first fragment", &result.ffq)?;
+    write_ffq_lfq(
+        &mut out,
+        "FFQ",
+        "first fragment",
+        &result.ffq,
+        result.max_first_fragment_len as usize,
+        max_qual,
+    )?;
 
     // LFQ — last fragment quality per cycle
-    write_ffq_lfq(&mut out, "LFQ", "last fragment", &result.lfq)?;
+    write_ffq_lfq(
+        &mut out,
+        "LFQ",
+        "last fragment",
+        &result.lfq,
+        result.max_last_fragment_len as usize,
+        max_qual,
+    )?;
 
     // GCF — GC content of first fragments
     write_gc_content(&mut out, "GCF", "first fragments", &result.gcf)?;
@@ -360,7 +371,7 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
     write_total_base_counts(&mut out, "LTC", &result.ltc)?;
 
     // IS — insert size with orientation breakdown
-    write_insert_size(&mut out, &result.is_hist)?;
+    write_insert_size(&mut out, &is)?;
 
     // RL — read length histogram
     write_length_hist(&mut out, "RL", &result.rl_hist)?;
@@ -384,8 +395,9 @@ pub fn write_stats(result: &BamStatResult, output_path: &Path) -> Result<()> {
     write_coverage_dist(&mut out, &result.cov_hist)?;
 
     // GCD — GC-depth
-    write_gc_depth(&mut out, &result.gcd_bins, result)?;
+    write_gc_depth(&mut out, &result.gcd_bins, avg_read_len as f32)?;
 
+    out.flush()?;
     debug!("Wrote samtools stats output to {}", output_path.display());
     Ok(())
 }
@@ -415,35 +427,34 @@ fn sn_no_comment<W: std::io::Write, V: std::fmt::Display>(
 // Histogram/distribution output helpers
 // ============================================================================
 
+/// Highest quality with a non-zero count in a per-cycle quality table.
+fn max_quality(data: &[[u64; 256]]) -> usize {
+    data.iter()
+        .flat_map(|row| row.iter().rposition(|&c| c > 0))
+        .max()
+        .unwrap_or(0)
+}
+
 /// Write FFQ or LFQ section (per-cycle quality distribution).
 ///
-/// Each row is a cycle, columns are quality values 0..max_q.
+/// Each row is a cycle, columns are qualities `0..=max_qual + 1` (samtools
+/// prints one column past the highest quality seen in either fragment).
+/// samtools prints a row for every cycle up to the longest read of that
+/// fragment, hard clips included; cycles past the stored ones are zero.
 /// `tag` is "FFQ" or "LFQ", `desc` is "first fragment" or "last fragment".
 fn write_ffq_lfq<W: std::io::Write>(
     out: &mut W,
     tag: &str,
     desc: &str,
-    data: &[[u64; 64]],
+    data: &[[u64; 256]],
+    n_cycles: usize,
+    max_qual: usize,
 ) -> Result<()> {
-    // Determine max quality observed across all cycles.
-    // Upstream samtools stats bumps max_qual by 1 (stats.c:1616:
-    // `if (max_qual+1 < nquals) max_qual++`) to include one extra
-    // trailing zero column beyond the highest observed quality.
-    let max_q_observed = data
-        .iter()
-        .flat_map(|row| {
-            row.iter()
-                .enumerate()
-                .rev()
-                .find(|(_, &c)| c > 0)
-                .map(|(i, _)| i)
-        })
-        .max()
-        .unwrap_or(0);
-    let max_q = if max_q_observed + 1 < 64 {
-        max_q_observed + 1
+    // stats.c: `if (max_qual+1 < nquals) max_qual++` with nquals = 256
+    let max_q = if max_qual + 1 < 256 {
+        max_qual + 1
     } else {
-        max_q_observed
+        max_qual
     };
 
     writeln!(
@@ -458,7 +469,9 @@ fn write_ffq_lfq<W: std::io::Write>(
         out,
         "# Use `plot-bamstats -p <outdir> <file>` to generate plots"
     )?;
-    for (cycle, row) in data.iter().enumerate() {
+    const EMPTY: [u64; 256] = [0; 256];
+    for cycle in 0..n_cycles {
+        let row = data.get(cycle).unwrap_or(&EMPTY);
         write!(out, "{tag}\t{}", cycle + 1)?; // 1-based cycle numbering
         for &count in row.iter().take(max_q + 1) {
             write!(out, "\t{count}")?;
@@ -588,9 +601,8 @@ fn write_gct<W: std::io::Write>(
                 pcts[2],
                 pcts[3]
             )?;
-        } else {
-            writeln!(out, "{tag}\t{}\t0.00\t0.00\t0.00\t0.00", cycle + 1)?;
         }
+        // Cycles without A/C/G/T are skipped (samtools `if (!acgt_sum) continue`).
     }
     Ok(())
 }
@@ -657,56 +669,18 @@ fn write_total_base_counts<W: std::io::Write>(
     Ok(())
 }
 
-/// Write IS section (insert size with orientation breakdown).
-fn write_insert_size<W: std::io::Write>(
-    out: &mut W,
-    is_hist: &std::collections::HashMap<u64, [u64; 4]>,
-) -> Result<()> {
+/// Write IS section (insert size with orientation breakdown), for the insert
+/// sizes in the main bulk (see [`insert_size_stats`]).
+fn write_insert_size<W: std::io::Write>(out: &mut W, is: &InsertSizeStats) -> Result<()> {
     writeln!(
         out,
         "# IS, insert size. Use `plot-bamstats -p <outdir> <file>` to generate plots"
     )?;
-
-    if is_hist.is_empty() {
-        return Ok(());
-    }
-
-    // Compute the "main bulk" cutoff matching samtools stats' isize_main_bulk.
-    // Samtools halves counts (each pair counted twice), then accumulates into
-    // nisize, then finds the isize where cumulative/nisize > 0.99.
-    // We compute on the raw (double-counted) histogram using f64 to match
-    // samtools' 0.5 multiplication (which preserves fractional halves).
-    const MAX_INSERT_SIZE: u64 = 8000;
-
-    // Halved total (nisize), matching samtools: sum of (count * 0.5)
-    // across ALL buckets including the overflow cap.
-    let nisize: f64 = is_hist.values().map(|v| v[0] as f64 * 0.5).sum();
-
-    let mut bulk: f64 = 0.0;
-    let mut bulk_limit: u64 = 0;
-    for isize_val in 0..=MAX_INSERT_SIZE {
-        let count = is_hist.get(&isize_val).map(|v| v[0]).unwrap_or(0);
-        if count > 0 {
-            bulk_limit = isize_val + 1;
-        }
-        bulk += count as f64 * 0.5;
-        if nisize > 0.0 && bulk / nisize > 0.99 {
-            bulk_limit = isize_val + 1;
-            break;
-        }
-    }
-
-    // Output halved counts (each pair was counted twice).
-    // Use f64 * 0.5 and round to match samtools' integer truncation.
-    for isize_val in 0..bulk_limit {
-        let counts = is_hist.get(&isize_val).copied().unwrap_or([0; 4]);
+    for (isize, &[inward, outward, other]) in is.rows.iter().enumerate() {
         writeln!(
             out,
-            "IS\t{isize_val}\t{}\t{}\t{}\t{}",
-            (counts[0] as f64 * 0.5) as u64,
-            (counts[1] as f64 * 0.5) as u64,
-            (counts[2] as f64 * 0.5) as u64,
-            (counts[3] as f64 * 0.5) as u64
+            "IS\t{isize}\t{}\t{inward}\t{outward}\t{other}",
+            inward + outward + other
         )?;
     }
     Ok(())
@@ -869,131 +843,99 @@ fn write_coverage_dist<W: std::io::Write>(out: &mut W, cov_hist: &HashMap<u32, u
 // GCD — GC-depth distribution
 // ============================================================================
 
-/// Compute the p-th percentile of `depths[0..n]` using linear interpolation,
-/// matching upstream samtools `gcd_percentile()`.
-fn gcd_percentile(depths: &[u32], n: usize, p: u32) -> f64 {
-    let pos = p as f64 * (n as f64 + 1.0) / 100.0;
-    let k = pos as usize;
-    if k == 0 {
-        return depths[0] as f64;
+/// samtools `gcd_percentile`: the `p`-th percentile of the sorted `depths`
+/// by linear interpolation, in single precision.
+///
+/// The depth difference is an unsigned 32-bit subtraction in samtools; it is
+/// kept as such (it can only wrap if a group mixes the raw last bin with a
+/// normalised one).
+fn gcd_percentile(depths: &[u32], p: u32) -> f32 {
+    let n_bins = depths.len() as i32;
+    let n = p as f32 * (n_bins + 1) as f32 / 100.0;
+    let k = n as i32;
+    if k <= 0 {
+        return depths[0] as f32;
     }
-    if k >= n {
-        return depths[n - 1] as f64;
+    if k >= n_bins {
+        return depths[(n_bins - 1) as usize] as f32;
     }
-    let d = pos - k as f64;
-    depths[k - 1] as f64 + d * (depths[k] as f64 - depths[k - 1] as f64)
+    let d = n - k as f32;
+    let (lo, hi) = (depths[(k - 1) as usize], depths[k as usize]);
+    lo as f32 + d * hi.wrapping_sub(lo) as f32
+}
+
+/// samtools `rint(100. * gc / depth)`: mean GC of a bin as a whole percentage,
+/// computed in double precision and rounded half to even.
+fn gcd_bin_gc_percent(gc: f32, depth: u32) -> f32 {
+    (100.0 * f64::from(gc) / f64::from(depth)).round_ties_even() as f32
 }
 
 /// Write the GCD (GC-depth) section.
 ///
-/// Matches upstream `samtools stats` without `--ref-seq`:
-/// - Normalise per-bin GC to a percentage (sum of per-read GC fractions / depth)
-/// - Sort bins by (gc%, depth)
-/// - Group by GC% and compute depth percentiles (10, 25, 50, 75, 90)
-/// - Scale depth by avg_read_length / gcd_bin_size
+/// Port of samtools `output_stats` without `--ref-seq` (gc_depth_t holds a
+/// `float` GC and a `uint32_t` depth; all depth arithmetic is `float`):
+/// - The bins are `gcd[1..=igcd]`, with an unused zero bin `gcd[0]` in front.
+/// - Every bin except the last (`gcd[igcd]`) gets its GC normalised to a
+///   whole percentage; the last keeps its raw sum of per-read GC fractions.
+/// - All `igcd + 1` entries are sorted by (GC, depth) and the first `igcd` are
+///   printed, grouped by GC (within 0.1), with depth percentiles scaled by
+///   `avg_read_len / GCD_BIN_SIZE`.
+///
+/// `gcd_bins` must be in BAM order (contig, then position).
 fn write_gc_depth(
     out: &mut impl Write,
     gcd_bins: &[GcDepthBin],
-    result: &BamStatResult,
+    avg_read_len: f32,
 ) -> std::io::Result<()> {
-    if gcd_bins.is_empty() {
-        return Ok(());
-    }
-
     writeln!(
         out,
         "# GC-depth. Use `grep ^GCD | cut -f 2-` to extract this part. \
          The columns are: GC%, unique sequence percentiles, 10th, 25th, \
          50th, 75th and 90th depth percentile"
     )?;
+    if gcd_bins.is_empty() {
+        return Ok(());
+    }
 
-    // Normalise GC: divide accumulated GC sum by depth, then scale to %
-    // and round to nearest integer.  Matches upstream no-reference path.
-    // Note: samtools normalises only bins 0..igcd-1 (all but the last real bin).
-    // The last bin keeps its raw accumulated gc fraction completely untouched
-    // (no rint, no /depth, no *100).  This means it sorts as a raw fraction
-    // (typically < 1.0) and prints as %.1f showing e.g. "0.6".
-    let last = gcd_bins.len().saturating_sub(1);
-    let mut bins: Vec<(f32, u32)> = gcd_bins
-        .iter()
-        .enumerate()
-        .map(|(idx, b)| {
-            let gc_pct = if idx == last {
-                // Last bin: keep raw gc_sum (not normalised at all, matching upstream)
-                b.gc
-            } else if b.depth > 0 {
-                (100.0 * b.gc / b.depth as f32).round()
-            } else {
-                0.0
-            };
-            (gc_pct, b.depth)
-        })
-        .collect();
+    let igcd = gcd_bins.len();
+    let mut bins: Vec<(f32, u32)> = Vec::with_capacity(igcd + 1);
+    bins.push((0.0, 0)); // gcd[0]
+    for (idx, b) in gcd_bins.iter().enumerate() {
+        let gc = if idx + 1 < igcd && b.depth > 0 {
+            gcd_bin_gc_percent(b.gc, b.depth)
+        } else {
+            b.gc
+        };
+        bins.push((gc, b.depth));
+    }
+    // gcd_cmp: by GC, then depth. Equal entries are identical, so the
+    // (unstable) qsort order cannot show.
+    bins.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
 
-    // Sort by (gc%, depth) — matches upstream qsort with gcd_cmp.
-    bins.sort_by(|a, b| {
-        a.0.partial_cmp(&b.0)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then(a.1.cmp(&b.1))
-    });
+    const GCD_BIN_SIZE: f32 = 20_000.0;
+    let scale = |depth: f32| f64::from(depth * avg_read_len / GCD_BIN_SIZE);
 
-    // Samtools allocates gcd[0] as a zero-depth ghost element that is never
-    // written to (indices start at 1), so after qsort the ghost sorts to the
-    // front of the array and is included in the percentile calculations but
-    // the last real bin is excluded from output.  We replicate this by
-    // prepending a (0.0, 0) ghost element and limiting output to the
-    // original real bin count.
-    let real_bins = bins.len();
-    bins.insert(0, (0.0f32, 0u32));
-    // total for denominator = real_bins + 1 (the ghost)
-    let total_for_denom = real_bins + 1;
-    // only output `real_bins` elements (loop over the first `real_bins` of
-    // the now real_bins+1 sorted entries)
-    let output_len = real_bins;
-
-    // Average read length for depth scaling (matches samtools: total_len / n_reads).
-    let avg_read_len = if result.primary_count > 0 {
-        result.total_len as f64 / result.primary_count as f64
-    } else {
-        0.0
-    };
-    let gcd_bin_size = 20_000.0_f64;
-    let scale = avg_read_len / gcd_bin_size;
-
-    // Group consecutive bins with the same GC% (within 0.1 tolerance)
-    // and emit one GCD line per group.
     let mut i = 0;
-    while i < output_len {
+    while i < igcd {
         let gc = bins[i].0;
-        let group_start = i;
-
-        // Count bins in this GC% group (only within output_len, not the ghost
-        // at the end if it happens to sort there).
-        while i < output_len && (bins[i].0 - gc).abs() < 0.1 {
-            i += 1;
+        let mut end = i;
+        // fabs(float - float) < 0.1 (double)
+        while end < igcd && f64::from((bins[end].0 - gc).abs()) < 0.1 {
+            end += 1;
         }
-        let nbins = i - group_start;
-
-        // Extract sorted depths for this group (already sorted by the
-        // secondary sort key above).
-        let depths: Vec<u32> = bins[group_start..i].iter().map(|b| b.1).collect();
-
-        // Cumulative percentile matches samtools: (igcd_start + nbins + 1) * 100 / (igcd + 1)
-        // where igcd_start = group_start (0-based), igcd = real_bins (total output bins),
-        // and total_for_denom = real_bins + 1.
-        let cum_pct = (group_start + nbins + 1) as f64 * 100.0 / total_for_denom as f64;
-
+        let depths: Vec<u32> = bins[i..end].iter().map(|b| b.1).collect();
         writeln!(
             out,
             "GCD\t{:.1}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}",
-            gc,
-            cum_pct,
-            gcd_percentile(&depths, nbins, 10) * scale,
-            gcd_percentile(&depths, nbins, 25) * scale,
-            gcd_percentile(&depths, nbins, 50) * scale,
-            gcd_percentile(&depths, nbins, 75) * scale,
-            gcd_percentile(&depths, nbins, 90) * scale,
+            f64::from(gc),
+            (end + 1) as f64 * 100.0 / (igcd + 1) as f64,
+            scale(gcd_percentile(&depths, 10)),
+            scale(gcd_percentile(&depths, 25)),
+            scale(gcd_percentile(&depths, 50)),
+            scale(gcd_percentile(&depths, 75)),
+            scale(gcd_percentile(&depths, 90)),
         )?;
+        i = end;
     }
 
     Ok(())
@@ -1061,5 +1003,160 @@ mod tests {
                 }
             }
         }
+    }
+
+    // --- Number formatting: Rust must print like C printf ---
+
+    use std::ffi::{c_char, c_int, CStr, CString};
+
+    extern "C" {
+        fn snprintf(buf: *mut c_char, size: usize, fmt: *const c_char, ...) -> c_int;
+    }
+
+    /// Format one double with the C library's printf.
+    fn c_fmt(fmt: &str, v: f64) -> String {
+        let fmt = CString::new(fmt).unwrap();
+        let mut buf = vec![0 as c_char; 128];
+        // SAFETY: `buf` is writable for its full length, `fmt` is a valid
+        // C string with exactly one double conversion, and `v` is a double.
+        let n = unsafe { snprintf(buf.as_mut_ptr(), buf.len(), fmt.as_ptr(), v) };
+        assert!(n >= 0 && (n as usize) < buf.len());
+        // SAFETY: snprintf NUL-terminated the buffer.
+        unsafe { CStr::from_ptr(buf.as_ptr()) }
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    /// Deterministic pseudo-random sample of f32-derived values.
+    fn sample_values() -> Vec<f64> {
+        let mut v = vec![
+            0.0, 0.5, 1.5, 2.5, 74.5, 98.5, 0.25, 0.35, 0.05, 37.25, 0.125, 0.375, 0.0625, 0.0225,
+            1e-10, 1.0, 9.9999995, 99.995, 123456.5,
+        ];
+        let mut state = 0x2545F4914F6CDD1Du64;
+        for _ in 0..20_000 {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            let a = (state >> 40) as u32;
+            let b = 1 + (state & 0xFFFF) as u32;
+            v.push(f64::from(a as f32 / b as f32));
+            v.push(f64::from((a % 4096) as f32 * 75.0 / 20_000.0));
+            v.push(f64::from(a % 1000) / 8.0);
+        }
+        v
+    }
+
+    #[test]
+    fn fixed_point_formatting_matches_printf() {
+        for v in sample_values() {
+            assert_eq!(format!("{v:.0}"), c_fmt("%.0f", v), "%.0f of {v:e}");
+            assert_eq!(format!("{v:.1}"), c_fmt("%.1f", v), "%.1f of {v:e}");
+            assert_eq!(format!("{v:.2}"), c_fmt("%.2f", v), "%.2f of {v:e}");
+            assert_eq!(format!("{v:.3}"), c_fmt("%.3f", v), "%.3f of {v:e}");
+        }
+    }
+
+    #[test]
+    fn scientific_formatting_matches_printf() {
+        for v in sample_values() {
+            assert_eq!(fmt_sci(v), c_fmt("%e", v), "%e of {v:e}");
+        }
+    }
+
+    #[test]
+    fn error_rate_is_single_precision() {
+        // sc_pe_rev: samtools prints 8.805891e-03; the double ratio prints ...892.
+        assert_eq!(fmt_sci(ratio_f32(1558, 176_927)), "8.805891e-03");
+        assert_eq!(fmt_sci(1558.0 / 176_927.0), "8.805892e-03");
+        assert_eq!(fmt_sci(ratio_f32(0, 0)), "0.000000e+00");
+    }
+
+    #[test]
+    fn gcd_gc_percent_rounds_half_to_even_in_double() {
+        // rint(): exact halves go to the even neighbour.
+        assert_eq!(gcd_bin_gc_percent(0.5, 4), 12.0); // 12.5 exactly
+        assert_eq!(gcd_bin_gc_percent(1.5, 4), 38.0); // 37.5 exactly
+        assert_eq!(gcd_bin_gc_percent(0.0, 3), 0.0);
+        // Computed in double from the float sum: 100 * 1.01f / 2 is
+        // 50.49999952..., while in float 100 * 1.01f rounds to 101.0 and
+        // the mean would be exactly 50.5.
+        assert_eq!((100.0f32 * 1.01f32 / 2.0).round(), 51.0);
+        assert_eq!(gcd_bin_gc_percent(1.01, 2), 50.0);
+    }
+
+    #[test]
+    fn gcd_percentile_matches_samtools() {
+        let d = [1u32, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        // n = p * (N + 1) / 100 = 1.1 → k = 1, d = 0.1
+        assert_eq!(gcd_percentile(&d, 10), 1.0 + (1.1f32 - 1.0));
+        assert_eq!(gcd_percentile(&d, 50), 5.5);
+        assert_eq!(gcd_percentile(&d, 90), 9.0 + (9.9f32 - 9.0));
+        // k <= 0 → first; k >= N → last
+        assert_eq!(gcd_percentile(&[7, 9], 10), 7.0);
+        assert_eq!(gcd_percentile(&[7, 9], 90), 9.0);
+        assert_eq!(gcd_percentile(&[3], 50), 3.0);
+        // Unsigned difference wraps like uint32_t in C.
+        let d = 1.6f32 - 1.0;
+        assert_eq!(
+            gcd_percentile(&[5, 3, 1], 40),
+            5.0 + d * 3u32.wrapping_sub(5) as f32
+        );
+    }
+
+    #[test]
+    fn gcd_last_bin_keeps_raw_gc_and_is_not_printed_alone() {
+        // Two bins: the first is normalised to 50%, the last keeps its raw
+        // GC sum (0.9). Sorted with the empty gcd[0] in front, only the first
+        // igcd = 2 entries are printed, so the 50% bin is left out.
+        let bins = vec![
+            GcDepthBin { gc: 1.0, depth: 2 },
+            GcDepthBin { gc: 0.9, depth: 3 },
+        ];
+        let mut out = Vec::new();
+        write_gc_depth(&mut out, &bins, 100.0).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        let lines: Vec<&str> = text.lines().filter(|l| l.starts_with("GCD")).collect();
+        assert_eq!(
+            lines,
+            vec![
+                "GCD\t0.0\t66.667\t0.000\t0.000\t0.000\t0.000\t0.000",
+                "GCD\t0.9\t100.000\t0.015\t0.015\t0.015\t0.015\t0.015",
+            ]
+        );
+    }
+
+    #[test]
+    fn insert_size_halves_each_orientation() {
+        let mut h = HashMap::new();
+        // isize 0 on the same contig is kept; odd counts truncate per orientation.
+        h.insert(0u64, [2, 2, 0, 0]);
+        h.insert(100u64, [6, 3, 3, 0]);
+        h.insert(101u64, [4, 4, 0, 0]);
+        let is = insert_size_stats(&h);
+        assert_eq!(is.inward, 1 + 1 + 2);
+        assert_eq!(is.outward, 1);
+        assert_eq!(is.other, 0);
+        assert_eq!(is.rows.len(), 102);
+        assert_eq!(is.rows[0], [1, 0, 0]);
+        assert_eq!(is.rows[100], [1, 1, 0]);
+        assert_eq!(is.rows[101], [2, 0, 0]);
+        // mean over all 5 halved pairs: (0 + 2 * 100 + 2 * 101) / 5
+        assert!((is.avg - 80.4).abs() < 1e-12);
+    }
+
+    #[test]
+    fn insert_size_main_bulk_cut() {
+        let mut h = HashMap::new();
+        h.insert(200u64, [198, 198, 0, 0]);
+        h.insert(8000u64, [2, 2, 0, 0]);
+        let is = insert_size_stats(&h);
+        // 99 of 100 pairs is not > 0.99, so the cap bin is included.
+        assert_eq!(is.rows.len(), 8001);
+        h.insert(200u64, [398, 398, 0, 0]);
+        let is = insert_size_stats(&h);
+        assert_eq!(is.rows.len(), 201);
+        assert_eq!(is.avg, 200.0);
+        assert_eq!(is.sd, 0.0);
     }
 }

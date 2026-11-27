@@ -1,4 +1,4 @@
-//! Test helpers for writing BAM files (integration tests).
+//! BAM writing: split_bam output and test fixtures.
 
 use std::fs::File;
 use std::io;

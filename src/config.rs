@@ -165,6 +165,10 @@ pub struct RnaConfig {
     /// Qualimap RNA-Seq QC configuration.
     #[serde(default)]
     pub qualimap: QualimapConfig,
+
+    /// split_bam (RSeQC `split_bam.py`) BED region classification configuration.
+    #[serde(default)]
+    pub split_bam: SplitBamConfig,
 }
 
 // ============================================================================
@@ -245,6 +249,8 @@ impl Default for DupradarConfig {
 ///   biotype_counts_mqc: true
 ///   biotype_rrna_mqc: true
 ///   biotype_attribute: "gene_biotype"
+///   count_multi_mapping: false
+///   count_multi_overlapping: false
 /// ```
 #[derive(Debug, Deserialize)]
 #[serde(default)]
@@ -275,6 +281,24 @@ pub struct FeatureCountsConfig {
     /// Defaults to `"gene_biotype"` (Ensembl convention).
     /// Use `"gene_type"` for GENCODE GTF files.
     pub biotype_attribute: String,
+
+    /// Count multi-mapping reads, like `featureCounts -M`.
+    ///
+    /// By default reads with `NH` > 1 are reported as `Unassigned_MultiMapping`.
+    /// When enabled, every reported alignment of a multi-mapping read is
+    /// counted. Applies to gene- and biotype-level counts, not dupRadar.
+    /// The CLI `-M` flag enables it regardless of this setting.
+    /// **Default:** `false`.
+    pub count_multi_mapping: bool,
+
+    /// Assign reads to every overlapping feature, like `featureCounts -O`.
+    ///
+    /// By default a read overlapping several genes (or biotypes) is reported
+    /// as `Unassigned_Ambiguity`. When enabled it is Assigned and counted once
+    /// for every overlapping feature.
+    /// The CLI `-O` flag enables it regardless of this setting.
+    /// **Default:** `false`.
+    pub count_multi_overlapping: bool,
 }
 
 impl Default for FeatureCountsConfig {
@@ -287,6 +311,8 @@ impl Default for FeatureCountsConfig {
             biotype_counts_mqc: true,
             biotype_rrna_mqc: true,
             biotype_attribute: "gene_biotype".to_string(),
+            count_multi_mapping: false,
+            count_multi_overlapping: false,
         }
     }
 }
@@ -575,6 +601,53 @@ impl Default for TinConfig {
     }
 }
 
+/// Configuration for split_bam (RSeQC `split_bam.py`) BED region classification.
+///
+/// Classifies every alignment as inside (`in`) or outside (`ex`) the regions of
+/// a BED12 file, or as `junk` (QC-failed / unmapped). Typically used with an
+/// rRNA BED file to quantify rRNA contamination. Only runs when a BED file is
+/// given, here or via `--split-bam-bed`.
+///
+/// Example:
+/// ```yaml
+/// split_bam:
+///   enabled: true
+///   bed: /refs/hg38_rRNA.bed
+///   write_bams: false
+/// ```
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct SplitBamConfig {
+    /// Whether to run split_bam when a BED file is set. Defaults to true.
+    pub enabled: bool,
+    /// BED file of regions (BED12, plain or gzip-compressed).
+    ///
+    /// The CLI `--split-bam-bed` flag takes precedence over this setting.
+    pub bed: Option<String>,
+    /// Also write `<sample>.in.bam`, `<sample>.ex.bam` and `<sample>.junk.bam`.
+    ///
+    /// Requires one extra sequential read of each alignment file.
+    /// **Default:** `false`.
+    pub write_bams: bool,
+}
+
+impl Default for SplitBamConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            bed: None,
+            write_bams: false,
+        }
+    }
+}
+
+impl SplitBamConfig {
+    /// The BED path to use, or `None` when split_bam should not run.
+    pub fn active_bed(&self) -> Option<&str> {
+        self.bed.as_deref().filter(|_| self.enabled)
+    }
+}
+
 /// Configuration for Qualimap RNA-Seq QC.
 ///
 /// When enabled, produces Qualimap-compatible output files including
@@ -839,20 +912,62 @@ pub fn load_merged_config(
 
     let config: Config =
         serde_yaml_ng::from_value(merged).context("Failed to deserialize merged configuration")?;
+    config.rna.validate().with_context(|| {
+        let files: Vec<String> = paths.iter().map(|(p, _)| p.display().to_string()).collect();
+        format!("Invalid configuration (from {})", files.join(", "))
+    })?;
     Ok((config, paths))
 }
 
 impl RnaConfig {
+    /// Check settings that deserialization alone cannot catch.
+    ///
+    /// Currently: `chromosome_mapping` must not map two GTF chromosomes to the
+    /// same alignment chromosome. Reads are looked up by their alignment
+    /// name, so such a mapping has no single answer.
+    pub fn validate(&self) -> Result<()> {
+        let mut by_aln: HashMap<&str, Vec<&str>> = HashMap::new();
+        for (gtf_name, aln_name) in &self.chromosome_mapping {
+            by_aln.entry(aln_name).or_default().push(gtf_name);
+        }
+        let mut clashes: Vec<String> = by_aln
+            .into_iter()
+            .filter(|(_, gtf_names)| gtf_names.len() > 1)
+            .map(|(aln_name, mut gtf_names)| {
+                gtf_names.sort_unstable();
+                format!("'{}' <- {}", aln_name, gtf_names.join(", "))
+            })
+            .collect();
+        if !clashes.is_empty() {
+            clashes.sort_unstable();
+            anyhow::bail!(
+                "chromosome_mapping maps several GTF chromosomes to the same alignment \
+                 chromosome: {}. Each alignment chromosome may appear only once as a value.",
+                clashes.join("; ")
+            );
+        }
+        Ok(())
+    }
+
     /// Build a reverse mapping: alignment chromosome name -> GTF chromosome name.
     ///
     /// The config file maps GTF -> alignment, but at lookup time we need
     /// alignment -> GTF (since the index is keyed by GTF names).
     /// Explicit chromosome_mapping entries take priority over the prefix.
+    ///
+    /// The mapping should have passed [`RnaConfig::validate`]. If it maps two
+    /// GTF names to one alignment name anyway, the GTF name that sorts first
+    /// wins, so the result never depends on hash order.
     pub fn alignment_to_gtf_mapping(&self) -> HashMap<String, String> {
-        self.chromosome_mapping
-            .iter()
-            .map(|(gtf_name, aln_name)| (aln_name.clone(), gtf_name.clone()))
-            .collect()
+        let mut pairs: Vec<(&String, &String)> = self.chromosome_mapping.iter().collect();
+        pairs.sort_unstable();
+        let mut reverse = HashMap::with_capacity(pairs.len());
+        for (gtf_name, aln_name) in pairs {
+            reverse
+                .entry(aln_name.clone())
+                .or_insert_with(|| gtf_name.clone());
+        }
+        reverse
     }
 
     /// Returns the chromosome prefix if configured.
@@ -900,6 +1015,7 @@ impl RnaConfig {
             || self.junction_saturation.enabled
             || self.inner_distance.enabled
             || self.tin.enabled
+            || self.split_bam.active_bed().is_some()
     }
 
     /// Returns true if any samtools-compatible output is enabled.
@@ -913,6 +1029,70 @@ mod tests {
     use super::*;
 
     // --- Tests for the top-level Config (rna: wrapper) ---
+
+    #[test]
+    fn test_split_bam_config() {
+        let default = RnaConfig::default();
+        assert!(default.split_bam.enabled);
+        assert!(!default.split_bam.write_bams);
+        assert_eq!(default.split_bam.active_bed(), None);
+
+        let yaml = "rna:\n  split_bam:\n    bed: rrna.bed\n    write_bams: true\n";
+        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        assert_eq!(config.rna.split_bam.active_bed(), Some("rrna.bed"));
+        assert!(config.rna.split_bam.write_bams);
+        assert!(config.rna.any_rseqc_output());
+
+        let yaml = "rna:\n  split_bam:\n    enabled: false\n    bed: rrna.bed\n";
+        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        assert_eq!(config.rna.split_bam.active_bed(), None);
+    }
+
+    #[test]
+    fn test_chromosome_mapping_rejects_shared_alignment_name() {
+        let yaml = r#"
+chromosome_mapping:
+  chrM: "MT"
+  chrMT: "MT"
+  chr1: "1"
+"#;
+        let config: RnaConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        let err = config.validate().unwrap_err().to_string();
+        assert!(err.contains("'MT' <- chrM, chrMT"), "{err}");
+
+        // The reverse mapping is still deterministic: the GTF name that sorts first wins.
+        let reverse = config.alignment_to_gtf_mapping();
+        assert_eq!(reverse.get("MT").map(String::as_str), Some("chrM"));
+        assert_eq!(reverse.get("1").map(String::as_str), Some("chr1"));
+    }
+
+    #[test]
+    fn test_chromosome_mapping_one_to_one_is_valid() {
+        let yaml = r#"
+chromosome_mapping:
+  chrM: "MT"
+  chr1: "1"
+"#;
+        let config: RnaConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        config.validate().unwrap();
+        assert_eq!(config.alignment_to_gtf_mapping().len(), 2);
+    }
+
+    #[test]
+    fn test_load_merged_config_rejects_shared_alignment_name() {
+        let dir = std::env::temp_dir().join(format!("rustqc_cfg_dup_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.yaml");
+        std::fs::write(
+            &path,
+            "rna:\n  chromosome_mapping:\n    chrM: MT\n    chrMT: MT\n",
+        )
+        .unwrap();
+        let err = load_merged_config(Some(path.to_str().unwrap())).unwrap_err();
+        let msg = format!("{err:#}");
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(msg.contains("'MT' <- chrM, chrMT"), "{msg}");
+    }
 
     #[test]
     fn test_top_level_rna_wrapper() {

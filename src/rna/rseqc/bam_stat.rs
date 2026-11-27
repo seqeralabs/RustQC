@@ -10,6 +10,8 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 
+use super::flagstat::FlagstatCounts;
+
 // ============================================================================
 // Result struct
 // ============================================================================
@@ -57,7 +59,7 @@ pub struct BamStatResult {
     // --- samtools flagstat fields ---
     /// Secondary alignments (0x100).
     pub secondary: u64,
-    /// Supplementary alignments (0x800).
+    /// Supplementary alignments (0x800) that are not also secondary (0x100).
     pub supplementary: u64,
     /// All mapped records (not 0x4).
     pub mapped: u64,
@@ -67,9 +69,11 @@ pub struct BamStatResult {
     pub read1_flagstat: u64,
     /// Read2 in pair (0x80).
     pub read2_flagstat: u64,
-    /// First fragments for samtools stats (read1 or unpaired).
+    /// samtools stats first fragments: primary reads with a sequence that are
+    /// unpaired, or paired with only the read1 flag.
     pub first_fragments: u64,
-    /// Last fragments for samtools stats (read2).
+    /// samtools stats last fragments: primary paired reads with a sequence and
+    /// only the read2 flag.
     pub last_fragments: u64,
     /// Properly paired reads (0x1 + 0x2).
     pub properly_paired: u64,
@@ -91,27 +95,28 @@ pub struct BamStatResult {
     // --- samtools stats SN fields ---
     /// Sum of query sequence lengths for all primary reads.
     pub total_len: u64,
-    /// Sum of first fragment (read1 or unpaired) sequence lengths.
+    /// Sum of first fragment sequence lengths.
     pub total_first_fragment_len: u64,
-    /// Sum of last fragment (read2) sequence lengths.
+    /// Sum of last fragment sequence lengths.
     pub total_last_fragment_len: u64,
     /// Sum of query lengths for mapped primary reads.
     pub bases_mapped: u64,
-    /// Sum of M/I/=/X CIGAR operations for mapped primary reads.
+    /// Sum of M/I/=/X CIGAR operations for mapped non-secondary reads.
     pub bases_mapped_cigar: u64,
     /// Sum of query lengths for duplicate-flagged primary reads.
     pub bases_duplicated: u64,
-    /// Maximum query sequence length (among primary reads).
+    /// Maximum read length including hard clips (non-secondary reads).
     pub max_len: u64,
-    /// Maximum first-fragment sequence length.
+    /// Maximum first-fragment read length including hard clips.
     pub max_first_fragment_len: u64,
-    /// Maximum last-fragment sequence length.
+    /// Maximum last-fragment read length including hard clips.
     pub max_last_fragment_len: u64,
-    /// Sum of individual base qualities across all primary non-QC-fail reads.
+    /// Sum of base qualities of primary first and last fragments.
     pub quality_sum: f64,
     /// Total number of bases contributing to quality_sum.
     pub quality_count: u64,
-    /// Sum of NM tag values across mapped primary reads.
+    /// Sum of NM tag values across mapped non-secondary reads (two's
+    /// complement, as samtools adds signed values to an unsigned counter).
     pub mismatches: u64,
     /// Insert size with orientation breakdown: abs(TLEN) → [total, inward, outward, other].
     /// Both mates contribute; divide by 2 at output to match samtools stats.
@@ -130,11 +135,11 @@ pub struct BamStatResult {
     pub primary_duplicates: u64,
     /// Number of primary mapped reads with mapping quality 0.
     pub reads_mq0: u64,
-    /// Number of primary, non-QC-fail, mapped, paired reads whose mate is also mapped.
+    /// Number of primary mapped, paired reads whose mate is also mapped.
     pub reads_mapped_and_paired: u64,
 
     // --- samtools stats histogram/distribution fields ---
-    /// Read length histogram (all primary reads): length → count.
+    /// Read length histogram (primary reads, length including hard clips): length → count.
     pub rl_hist: HashMap<u64, u64>,
     /// First fragment read length histogram: length → count.
     pub frl_hist: HashMap<u64, u64>,
@@ -142,10 +147,10 @@ pub struct BamStatResult {
     pub lrl_hist: HashMap<u64, u64>,
     /// MAPQ histogram (primary, mapped, !qcfail, !dup): quality 0-255.
     pub mapq_hist: [u64; 256],
-    /// Per-cycle quality for first fragments: outer = cycle, inner = quality bucket counts.
-    pub ffq: Vec<[u64; 64]>,
-    /// Per-cycle quality for last fragments: outer = cycle, inner = quality bucket counts.
-    pub lfq: Vec<[u64; 64]>,
+    /// Per-cycle quality for first fragments: outer = cycle, inner = count per quality 0-255.
+    pub ffq: Vec<[u64; 256]>,
+    /// Per-cycle quality for last fragments: outer = cycle, inner = count per quality 0-255.
+    pub lfq: Vec<[u64; 256]>,
     /// GC content step-function for first fragments, 200 bins (samtools ngc=200).
     pub gcf: [u64; 200],
     /// GC content step-function for last fragments, 200 bins (samtools ngc=200).
@@ -175,8 +180,31 @@ pub struct BamStatResult {
     pub chk: [u32; 3],
     /// Coverage distribution: depth → number of reference positions at that depth.
     pub cov_hist: HashMap<u32, u64>,
-    /// GC-depth bins for the GCD section of samtools stats.
+    /// GC-depth bins for the GCD section of samtools stats, in BAM order
+    /// (contig, then position). samtools treats the last bin specially.
     pub gcd_bins: Vec<GcDepthBin>,
+
+    // --- samtools stats counters without a bam_stat/flagstat equivalent ---
+    /// Primary reads with a sequence that are neither first nor last fragments.
+    pub other_fragments: u64,
+    /// Primary reads with a sequence and the QC-fail flag.
+    pub stats_qcfail: u64,
+    /// Primary unmapped reads with a sequence.
+    pub stats_unmapped: u64,
+    /// Primary reads with a sequence and the paired flag.
+    pub stats_paired_tech: u64,
+    /// Primary reads with a sequence, both mates mapped and the proper-pair flag.
+    pub stats_properly_paired: u64,
+    /// Primary reads with a sequence, both mates mapped, mate on another contig.
+    pub stats_anomalous: u64,
+    /// Duplicate-flagged non-secondary reads with a sequence.
+    pub stats_dup_reads: u64,
+    /// Sequence length of `stats_dup_reads`.
+    pub stats_dup_bases: u64,
+
+    // --- samtools flagstat ---
+    /// samtools flagstat counters, split by QC-fail.
+    pub flagstat: FlagstatCounts,
 }
 
 /// A single GC-depth bin, representing a `gcd_bin_size`-bp window of the genome.
@@ -185,7 +213,7 @@ pub struct GcDepthBin {
     /// Accumulated GC fraction sum (sum of per-read `gc_count / seq_len`).
     /// Divided by `depth` during output to get the mean GC fraction.
     pub gc: f32,
-    /// Number of reads whose start position falls in this bin.
+    /// Number of mapped, non-secondary reads assigned to this bin.
     pub depth: u32,
 }
 
@@ -263,6 +291,15 @@ impl Default for BamStatResult {
             chk: [0u32; 3],
             cov_hist: HashMap::new(),
             gcd_bins: Vec::new(),
+            other_fragments: 0,
+            stats_qcfail: 0,
+            stats_unmapped: 0,
+            stats_paired_tech: 0,
+            stats_properly_paired: 0,
+            stats_anomalous: 0,
+            stats_dup_reads: 0,
+            stats_dup_bases: 0,
+            flagstat: FlagstatCounts::default(),
         }
     }
 }

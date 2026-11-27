@@ -53,7 +53,7 @@ rustqc rna sample1.bam sample2.bam sample3.bam --gtf genes.gtf
 Path to a GTF gene annotation file (plain or gzip-compressed). **Required.**
 The GTF must contain `exon` features with a `gene_id` attribute.
 Transcript-level structure (exon blocks, CDS features) is extracted automatically
-and used by all analyses: dupRadar, featureCounts, all 8 RSeQC tools (including TIN),
+and used by all analyses: dupRadar, featureCounts, the RSeQC tools (including TIN),
 Qualimap, preseq, and samtools.
 
 Gzip compression is detected automatically by inspecting the file header (magic
@@ -121,6 +121,20 @@ set during parsing and exits with an error if none are found.
 
 Use this flag if you want to run on a file without duplicate marking for
 testing purposes.
+
+#### `--count-multi-mapping`
+
+Count multi-mapping reads (`NH` > 1) in the featureCounts gene and biotype
+outputs, like `featureCounts -M`: every reported alignment is counted instead
+of being reported as `Unassigned_MultiMapping`. dupRadar is not affected.
+Also settable as `featurecounts.count_multi_mapping` in the config file.
+
+#### `--count-multi-overlapping`
+
+Assign reads that overlap several genes (or biotypes) to all of them, like
+`featureCounts -O`, instead of reporting them as `Unassigned_Ambiguity`.
+Also settable as `featurecounts.count_multi_overlapping` in the config file.
+See [Multi-mapping and multi-overlapping reads](../rna/featurecounts/#multi-mapping-and-multi-overlapping-reads).
 
 #### `--biotype-attribute <NAME>`
 
@@ -215,11 +229,16 @@ tool runs by default as part of `rustqc rna` and can be disabled via the
 
 | Option                                         | Default | Description                                       |
 | ---------------------------------------------- | ------- | ------------------------------------------------- |
-| `--junction-saturation-seed <N>`               | `42`    | Random seed for reproducible sampling             |
+| `--junction-saturation-seed <N>`               | `42`    | Seed for the sampling shuffle (see below)         |
 | `--junction-saturation-min-coverage <N>`       | `1`     | Minimum reads for a junction to count as detected |
 | `--junction-saturation-percentile-floor <N>`   | `5`     | Sampling start percentage                         |
 | `--junction-saturation-percentile-ceiling <N>` | `100`   | Sampling end percentage                           |
 | `--junction-saturation-percentile-step <N>`    | `5`     | Sampling step percentage                          |
+
+The intermediate sampling points come from RustQC's own seeded RNG: they are
+reproducible for a given seed, but do not match RSeQC's random draws. The x-axis
+values and the 100% point match RSeQC. See
+[junction_saturation](/rna/rseqc/#junction_saturation).
 
 #### inner_distance
 
@@ -229,6 +248,15 @@ tool runs by default as part of `rustqc rna` and can be disabled via the
 | `--inner-distance-lower-bound <N>` | `-250`    | Histogram lower bound        |
 | `--inner-distance-upper-bound <N>` | `250`     | Histogram upper bound        |
 | `--inner-distance-step <N>`        | `5`       | Histogram bin width          |
+
+#### split_bam
+
+split_bam only runs when a BED file is given. See [split_bam](../rna/rseqc/#split_bam).
+
+| Option                   | Default | Description                                                        |
+| ------------------------ | ------- | ------------------------------------------------------------------ |
+| `--split-bam-bed <BED>`  | none    | BED12 of regions (e.g. rRNA) to classify alignments against        |
+| `--split-bam-write-bams` | `false` | Also write `.in.bam`, `.ex.bam` and `.junk.bam` (one extra pass)    |
 
 ### Preseq options
 

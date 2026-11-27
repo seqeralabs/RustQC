@@ -64,7 +64,7 @@ impl<'a> Seq<'a> {
 }
 
 /// A BAM alignment record with rust-htslib-compatible accessors.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Record {
     inner: RecordBuf,
     seq_packed: Vec<u8>,
@@ -182,16 +182,21 @@ impl Record {
         self.inner.name().map(|n| n.as_ref()).unwrap_or(b"*")
     }
 
-    pub fn seq_len(&self) -> i32 {
-        i32::try_from(self.inner.sequence().len()).unwrap_or(0)
+    pub fn seq_len(&self) -> usize {
+        self.inner.sequence().len()
     }
 
-    pub fn insert_size(&self) -> i32 {
-        self.inner.template_length()
+    pub fn insert_size(&self) -> i64 {
+        i64::from(self.inner.template_length())
     }
 
     pub fn cigar(&self) -> CigarStringView {
         CigarStringView::from_ops(self.cigar_cache.clone(), self.pos().max(0) as u64)
+    }
+
+    /// BAM-encoded CIGAR operations (`len << 4 | op`), as htslib stores them.
+    pub fn raw_cigar(&self) -> Vec<u32> {
+        self.cigar_cache.iter().map(Cigar::encode).collect()
     }
 
     pub fn seq(&self) -> Seq<'_> {

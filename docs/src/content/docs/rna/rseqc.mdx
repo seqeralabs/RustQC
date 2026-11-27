@@ -13,12 +13,13 @@ RSeQC is a Python package providing a suite of quality control tools for RNA-Seq
 [Documentation](https://rseqc.sourceforge.net/) | [Source code](https://github.com/MonashBioinformaticsPlatform/RSeQC)
 </Aside>
 
-RustQC reimplements eight tools from the [RSeQC](https://rseqc.sourceforge.net/)
-package (including TIN). Each tool produces output files that match the format
+RustQC reimplements nine tools from the [RSeQC](https://rseqc.sourceforge.net/)
+package (including TIN and split_bam). Each tool produces output files that match the format
 and content of the original Python implementation, plus **native PNG and SVG
 plots** generated directly -- no R scripts required.
 
-All RSeQC tools run automatically as part of the `rustqc rna` command and use
+All RSeQC tools except split_bam (which needs a BED file) run automatically
+as part of the `rustqc rna` command and use
 the input filename stem as a prefix for output files. Output files are organized
 into per-tool subdirectories under `rseqc/`. For example,
 `rustqc rna sample.bam --gtf genes.gtf -o results/` produces
@@ -428,8 +429,21 @@ At 100% sampling depth:
 
 </details>
 
-Intermediate sampling percentages show minor stochastic variation from random
-subsampling, as expected.
+RustQC follows RSeQC's sampling: the percentages are
+`range(floor, ceiling, step)` followed by 100, and the window for each percentage
+uses RSeQC's floating-point index arithmetic, `int(N * (p / 100.0))`. The x-axis
+values are therefore identical to RSeQC's, and so is the 100% point whenever the
+windows cover all observations (as with the default parameters). The
+intermediate points depend on how the splice-junction observations are shuffled.
+RSeQC does not seed Python's `random`, so its intermediate points change from run
+to run. RustQC shuffles with its own seeded RNG (`--junction-saturation-seed`,
+default 42), so its intermediate points are reproducible and identical for any
+`--threads` value, but they do not match RSeQC's random draws.
+
+As in RSeQC, reads on chromosomes without any annotated transcript are ignored.
+The `pdf()` call in the R script names the PDF by sample name only, as RSeQC does
+when run with `-o <sample name>`, so the script does not depend on the output
+directory.
 
 ## inner_distance
 
@@ -486,7 +500,7 @@ The R plotting script (`inner_distance_plot.r`) matches upstream format exactly.
 TIN (Transcript Integrity Number) measures the uniformity of read coverage
 across a transcript. A TIN score of 100 means perfectly uniform coverage; lower
 scores indicate degradation or bias. TIN is computed using Shannon entropy of
-read-start coverage at sampled positions along each transcript's exonic regions.
+per-base read coverage at sampled positions along each transcript's exonic regions.
 
 RustQC reimplements [RSeQC's `tin.py`](https://rseqc.sourceforge.net/#tin-py),
 computing TIN scores automatically as part of `rustqc rna` in the same
@@ -503,34 +517,44 @@ TIN is particularly useful for:
 
 | File                 | Description                                                            |
 | -------------------- | ---------------------------------------------------------------------- |
-| `{stem}.tin.xls`     | Per-gene TIN scores (TSV: geneID, chrom, tx_start, tx_end, TIN)        |
+| `{stem}.tin.xls`     | Per-transcript TIN scores (TSV: geneID, chrom, tx_start, tx_end, TIN)  |
 | `{stem}.summary.txt` | Summary statistics: mean, median, and standard deviation of TIN scores |
 
 ### TIN scores file
 
-The `{stem}.tin.xls` file is a tab-separated file with one row per transcript (gene):
+The `{stem}.tin.xls` file is a tab-separated file with one row per transcript:
 
 | Column     | Description                         |
 | ---------- | ----------------------------------- |
-| `geneID`   | Gene identifier from the annotation |
+| `geneID`   | Transcript identifier (as `tin.py`) |
 | `chrom`    | Chromosome                          |
 | `tx_start` | Transcript start position           |
 | `tx_end`   | Transcript end position             |
 | `TIN`      | Transcript Integrity Number (0-100) |
 
-Transcripts below the minimum coverage threshold are excluded from the output.
-TIN values are formatted to 2 decimal places.
+Transcripts below the minimum coverage threshold are reported with a TIN of `0.0`
+and are left out of the summary statistics, as in `tin.py`. TIN values are written
+at full precision, like Python's `str(float)`.
+
+Rows follow the BED order produced by nf-core/rnaseq's `eautils/gtf2bed` module.
+The converter sorts by chromosome name, the start of each transcript's first
+exon line in the GTF, then transcript ID. Exons without a transcript ID are omitted.
+Older versions of the converter break ties in Perl hash order, which varies between runs.
 
 ### Summary file
 
 The `{stem}.summary.txt` file is a single-row tab-separated summary:
 
-| Column        | Description                     |
-| ------------- | ------------------------------- |
-| `Bam_file`    | Path to the input BAM file      |
-| `TIN(mean)`   | Mean TIN across all transcripts |
-| `TIN(median)` | Median TIN                      |
-| `TIN(stdev)`  | Standard deviation of TIN       |
+| Column        | Description                                 |
+| ------------- | ------------------------------------------- |
+| `Bam_file`    | File name of the input BAM                  |
+| `TIN(mean)`   | Mean TIN across all transcripts             |
+| `TIN(median)` | Median TIN                                  |
+| `TIN(stdev)`  | Standard deviation (population) of TIN      |
+
+The statistics are computed as NumPy computes them in `tin.py` (pairwise
+summation), over the transcripts that passed the coverage threshold. If none
+pass, the summary reports `nan` for all three statistics.
 
 ### Interpreting TIN scores
 
@@ -549,7 +573,7 @@ than global degradation.
 
 TIN parameters (`sample_size`, `min_coverage`) can be set in the YAML config file.
 See the [Configuration](../usage/configuration/#tin) page for details.
-TIN uses the shared `--mapq` / `-q` flag for mapping quality filtering.
+Like `tin.py`, TIN does not filter reads by mapping quality.
 
 ### Performance
 
@@ -564,31 +588,39 @@ analyses combined in under 15 minutes.
 RustQC's TIN output uses the same file format and column names as RSeQC's
 `tin.py`. TIN scores are computed using the same Shannon entropy formula.
 
-<Aside type="caution" title="Per-transcript TIN differences from upstream tin.py">
-  TIN scores may differ from RSeQC's `tin.py`. Both tools sample identical
-  positions and apply identical flag filters, but they count per-position
-  coverage differently: upstream uses pysam's pileup engine (`bam_plp_auto`)
-  while RustQC uses CIGAR-derived aligned blocks via the BAM index. pysam's pileup
-  engine uses a different internal read traversal that can produce
-  different coverage counts at certain positions, leading to per-transcript TIN
-  differences. Summary-level statistics (mean, median, stdev) remain closely
-  aligned across all benchmarks. Per-transcript accuracy is an active area of
-  investigation.
-</Aside>
+`tin.py` counts coverage with pysam's `pileup()` and its default settings, and
+RustQC reproduces what that pileup counts at each sampled position:
+
+- Reads flagged unmapped, secondary, QC-fail or duplicate are not counted, and
+  neither are orphans (paired reads without the proper-pair flag).
+- Bases with a base quality below 13 are not counted.
+- Overlapping mates are counted once. RustQC replays htslib's overlap quality
+  adjustment (`tweak_overlap_quality`, htslib 1.24 as bundled with pysam 0.24),
+  including its quirks after deletions and reference skips.
+- Deleted and skipped (`N`) bases are not counted. A transcript that passes the
+  minimum read check but has no counted base gets `100 / l` when some read spans
+  a sampled position, and `0` otherwise, as in `tin.py`.
+
+The one pileup setting not reproduced is the `max_depth` cap of 8,000 reads per
+position, which only matters for extremely deep transcripts.
 
 <details>
 <summary>Small dataset - Identical</summary>
 
+All 8,443 per-transcript TIN values agree with `tin.py` (RSeQC 5.0.4, pysam
+0.24.1) to within 1e-13. Three values differ in the last printed digit because
+of `exp`/`log` rounding differences between platforms' maths libraries.
+
 | Metric      |   RSeQC |  RustQC |
 | ----------- | ------: | ------: |
-| TIN mean    | 52.7514 | 52.7514 |
-| TIN median  | 55.5830 | 55.5830 |
-| TIN std dev | 22.5333 | 22.5333 |
+| TIN mean    | 53.4665 | 53.4665 |
+| TIN median  | 56.1341 | 56.1341 |
+| TIN std dev | 22.8055 | 22.8055 |
 
 </details>
 
 <details>
-<summary>Large dataset - Both tools completed</summary>
+<summary>Large dataset - Both tools completed (measured before the pileup-parity fix)</summary>
 
 The upstream `tin.py` took **9h 45m** to complete on the large dataset.
 RustQC completes TIN analysis as part of its single-pass BAM processing
@@ -602,12 +634,105 @@ in under 15 minutes total (inclusive of all other analyses).
 
 </details>
 
-Summary-level TIN statistics are near-identical. Per-transcript TIN values
-show larger differences due to the coverage counting approach described above.
+Like `tin.py`, RustQC reports one TIN score per transcript. Rows are written in
+GTF transcript order, while `tin.py` follows the order of its BED file.
 
-RustQC produces gene-level TIN scores (one row per gene, using the longest
-transcript as representative), while RSeQC's `tin.py` produces transcript-level
-scores. Both formats are compatible with MultiQC.
+## split_bam
+
+RustQC reimplements [RSeQC's `split_bam.py`](https://rseqc.sourceforge.net/#split-bam-py),
+which classifies every alignment against a BED file of regions. Its main use is
+**rRNA quantification** with an rRNA BED file (for example RSeQC's
+[`hg38_rRNA.bed`](https://sourceforge.net/projects/rseqc/files/BED/Human_Homo_sapiens/)).
+This counts rRNA that the GTF/biotype route cannot see; see
+[why biotype rRNA can read near zero](../featurecounts/#rrna-and-biotype-counts).
+
+Unlike the other RSeQC tools, split_bam needs an extra input, so it only runs
+when a BED file is given:
+
+```bash
+rustqc rna sample.markdup.bam --gtf genes.gtf --split-bam-bed hg38_rRNA.bed
+```
+
+Each alignment record falls into exactly one category:
+
+| Category | Records                                                                    |
+| -------- | -------------------------------------------------------------------------- |
+| `in`     | Mapped, QC-passing records whose start (or mate's start) is in a region    |
+| `ex`     | Mapped, QC-passing records outside every region                            |
+| `junk`   | QC-failed (`0x200`) or unmapped (`0x4`) records                            |
+
+Classification follows `split_bam.py` exactly:
+
+- The BED file is read as **BED12**, and only the exon blocks count. A read
+  starting inside an intron of a BED12 record is `ex`.
+- A record is `in` when its own 0-based start lies in a block on its
+  chromosome. If the mate-unmapped flag (`0x8`) is not set, the mate's start is
+  also tested, **against the read's own chromosome** even when the mate maps
+  elsewhere.
+- Only the start position is tested, not the whole alignment.
+- No other flags are filtered. Secondary, supplementary and duplicate
+  alignments are all classified, so multi-mapping rRNA reads count once per
+  reported alignment.
+- Chromosome names are compared case-insensitively against the **alignment
+  file's** reference names. The `chromosome_prefix` / `chromosome_mapping`
+  settings (which map alignment names to GTF names) do not apply.
+
+RustQC warns when no BED chromosome matches any reference name in the
+alignment file (for example a `chr6` BED against an Ensembl `6` BAM), a mismatch
+that `split_bam.py` silently reports as 0% `in`.
+
+| File                       | Description                                   |
+| -------------------------- | --------------------------------------------- |
+| `{stem}.split_bam.txt`     | Record counts, identical to `split_bam.py`'s stdout |
+| `{stem}.in.bam`            | Records in the regions (optional)             |
+| `{stem}.ex.bam`            | Records outside the regions (optional)        |
+| `{stem}.junk.bam`          | QC-failed and unmapped records (optional)     |
+
+The summary file is byte-for-byte what `split_bam.py -o {stem}` prints. For
+the test fixture (`tests/expected/split_bam/split_bam_test.split_bam.txt`):
+
+```text
+Total records:                                         33
+split_bam_test.in.bam (Alignments consumed by input gene list):15
+split_bam_test.ex.bam (Alignments not consumed by input gene list):11
+split_bam_test.junk.bam (qcfailed, unmapped reads):    7
+```
+
+### Writing the split BAM files
+
+The counts come from the single pass. Writing the `.in.bam`, `.ex.bam` and
+`.junk.bam` files is optional because it needs one extra sequential read of the
+alignment file:
+
+```bash
+rustqc rna sample.markdup.bam --gtf genes.gtf \
+  --split-bam-bed hg38_rRNA.bed --split-bam-write-bams
+```
+
+The BAM files keep the input header unchanged and the records in input order,
+matching `split_bam.py`.
+
+### Configuration
+
+split_bam can also be enabled from the config file. See the
+[Configuration](../usage/configuration/#split_bam) page.
+
+### Compatibility
+
+Validated against RSeQC 5.0.4 `split_bam.py`:
+
+- **Test fixture** (`tests/data/split_bam_test.*`): 33 records covering every
+  classification branch, with a BED12 that has multi-block, zero-length,
+  overlapping, truncated-block and mixed-case entries. Counts and all three
+  BAM files are identical, record for record.
+- **Small dataset** (~52K reads, chr6 subset): with a 4,000-record BED12
+  built around the reads, the counts (32,150 `in` / 20,689 `ex`) and all three
+  BAM files are identical to `split_bam.py` on both the single-threaded and
+  the parallel code paths.
+
+BED inputs that `split_bam.py` crashes on are accepted. Blank, `#`, `track` and
+`browser` lines are skipped, and BED3–BED11 records are used as a single
+`chromStart`–`chromEnd` block, with a warning.
 
 ## Compatibility with RSeQC
 
