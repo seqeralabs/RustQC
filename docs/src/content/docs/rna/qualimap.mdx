@@ -330,11 +330,10 @@ eliminating the separate name-sort and Qualimap run required by the original Jav
 
 </details>
 
-Every number is printed the way Qualimap prints it. Qualimap formats counts,
-ratios and percentages with Java's `DecimalFormat` (at most two decimals,
-trailing zeros dropped, half-even rounding), so a whole percentage is `60%`,
-not `60.0%`, and a ratio of exactly one half is `0.5`. The coverage profile
-files use Java's `Double.toString` (`0.0`, `1.0E-4`). Reads on a sequence with
+Counts, ratios and percentages are printed with at most two decimals and
+trailing zeros dropped, so a whole percentage is `60%` and a ratio of exactly
+one half is `0.5`. Counts are grouped with commas. The coverage profile
+files hold plain decimal numbers (`0`, `0.0001`). Reads on a sequence with
 no annotated exon are left out of the counts, as in Qualimap, and reported in
 the HTML report as "Missing chromosome in annotation".
 
