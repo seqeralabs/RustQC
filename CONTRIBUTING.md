@@ -184,7 +184,10 @@ To prepare a release:
 2. Run `cargo update --package rustqc` to sync `Cargo.lock`.
 3. Add a new section to `CHANGELOG.md` following the existing format.
 4. Commit and push to `main`.
-5. Trigger the **Release** workflow via GitHub Actions.
+5. Once the `:dev` image of that commit is published, run the **Full-size test on Seqera Platform**
+   workflow in [RustQC-benchmarks](https://github.com/seqeralabs/RustQC-benchmarks/actions) and
+   check that it passes (it compares RustQC with the upstream tools on a whole-transcriptome sample).
+6. Trigger the **Release** workflow via GitHub Actions.
 
 ## Reporting issues
 
