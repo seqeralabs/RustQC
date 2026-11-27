@@ -335,6 +335,10 @@ An explicit mapping from GTF chromosome names (keys) to alignment file chromosom
 names (values). Applied after the prefix, so explicit entries can override the
 prefix for specific chromosomes.
 
+Each alignment chromosome name may appear only once as a value. A mapping that
+sends two GTF chromosomes to the same alignment chromosome is rejected when the
+configuration is loaded.
+
 ```yaml
 rna:
   # After adding "chr" prefix, override the mitochondrial chromosome

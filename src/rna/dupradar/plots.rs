@@ -597,13 +597,15 @@ where
             .or_insert((x, y, d));
     }
 
-    // Sort by density ascending so high-density points draw on top
-    let mut deduped: Vec<(f64, f64, f64)> = pixel_map.into_values().collect();
-    deduped.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+    // Sort by density ascending so high-density points draw on top. Equal
+    // densities are ordered by pixel (x, then y): the map's iteration order is
+    // random, and the draw order is written into the SVG.
+    let mut deduped: Vec<_> = pixel_map.into_iter().collect();
+    deduped.sort_by(|(pa, a), (pb, b)| a.2.total_cmp(&b.2).then(pa.cmp(pb)));
 
-    let max_dens = deduped.iter().map(|d| d.2).fold(0.0f64, f64::max);
+    let max_dens = deduped.iter().map(|(_, d)| d.2).fold(0.0f64, f64::max);
 
-    for (x, y, d) in deduped {
+    for (_, (x, y, d)) in deduped {
         let t = if max_dens > 0.0 { d / max_dens } else { 0.0 };
         let c = density_color(t);
         chart.draw_series(std::iter::once(Circle::new(

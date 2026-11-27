@@ -1757,6 +1757,8 @@ pub struct InnerDistAccum {
     pub pair_num: u64,
     /// Maximum pairs to sample.
     pub sample_size: u64,
+    /// Chromosome runs of `pairs` (see [`merge_chrom_runs`]).
+    pair_runs: Vec<(i32, usize)>,
 }
 
 impl InnerDistAccum {
@@ -1822,6 +1824,7 @@ impl InnerDistAccum {
                 distance: None,
                 classification: "sameChrom=No",
             });
+            push_chrom_run(&mut self.pair_runs, record.tid());
             return;
         }
 
@@ -1898,6 +1901,7 @@ impl InnerDistAccum {
                         distance: Some(mrna_dist),
                         classification: "sameTranscript=Yes,sameExon=No,dist=mRNA",
                     });
+                    push_chrom_run(&mut self.pair_runs, record.tid());
                     self.distances.push(mrna_dist);
                     return;
                 } else {
@@ -1913,27 +1917,30 @@ impl InnerDistAccum {
             distance: Some(inner_dist),
             classification,
         });
+        push_chrom_run(&mut self.pair_runs, record.tid());
         self.distances.push(inner_dist);
     }
 
     /// Merge another accumulator into this one, respecting the sample size limit.
     ///
-    /// In parallel mode each worker accumulates pairs independently.  After
-    /// merging all workers the total may exceed `sample_size`, so we truncate
-    /// to the limit.  This matches the upstream RSeQC behaviour of sampling
-    /// at most `sample_size` pairs regardless of processing order.
+    /// Upstream RSeQC keeps the first `sample_size` pairs of the file. Each
+    /// worker keeps the first `sample_size` pairs of its own chromosomes
+    /// (processed in ascending order), so putting the pairs back in
+    /// chromosome order and cutting at `sample_size` gives the same pairs as
+    /// a single pass, whatever the thread count.
     pub fn merge(&mut self, other: InnerDistAccum) {
-        self.pairs.extend(other.pairs);
-        self.distances.extend(other.distances);
-        self.pair_num += other.pair_num;
-
-        // Enforce the sampling limit after merging
-        if self.pair_num > self.sample_size {
-            let limit = self.sample_size as usize;
-            self.pairs.truncate(limit);
-            self.distances.truncate(limit);
-            self.pair_num = self.sample_size;
-        }
+        merge_chrom_runs(
+            &mut self.pairs,
+            &mut self.pair_runs,
+            other.pairs,
+            other.pair_runs,
+        );
+        let limit = self.sample_size.min(self.pairs.len() as u64) as usize;
+        truncate_chrom_runs(&mut self.pairs, &mut self.pair_runs, limit);
+        self.pair_num = self.pairs.len() as u64;
+        // Every pair except those with mates on different chromosomes has a
+        // distance, in the same order.
+        self.distances = self.pairs.iter().filter_map(|p| p.distance).collect();
     }
 }
 
@@ -2235,6 +2242,83 @@ impl RseqcAccumulators {
 /// in a region map (HashMap<String, ChromIntervals>).
 fn point_in(region_map: &HashMap<String, ChromIntervals>, chrom: &str, point: u64) -> bool {
     region_map.get(chrom).is_some_and(|ci| ci.contains(point))
+}
+
+// ===================================================================
+// Chromosome-ordered merging
+// ===================================================================
+
+/// Record that one more item was appended for chromosome `tid`.
+///
+/// `runs` describes a vector of items as consecutive `(tid, count)` runs.
+/// Accumulators whose output depends on the order of the items they collect
+/// (inner_distance's first-N sample) keep such runs so that
+/// [`merge_chrom_runs`] can restore file order.
+#[inline]
+fn push_chrom_run(runs: &mut Vec<(i32, usize)>, tid: i32) {
+    match runs.last_mut() {
+        Some((last_tid, count)) if *last_tid == tid => *count += 1,
+        _ => runs.push((tid, 1)),
+    }
+}
+
+/// Append `other_items` to `items` and reorder the result by chromosome.
+///
+/// Each parallel worker reads whole chromosomes, but which chromosomes a
+/// worker gets depends on the thread count. Sorting the runs by tid (a stable
+/// sort, so the order within a chromosome is kept) gives the order of a
+/// single pass over a coordinate-sorted file, so the merged result is the
+/// same for any `--threads` and any merge order.
+fn merge_chrom_runs<T>(
+    items: &mut Vec<T>,
+    runs: &mut Vec<(i32, usize)>,
+    other_items: Vec<T>,
+    other_runs: Vec<(i32, usize)>,
+) {
+    debug_assert_eq!(runs.iter().map(|r| r.1).sum::<usize>(), items.len());
+    debug_assert_eq!(
+        other_runs.iter().map(|r| r.1).sum::<usize>(),
+        other_items.len()
+    );
+    if other_items.is_empty() {
+        return;
+    }
+    let mut chunks: Vec<(i32, Vec<T>)> = Vec::with_capacity(runs.len() + other_runs.len());
+    let mut mine = std::mem::take(items).into_iter();
+    for &(tid, n) in runs.iter() {
+        chunks.push((tid, mine.by_ref().take(n).collect()));
+    }
+    let mut theirs = other_items.into_iter();
+    for &(tid, n) in &other_runs {
+        chunks.push((tid, theirs.by_ref().take(n).collect()));
+    }
+    chunks.sort_by_key(|c| c.0);
+
+    runs.clear();
+    for (tid, chunk) in chunks {
+        match runs.last_mut() {
+            Some((last_tid, count)) if *last_tid == tid => *count += chunk.len(),
+            _ => runs.push((tid, chunk.len())),
+        }
+        items.extend(chunk);
+    }
+}
+
+/// Keep the first `len` items, adjusting the chromosome runs to match.
+fn truncate_chrom_runs<T>(items: &mut Vec<T>, runs: &mut Vec<(i32, usize)>, len: usize) {
+    if items.len() <= len {
+        return;
+    }
+    items.truncate(len);
+    let mut left = len;
+    runs.retain_mut(|(_, count)| {
+        if left == 0 {
+            return false;
+        }
+        *count = (*count).min(left);
+        left -= *count;
+        true
+    });
 }
 
 // ===================================================================
@@ -2813,5 +2897,41 @@ mod tests {
             assert_eq!(r.known_counts, expected.known_counts);
             assert_eq!(r.novel_counts, expected.novel_counts);
         }
+    }
+}
+
+#[cfg(test)]
+mod chrom_run_tests {
+    use super::*;
+
+    fn runs_of(items: &[(i32, u32)]) -> (Vec<u32>, Vec<(i32, usize)>) {
+        let mut runs = Vec::new();
+        for &(tid, _) in items {
+            push_chrom_run(&mut runs, tid);
+        }
+        (items.iter().map(|x| x.1).collect(), runs)
+    }
+
+    #[test]
+    fn test_merge_chrom_runs_restores_file_order() {
+        // Worker 1 read chromosomes 1 and 3, worker 2 read chromosomes 0 and 2.
+        let w1 = [(1, 10), (1, 11), (3, 30)];
+        let w2 = [(0, 0), (2, 20), (2, 21)];
+        let expected = vec![0, 10, 11, 20, 21, 30];
+        for (first, second) in [(&w1, &w2), (&w2, &w1)] {
+            let (mut items, mut runs) = runs_of(first);
+            let (other, other_runs) = runs_of(second);
+            merge_chrom_runs(&mut items, &mut runs, other, other_runs);
+            assert_eq!(items, expected);
+            assert_eq!(runs, vec![(0, 1), (1, 2), (2, 2), (3, 1)]);
+        }
+    }
+
+    #[test]
+    fn test_truncate_chrom_runs() {
+        let (mut items, mut runs) = runs_of(&[(0, 0), (1, 10), (1, 11), (2, 20)]);
+        truncate_chrom_runs(&mut items, &mut runs, 2);
+        assert_eq!(items, vec![0, 10]);
+        assert_eq!(runs, vec![(0, 1), (1, 1)]);
     }
 }

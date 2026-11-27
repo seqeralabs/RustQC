@@ -912,20 +912,62 @@ pub fn load_merged_config(
 
     let config: Config =
         serde_yaml_ng::from_value(merged).context("Failed to deserialize merged configuration")?;
+    config.rna.validate().with_context(|| {
+        let files: Vec<String> = paths.iter().map(|(p, _)| p.display().to_string()).collect();
+        format!("Invalid configuration (from {})", files.join(", "))
+    })?;
     Ok((config, paths))
 }
 
 impl RnaConfig {
+    /// Check settings that deserialization alone cannot catch.
+    ///
+    /// Currently: `chromosome_mapping` must not map two GTF chromosomes to the
+    /// same alignment chromosome. Reads are looked up by their alignment
+    /// name, so such a mapping has no single answer.
+    pub fn validate(&self) -> Result<()> {
+        let mut by_aln: HashMap<&str, Vec<&str>> = HashMap::new();
+        for (gtf_name, aln_name) in &self.chromosome_mapping {
+            by_aln.entry(aln_name).or_default().push(gtf_name);
+        }
+        let mut clashes: Vec<String> = by_aln
+            .into_iter()
+            .filter(|(_, gtf_names)| gtf_names.len() > 1)
+            .map(|(aln_name, mut gtf_names)| {
+                gtf_names.sort_unstable();
+                format!("'{}' <- {}", aln_name, gtf_names.join(", "))
+            })
+            .collect();
+        if !clashes.is_empty() {
+            clashes.sort_unstable();
+            anyhow::bail!(
+                "chromosome_mapping maps several GTF chromosomes to the same alignment \
+                 chromosome: {}. Each alignment chromosome may appear only once as a value.",
+                clashes.join("; ")
+            );
+        }
+        Ok(())
+    }
+
     /// Build a reverse mapping: alignment chromosome name -> GTF chromosome name.
     ///
     /// The config file maps GTF -> alignment, but at lookup time we need
     /// alignment -> GTF (since the index is keyed by GTF names).
     /// Explicit chromosome_mapping entries take priority over the prefix.
+    ///
+    /// The mapping should have passed [`RnaConfig::validate`]. If it maps two
+    /// GTF names to one alignment name anyway, the GTF name that sorts first
+    /// wins, so the result never depends on hash order.
     pub fn alignment_to_gtf_mapping(&self) -> HashMap<String, String> {
-        self.chromosome_mapping
-            .iter()
-            .map(|(gtf_name, aln_name)| (aln_name.clone(), gtf_name.clone()))
-            .collect()
+        let mut pairs: Vec<(&String, &String)> = self.chromosome_mapping.iter().collect();
+        pairs.sort_unstable();
+        let mut reverse = HashMap::with_capacity(pairs.len());
+        for (gtf_name, aln_name) in pairs {
+            reverse
+                .entry(aln_name.clone())
+                .or_insert_with(|| gtf_name.clone());
+        }
+        reverse
     }
 
     /// Returns the chromosome prefix if configured.
@@ -1004,6 +1046,52 @@ mod tests {
         let yaml = "rna:\n  split_bam:\n    enabled: false\n    bed: rrna.bed\n";
         let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
         assert_eq!(config.rna.split_bam.active_bed(), None);
+    }
+
+    #[test]
+    fn test_chromosome_mapping_rejects_shared_alignment_name() {
+        let yaml = r#"
+chromosome_mapping:
+  chrM: "MT"
+  chrMT: "MT"
+  chr1: "1"
+"#;
+        let config: RnaConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        let err = config.validate().unwrap_err().to_string();
+        assert!(err.contains("'MT' <- chrM, chrMT"), "{err}");
+
+        // The reverse mapping is still deterministic: the GTF name that sorts first wins.
+        let reverse = config.alignment_to_gtf_mapping();
+        assert_eq!(reverse.get("MT").map(String::as_str), Some("chrM"));
+        assert_eq!(reverse.get("1").map(String::as_str), Some("chr1"));
+    }
+
+    #[test]
+    fn test_chromosome_mapping_one_to_one_is_valid() {
+        let yaml = r#"
+chromosome_mapping:
+  chrM: "MT"
+  chr1: "1"
+"#;
+        let config: RnaConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        config.validate().unwrap();
+        assert_eq!(config.alignment_to_gtf_mapping().len(), 2);
+    }
+
+    #[test]
+    fn test_load_merged_config_rejects_shared_alignment_name() {
+        let dir = std::env::temp_dir().join(format!("rustqc_cfg_dup_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.yaml");
+        std::fs::write(
+            &path,
+            "rna:\n  chromosome_mapping:\n    chrM: MT\n    chrMT: MT\n",
+        )
+        .unwrap();
+        let err = load_merged_config(Some(path.to_str().unwrap())).unwrap_err();
+        let msg = format!("{err:#}");
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(msg.contains("'MT' <- chrM, chrMT"), "{msg}");
     }
 
     #[test]
