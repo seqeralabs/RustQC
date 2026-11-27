@@ -1,0 +1,7 @@
+@HD	VN:1.6	SO:coordinate
+@SQ	SN:chr1	LN:1000
+@SQ	SN:chr2	LN:1000
+r0	0	chr1	101	60	4M	*	0	0	AAAA	IIII
+r1	0	chr1	201	60	4M	*	0	0	AAAA	IIII
+r2	73	chr2	901	60	4M	=	901	0	AAAA	IIII
+r3	133	chr2	901	0	*	=	901	0	AAAA	IIII

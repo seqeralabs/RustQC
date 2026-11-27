@@ -282,7 +282,7 @@ enum BamCursor {
         chunk_end: Option<bgzf::VirtualPosition>,
         reference_sequence_id: usize,
     },
-    /// Streaming unmapped records from a seeked position to end of file.
+    /// Streaming records with no reference from a seeked position to end of file.
     Unmapped,
 }
 
@@ -436,8 +436,10 @@ impl IndexedReader {
         let source_path = self.source_path.clone();
         match &mut self.backend {
             IndexedBackend::Bam { reader, cursor, .. } => {
-                // Seek to the start of the unmapped read region and stream from
-                // there, filtering for unmapped records as we go.
+                // Seek to the last linear-index window of the last reference and
+                // stream from there, keeping only records with no reference
+                // (htslib's HTS_IDX_NOCOOR). Placed unmapped mates in that window
+                // belong to their reference's fetch.
                 match reader.index().last_first_record_start_position() {
                     Some(pos) => {
                         reader
@@ -448,7 +450,7 @@ impl IndexedReader {
                     None => {
                         // The index carries no metadata pseudo-bin, so there is
                         // no recorded unmapped offset. Reopen and stream from the
-                        // first record, relying on the per-record unmapped filter.
+                        // first record, relying on the per-record no-reference filter.
                         let mut fresh = noodles_bam::io::indexed_reader::Builder::default()
                             .build_from_path(&source_path)
                             .with_context(|| {
@@ -470,9 +472,25 @@ impl IndexedReader {
                         reader: heads.reader,
                         header: heads.header,
                         iter_builder: |reader, header| -> Result<CramRecordIter> {
+                            // With no unplaced CRAI entry, noodles 0.94 seeks EOF
+                            // and reports a truncated container instead of an empty query.
+                            if reader
+                                .index()
+                                .iter()
+                                .all(|entry| entry.reference_sequence_id().is_some())
+                            {
+                                return Ok(Box::new(std::iter::empty()));
+                            }
+                            // The unplaced reads' slice can also hold placed records
+                            // (multi-reference slice); keep only those with no reference.
                             let query = reader
                                 .query_unmapped(header)
-                                .context("failed to query unmapped CRAM reads")?;
+                                .context("failed to query unmapped CRAM reads")?
+                                .filter(|result| {
+                                    result.as_ref().map_or(true, |record| {
+                                        record.reference_sequence_id().is_none()
+                                    })
+                                });
                             Ok(Box::new(query))
                         },
                     }
@@ -503,13 +521,13 @@ impl Read for IndexedReader {
                         Ok(0) => return None,
                         Ok(_) => {
                             *cursor = BamCursor::Unmapped;
-                            if scratch.flags().is_unmapped() {
+                            if scratch.reference_sequence_id().is_none() {
                                 return Some(
                                     Record::from_bam(header.noodles_header(), scratch)
                                         .and_then(|loaded| store_record(record, loaded)),
                                 );
                             }
-                            // Mapped record in the unmapped tail: skip and continue.
+                            // Placed record before the unplaced tail: skip and continue.
                         }
                         Err(e) => return Some(Err(e.into())),
                     },
@@ -518,22 +536,19 @@ impl Read for IndexedReader {
                         chunk_end,
                         reference_sequence_id,
                     } => match chunk_end {
-                        None => match chunks.next() {
-                            Some(chunk) => {
-                                if let Err(e) =
-                                    reader.get_mut().seek_to_virtual_position(chunk.start())
-                                {
-                                    return Some(Err(anyhow::Error::new(e)
-                                        .context("failed to seek to BAM index chunk")));
-                                }
-                                *cursor = BamCursor::Region {
-                                    chunks,
-                                    chunk_end: Some(chunk.end()),
-                                    reference_sequence_id,
-                                };
+                        None => {
+                            let chunk = chunks.next()?;
+                            if let Err(e) = reader.get_mut().seek_to_virtual_position(chunk.start())
+                            {
+                                return Some(Err(anyhow::Error::new(e)
+                                    .context("failed to seek to BAM index chunk")));
                             }
-                            None => return None,
-                        },
+                            *cursor = BamCursor::Region {
+                                chunks,
+                                chunk_end: Some(chunk.end()),
+                                reference_sequence_id,
+                            };
+                        }
                         Some(end) => {
                             if reader.get_mut().virtual_position() >= end {
                                 // Reached the end of this chunk; advance to the next.
@@ -613,7 +628,7 @@ mod tests {
     use noodles::sam::header::record::value::Map;
     use noodles::{cram, sam};
 
-    use super::{Read, Reader};
+    use super::{FetchTarget, IndexedReader, Read, Reader};
     use crate::rna::bam::Record;
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -692,5 +707,169 @@ mod tests {
         let _ = std::fs::remove_file(&fasta_path);
 
         assert_eq!(got, expected.to_vec());
+    }
+
+    // ------------------------------------------------------------------------
+    // Unmapped sweep: htslib's HTS_IDX_NOCOOR returns exactly the records with
+    // no reference (tid -1). A placed unmapped mate (0x4 with a tid) belongs
+    // to its reference's fetch, so the sweep must not return it again.
+    // ------------------------------------------------------------------------
+
+    const CONTIG_LEN: usize = 100_000;
+
+    /// Two mapped reads on chr1; on chr2, a mapped read whose unmapped mate is
+    /// placed at its position in chr2's last 16 kb linear-index window; two
+    /// unplaced reads (no reference) at the end.
+    fn sweep_world() -> (sam::Header, Vec<RecordBuf>) {
+        let header: sam::Header = format!(
+            "@HD\tVN:1.6\tSO:coordinate\n@SQ\tSN:chr1\tLN:{CONTIG_LEN}\n@SQ\tSN:chr2\tLN:{CONTIG_LEN}\n"
+        )
+        .parse()
+        .unwrap();
+        let rec = |name: &str, flags: u16, tid: Option<usize>, start: Option<usize>| {
+            let mut builder = RecordBuf::builder()
+                .set_name(name)
+                .set_flags(Flags::from(flags))
+                .set_sequence(b"AAAA".to_vec().into())
+                .set_quality_scores(vec![30u8; 4].into());
+            if let (Some(tid), Some(start)) = (tid, start) {
+                let start = Position::new(start).unwrap();
+                builder = builder
+                    .set_reference_sequence_id(tid)
+                    .set_alignment_start(start);
+                if flags & 0x1 != 0 {
+                    builder = builder
+                        .set_mate_reference_sequence_id(tid)
+                        .set_mate_alignment_start(start);
+                }
+                if flags & 0x4 == 0 {
+                    builder = builder
+                        .set_mapping_quality(
+                            sam::alignment::record::MappingQuality::new(60).unwrap(),
+                        )
+                        .set_cigar([Op::new(Kind::Match, 4)].into_iter().collect());
+                }
+            }
+            builder.build()
+        };
+        let records = vec![
+            rec("r0", 0x0, Some(0), Some(1_001)),
+            rec("r1", 0x0, Some(0), Some(1_201)),
+            rec("r2", 0x1 | 0x8 | 0x40, Some(1), Some(99_001)),
+            rec("r3", 0x1 | 0x4 | 0x80, Some(1), Some(99_001)),
+            rec("u1", 0x4, None, None),
+            rec("u2", 0x4, None, None),
+        ];
+        (header, records)
+    }
+
+    /// Fetch each reference, then the unmapped bucket; return (fetch, read name)
+    /// for every record returned.
+    fn fetch_everything(
+        path: &std::path::Path,
+        fasta: Option<&std::path::Path>,
+    ) -> Vec<(String, String)> {
+        let mut reader = IndexedReader::from_path(path).unwrap();
+        if let Some(fasta) = fasta {
+            reader.set_reference(fasta).unwrap();
+        }
+        let mut got = Vec::new();
+        let mut record = Record::new();
+        let targets = [
+            ("tid 0", FetchTarget::Tid(0)),
+            ("tid 1", FetchTarget::Tid(1)),
+            ("unmapped", FetchTarget::Unmapped),
+        ];
+        for (label, target) in targets {
+            reader.fetch(target).unwrap();
+            while let Some(result) = reader.read(&mut record) {
+                result.unwrap();
+                got.push((
+                    label.to_string(),
+                    String::from_utf8(record.qname().to_vec()).unwrap(),
+                ));
+            }
+        }
+        got
+    }
+
+    fn assert_sweep(got: &[(String, String)]) {
+        let swept: Vec<&str> = got
+            .iter()
+            .filter(|(label, _)| label == "unmapped")
+            .map(|(_, name)| name.as_str())
+            .collect();
+        assert_eq!(
+            swept,
+            ["u1", "u2"],
+            "unmapped sweep must return only the unplaced records; all fetches: {got:?}"
+        );
+    }
+
+    fn assert_each_record_once(got: &[(String, String)]) {
+        let mut names: Vec<&str> = got.iter().map(|(_, name)| name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            ["r0", "r1", "r2", "r3", "u1", "u2"],
+            "each record must be fetched exactly once; all fetches: {got:?}"
+        );
+    }
+
+    #[test]
+    fn bam_unmapped_sweep_returns_only_unplaced_records() {
+        let (header, records) = sweep_world();
+        let bam_path = temp_path("sweep.bam");
+        {
+            let mut writer = noodles::bam::io::writer::Builder
+                .build_from_path(&bam_path)
+                .unwrap();
+            writer.write_header(&header).unwrap();
+            for record in &records {
+                writer.write_alignment_record(&header, record).unwrap();
+            }
+            writer.try_finish().unwrap();
+        }
+        let bai_path = std::path::PathBuf::from(format!("{}.bai", bam_path.display()));
+        let index = noodles::bam::fs::index(&bam_path).unwrap();
+        noodles::bam::bai::fs::write(&bai_path, &index).unwrap();
+
+        let got = fetch_everything(&bam_path, None);
+        let _ = std::fs::remove_file(&bam_path);
+        let _ = std::fs::remove_file(&bai_path);
+        assert_sweep(&got);
+        assert_each_record_once(&got);
+    }
+
+    /// samtools-written CRAMs of the same records (see the fixture README).
+    #[test]
+    fn cram_unmapped_sweep_returns_only_unplaced_records() {
+        let dir = std::path::Path::new("tests/data/unmapped_sweep");
+        let fasta = dir.join("sweep.fa");
+
+        let got = fetch_everything(&dir.join("single_ref_slices.cram"), Some(&fasta));
+        assert_sweep(&got);
+        assert_each_record_once(&got);
+
+        // Only the sweep is checked here: a per-reference fetch on a
+        // multi-reference slice also returns the other references' records.
+        let got = fetch_everything(&dir.join("multi_ref_slice.cram"), Some(&fasta));
+        assert_sweep(&got);
+    }
+    #[test]
+    fn cram_unmapped_sweep_with_no_unplaced_reads_is_empty() {
+        let dir = std::path::Path::new("tests/data/unmapped_sweep");
+        let got = fetch_everything(&dir.join("placed_only.cram"), Some(&dir.join("sweep.fa")));
+        let swept: Vec<_> = got
+            .iter()
+            .filter(|(target, _)| target == "unmapped")
+            .collect();
+        assert!(
+            swept.is_empty(),
+            "no unplaced records should be returned: {got:?}"
+        );
+        let mut names: Vec<_> = got.iter().map(|(_, name)| name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(names, ["r0", "r1", "r2", "r3"]);
     }
 }
